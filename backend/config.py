@@ -36,9 +36,9 @@ class SystemConfig(BaseModel):
     slippage_bps: float = float(os.getenv("SIM_SLIPPAGE_BPS", "5.0")) # 5 bps simulated slippage
     spread_pct: float = float(os.getenv("SIM_SPREAD_PCT", "0.0005")) # 0.05% eToro spread simulation
     
-    # Target Watchlist (US Equities & Mega-cap ETFs)
+    # Target Watchlist (High Beta Equities, Leveraged ETFs & Mega-caps)
     watchlist: List[str] = [
-        "AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "SPY", "QQQ"
+        "MARA", "IREN", "SOXL", "TQQQ", "MSFT", "META", "APLD", "SPY", "QQQ", "BULL", "URA", "HOOD", "SOFI"
     ]
     
     # Storage & Persistence

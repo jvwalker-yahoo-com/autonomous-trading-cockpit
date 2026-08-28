@@ -11,17 +11,26 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
-# Reference seed prices for US equities & ETFs
+# Reference seed prices for US equities, high-beta assets & ETFs
 BASE_PRICES = {
-    "AAPL": 224.50,
+    "MARA": 18.50,
+    "IREN": 9.80,
+    "SOXL": 38.40,
+    "TQQQ": 72.60,
     "MSFT": 448.20,
+    "META": 512.90,
+    "APLD": 8.70,
+    "SPY": 560.10,
+    "QQQ": 482.40,
+    "BULL": 24.50,
+    "URA": 28.60,
+    "HOOD": 22.40,
+    "SOFI": 7.90,
+    "AAPL": 224.50,
     "NVDA": 128.80,
     "TSLA": 215.30,
     "AMZN": 186.40,
-    "GOOGL": 165.70,
-    "META": 512.90,
-    "SPY": 560.10,
-    "QQQ": 482.40
+    "GOOGL": 165.70
 }
 
 class MarketDataPoint:
