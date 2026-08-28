@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: autonomous-trading-cockpit
+    runtime: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn backend.server:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: SIMULATION_MODE
+        value: "true"
+      - key: INITIAL_CAPITAL
+        value: "10000.0"
+      - key: FINNHUB_API_KEY
+        sync: false

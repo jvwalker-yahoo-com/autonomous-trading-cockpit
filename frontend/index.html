@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Predictive Execution Cockpit | Autonomous Stock Trading System</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700;800&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+</head>
+<body class="theme-dark">
+
+  <!-- TOP STATUS & CONTROL BAR -->
+  <header class="top-nav">
+    <div class="brand-group">
+      <div class="pulse-indicator live-pulse" id="heartbeatPulse" title="Heartbeat Liveness"></div>
+      <div class="brand-text">
+        <span class="brand-title">PREDICTIVE EXECUTION COCKPIT</span>
+        <span class="brand-subtitle">AUTONOMOUS TRADING ENGINE // eToro & FINNHUB READY</span>
+      </div>
+    </div>
+
+    <!-- Active Symbol & Live Price Header -->
+    <div class="symbol-ticker-header">
+      <div class="symbol-selector-wrapper">
+        <label for="symbolSelect">ASSET:</label>
+        <select id="symbolSelect" class="cyber-select">
+          <option value="AAPL">AAPL - Apple Inc.</option>
+          <option value="NVDA">NVDA - NVIDIA Corp.</option>
+          <option value="MSFT">MSFT - Microsoft</option>
+          <option value="TSLA">TSLA - Tesla Inc.</option>
+          <option value="AMZN">AMZN - Amazon</option>
+          <option value="GOOGL">GOOGL - Alphabet</option>
+          <option value="META">META - Meta Platforms</option>
+          <option value="SPY">SPY - S&P 500 ETF</option>
+          <option value="QQQ">QQQ - Invesco QQQ</option>
+        </select>
+      </div>
+
+      <div class="live-price-box">
+        <span class="price-val" id="headerPrice">$0.00</span>
+        <span class="price-delta badge" id="headerChange">+0.00%</span>
+      </div>
+    </div>
+
+    <!-- Telemetry Badges & Quick Controls -->
+    <div class="telemetry-toolbar">
+      <div class="telemetry-pill">
+        <span class="pill-label">SYNC DRIFT</span>
+        <span class="pill-val status-ok" id="pillSyncDrift">0ms</span>
+      </div>
+      <div class="telemetry-pill">
+        <span class="pill-label">LATENCY</span>
+        <span class="pill-val" id="pillLatency">12.0ms</span>
+      </div>
+      <div class="telemetry-pill">
+        <span class="pill-label">REGIME</span>
+        <span class="pill-val mode-badge-ok" id="pillRegime">OK</span>
+      </div>
+
+      <div class="action-btn-group">
+        <button id="btnDailyReport" class="btn btn-primary" title="View Full Day Performance & Learning Audit">📊 DAILY REPORT</button>
+        <button id="btnTickStep" class="btn btn-secondary" title="Trigger Instant Analysis Step">⚡ STEP</button>
+        <button id="btnSettings" class="btn btn-outline" title="Settings & Finnhub Key">⚙️ CONFIG</button>
+        <button id="btnResetPortfolio" class="btn btn-danger" title="Reset Simulation Portfolio">🔄 RESET</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- QUICK SUMMARY STATS STRIP -->
+  <section class="portfolio-stats-bar">
+    <div class="stat-card">
+      <span class="stat-title">EQUITY (USD)</span>
+      <span class="stat-number stat-highlight" id="statEquity">$10,000.00</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-title">AVAILABLE CASH</span>
+      <span class="stat-number" id="statCash">$10,000.00</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-title">REALIZED P&L</span>
+      <span class="stat-number" id="statRealizedPnl">$0.00 (0.00%)</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-title">UNREALIZED P&L</span>
+      <span class="stat-number" id="statUnrealizedPnl">$0.00</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-title">WIN RATE</span>
+      <span class="stat-number" id="statWinRate">0.0% (0/0)</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-title">PROFIT FACTOR</span>
+      <span class="stat-number" id="statProfitFactor">1.00</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-title">EXECUTION MODE</span>
+      <span class="stat-badge sim-badge" id="statModeBadge">SIMULATION (FRACTIONAL)</span>
+    </div>
+  </section>
+
+  <!-- 9-PANEL COCKPIT GRID (Matching Architectural Design) -->
+  <main class="cockpit-grid">
+
+    <!-- PANEL 1: STATE -->
+    <article class="panel panel-state">
+      <div class="panel-header">
+        <h3><span class="panel-num">01</span> STATE // REGIME MONITOR</h3>
+        <span class="badge" id="stateModeBadge">OK</span>
+      </div>
+      <div class="panel-body">
+        <div class="metric-row">
+          <div class="metric-info">
+            <span class="metric-name">RISK COEFFICIENT</span>
+            <span class="metric-val" id="valRisk">0.35</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill risk-fill" id="barRisk" style="width: 35%"></div></div>
+        </div>
+
+        <div class="metric-row">
+          <div class="metric-info">
+            <span class="metric-name">MARKET IMPACT</span>
+            <span class="metric-val" id="valImpact">0.40</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill impact-fill" id="barImpact" style="width: 40%"></div></div>
+        </div>
+
+        <div class="metric-row">
+          <div class="metric-info">
+            <span class="metric-name">ESTIMATED SLIPPAGE</span>
+            <span class="metric-val" id="valSlippage">0.30</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill slippage-fill" id="barSlippage" style="width: 30%"></div></div>
+        </div>
+
+        <div class="metric-row">
+          <div class="metric-info">
+            <span class="metric-name">TELEMETRY LATENCY</span>
+            <span class="metric-val" id="valLatency">12.0 ms</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill latency-fill" id="barLatency" style="width: 25%"></div></div>
+        </div>
+
+        <div class="state-footer-grid">
+          <div class="sub-metric">
+            <span class="sub-label">COMBINED SCORE</span>
+            <span class="sub-val" id="valScore">0.35</span>
+          </div>
+          <div class="sub-metric">
+            <span class="sub-label">STRUCTURAL TREND</span>
+            <span class="sub-val trend-highlight" id="valTrend">BULL_TREND</span>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- PANEL 2: DECISION -->
+    <article class="panel panel-decision">
+      <div class="panel-header">
+        <h3><span class="panel-num">02</span> DECISION // ACTION ENGINE</h3>
+        <span class="badge badge-primary" id="decisionSymbol">AAPL</span>
+      </div>
+      <div class="panel-body">
+        <div class="decision-hero">
+          <div class="signal-tag signal-hold" id="decisionSignal">HOLD</div>
+          <div class="confidence-box">
+            <span class="conf-label">CONFIDENCE</span>
+            <span class="conf-val" id="decisionConfidence">0%</span>
+          </div>
+        </div>
+
+        <div class="decision-details-grid">
+          <div class="detail-cell">
+            <span class="cell-label">ALLOCATION</span>
+            <span class="cell-val" id="decisionAlloc">$0.00</span>
+          </div>
+          <div class="detail-cell">
+            <span class="cell-label">FRACTIONAL SHARES</span>
+            <span class="cell-val" id="decisionShares">0.0000</span>
+          </div>
+          <div class="detail-cell">
+            <span class="cell-label">STOP LOSS</span>
+            <span class="cell-val color-danger" id="decisionStopLoss">--</span>
+          </div>
+          <div class="detail-cell">
+            <span class="cell-label">TAKE PROFIT</span>
+            <span class="cell-val color-success" id="decisionTakeProfit">--</span>
+          </div>
+        </div>
+
+        <div class="rationale-box">
+          <span class="rationale-heading">DECISION RATIONALE:</span>
+          <p id="decisionRationale" class="rationale-text">Awaiting next telemetry tick...</p>
+        </div>
+
+        <!-- Manual Quick Trigger Buttons -->
+        <div class="quick-order-bar">
+          <button id="btnManualBuy" class="btn btn-buy">BUY (LONG)</button>
+          <button id="btnManualShort" class="btn btn-short">SHORT (CFD)</button>
+          <button id="btnManualClose" class="btn btn-close-pos">CLOSE</button>
+        </div>
+      </div>
+    </article>
+
+    <!-- PANEL 3: FEDERATION -->
+    <article class="panel panel-federation">
+      <div class="panel-header">
+        <h3><span class="panel-num">03</span> FEDERATION // MODEL ENSEMBLE</h3>
+        <span class="badge" id="dominantModelBadge">MOMENTUM</span>
+      </div>
+      <div class="panel-body">
+        <div class="federation-list" id="federationList">
+          <!-- Dynamic Model Signals will be rendered here -->
+        </div>
+
+        <div class="federation-summary">
+          <span class="fed-label">CONSENSUS SCORE:</span>
+          <span class="fed-score" id="valFederatedScore">0.00</span>
+        </div>
+      </div>
+    </article>
+
+    <!-- PANEL 4: ARBITRATION -->
+    <article class="panel panel-arbitration">
+      <div class="panel-header">
+        <h3><span class="panel-num">04</span> ARBITRATION // RISK GATES</h3>
+        <span class="badge" id="arbitrationApprovedBadge">APPROVED</span>
+      </div>
+      <div class="panel-body">
+        <div class="gate-status-grid">
+          <div class="gate-item" id="gateDrawdown">
+            <span class="gate-icon">✓</span>
+            <span class="gate-name">Drawdown Gate (< 15%)</span>
+          </div>
+          <div class="gate-item" id="gateExposure">
+            <span class="gate-icon">✓</span>
+            <span class="gate-name">Exposure Gate (< 75%)</span>
+          </div>
+          <div class="gate-item" id="gateAnomaly">
+            <span class="gate-icon">✓</span>
+            <span class="gate-name">Anomaly Gate (Normal)</span>
+          </div>
+          <div class="gate-item" id="gateCircuit">
+            <span class="gate-icon">✓</span>
+            <span class="gate-name">Circuit Breaker (Armed)</span>
+          </div>
+        </div>
+
+        <div class="arbitration-reasons-box">
+          <span class="reasons-heading">ARBITRATION AUDIT:</span>
+          <ul id="arbitrationReasonsList" class="reasons-list">
+            <li>All arbitration safety checks passed. Execution permitted.</li>
+          </ul>
+        </div>
+      </div>
+    </article>
+
+    <!-- PANEL 5: ANOMALY DETECTOR -->
+    <article class="panel panel-anomaly">
+      <div class="panel-header">
+        <h3><span class="panel-num">05</span> ANOMALY DETECTOR</h3>
+        <span class="badge badge-normal" id="anomalyMainBadge">NORMAL</span>
+      </div>
+      <div class="panel-body">
+        <div class="anomaly-flags-grid">
+          <div class="anomaly-flag-pill" id="flagRiskSpike">
+            <span class="flag-indicator"></span>
+            <span class="flag-title">Risk Spike (>0.85)</span>
+          </div>
+          <div class="anomaly-flag-pill" id="flagImpactJump">
+            <span class="flag-indicator"></span>
+            <span class="flag-title">Impact Jump (>0.85)</span>
+          </div>
+          <div class="anomaly-flag-pill" id="flagSlippageJump">
+            <span class="flag-indicator"></span>
+            <span class="flag-title">Slippage Jump (>0.85)</span>
+          </div>
+          <div class="anomaly-flag-pill" id="flagLatencySpike">
+            <span class="flag-indicator"></span>
+            <span class="flag-title">Latency Spike (>20ms)</span>
+          </div>
+        </div>
+
+        <div class="zscore-container">
+          <div class="z-item">
+            <span class="z-label">PRICE Z-SCORE:</span>
+            <span class="z-val" id="valPriceZ">0.00σ</span>
+          </div>
+          <div class="z-item">
+            <span class="z-label">VOL SURGE Z-SCORE:</span>
+            <span class="z-val" id="valVolZ">0.00σ</span>
+          </div>
+        </div>
+
+        <div class="active-anomalies-box" id="activeAnomaliesContainer">
+          <span class="empty-notice">No anomalous spikes detected. Telemetry nominal.</span>
+        </div>
+      </div>
+    </article>
+
+    <!-- PANEL 6: QUADRANT -->
+    <article class="panel panel-quadrant">
+      <div class="panel-header">
+        <h3><span class="panel-num">06</span> QUADRANT // RISK × IMPACT</h3>
+        <span class="badge" id="quadrantBadge">LOW</span>
+      </div>
+      <div class="panel-body">
+        <div class="quadrant-matrix">
+          <div class="matrix-cell" id="qHigh">
+            <span class="q-title">HIGH</span>
+            <span class="q-subtitle">Risk < 0.66, Imp ≥ 0.66</span>
+          </div>
+          <div class="matrix-cell" id="qCritical">
+            <span class="q-title">CRITICAL</span>
+            <span class="q-subtitle">Risk ≥ 0.66 Extreme</span>
+          </div>
+          <div class="matrix-cell" id="qLow">
+            <span class="q-title">LOW</span>
+            <span class="q-subtitle">Risk < 0.33, Imp < 0.33</span>
+          </div>
+          <div class="matrix-cell" id="qMedium">
+            <span class="q-title">MEDIUM</span>
+            <span class="q-subtitle">Risk < 0.66, Imp < 0.66</span>
+          </div>
+        </div>
+        <p class="quadrant-desc" id="quadrantDescription">Optimal execution conditions. Low risk exposure.</p>
+      </div>
+    </article>
+
+    <!-- PANEL 7: ACTIVE POSITIONS & ORDERS -->
+    <article class="panel panel-positions">
+      <div class="panel-header">
+        <h3><span class="panel-num">07</span> ACTIVE POSITIONS (FRACTIONAL)</h3>
+        <span class="badge" id="posCountBadge">0 OPEN</span>
+      </div>
+      <div class="panel-body table-responsive">
+        <table class="cyber-table">
+          <thead>
+            <tr>
+              <th>SYMBOL</th>
+              <th>TYPE</th>
+              <th>SHARES</th>
+              <th>ENTRY</th>
+              <th>CURRENT</th>
+              <th>VALUE</th>
+              <th>UNREALIZED P&L</th>
+              <th>SL / TP</th>
+              <th>ACTION</th>
+            </tr>
+          </thead>
+          <tbody id="positionsTableBody">
+            <tr><td colspan="9" class="text-center text-muted">No active open positions. Autonomous scanner active.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <!-- PANEL 8: ADAPTIVE LEARNING & MISTAKE AUDIT -->
+    <article class="panel panel-learning">
+      <div class="panel-header">
+        <h3><span class="panel-num">08</span> ADAPTIVE LEARNING & MISTAKE AUDIT</h3>
+        <span class="badge badge-learning" id="learningRateBadge">LR: 0.08</span>
+      </div>
+      <div class="panel-body">
+        <div class="learning-weights-grid" id="learningWeightsBars">
+          <!-- Dynamic strategy weights bars rendered here -->
+        </div>
+
+        <div class="mistake-audit-container">
+          <span class="audit-heading">MISTAKE POST-MORTEMS & CALIBRATION HISTORY:</span>
+          <div class="mistake-log-list" id="mistakeLogList">
+            <div class="empty-mistake-msg">No mistakes logged yet. Learning engine actively observing trade outcomes.</div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- PANEL 9: NODE EVENTS & TRADE AUDIT LEDGER -->
+    <article class="panel panel-events">
+      <div class="panel-header">
+        <h3><span class="panel-num">09</span> EVENT TIMELINE & TRADE LEDGER</h3>
+        <span class="badge badge-outline" id="eventsCountBadge">LIVE STREAM</span>
+      </div>
+      <div class="panel-body">
+        <div class="events-timeline" id="eventsTimeline">
+          <div class="timeline-entry">
+            <span class="entry-time">--:--:--</span>
+            <span class="entry-text">Predictive Execution Engine started. Connecting to telemetry...</span>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </main>
+
+  <!-- DAILY REPORT & LEARNING AUDIT MODAL -->
+  <div id="dailyReportModal" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width: 800px; max-height: 85vh; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <h3>📊 END-OF-DAY PERFORMANCE & LEARNING AUDIT</h3>
+        <button id="btnCloseReportModal" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body" style="overflow-y: auto; gap: 16px;">
+        
+        <!-- Summary Cards -->
+        <div class="portfolio-stats-bar" style="margin-bottom: 0;">
+          <div class="stat-card">
+            <span class="stat-title">ENDING EQUITY</span>
+            <span class="stat-number stat-highlight" id="repEquity">$0.00</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-title">NET REALIZED P&L</span>
+            <span class="stat-number" id="repNetPnl">+$0.00 (+0.0%)</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-title">WIN RATE / TRADES</span>
+            <span class="stat-number" id="repWinRate">0.0% (0/0)</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-title">PROFIT FACTOR</span>
+            <span class="stat-number" id="repProfitFactor">0.00</span>
+          </div>
+        </div>
+
+        <!-- Strategy Weight Adaptations -->
+        <div class="mistake-audit-container">
+          <span class="audit-heading">🧠 STRATEGY RE-CALIBRATION & WEIGHT EVOLUTION:</span>
+          <div id="repWeightEvolution" class="grid grid-cols-2 gap-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px;"></div>
+        </div>
+
+        <!-- Diagnosed Mistakes -->
+        <div class="mistake-audit-container">
+          <span class="audit-heading">🔴 DIAGNOSED MISTAKES & POLICY ADAPTATIONS:</span>
+          <div id="repMistakesList" class="mistake-log-list" style="max-height: 140px;"></div>
+        </div>
+
+        <!-- Full Trade Ledger -->
+        <div>
+          <span class="audit-heading" style="margin-bottom: 6px; display: block;">📜 COMPLETE SESSION TRADE LEDGER:</span>
+          <div class="table-responsive">
+            <table class="cyber-table">
+              <thead>
+                <tr>
+                  <th>TIME</th>
+                  <th>SYMBOL</th>
+                  <th>DIR</th>
+                  <th>SHARES</th>
+                  <th>ENTRY</th>
+                  <th>EXIT</th>
+                  <th>P&L</th>
+                  <th>RATIONALE</th>
+                </tr>
+              </thead>
+              <tbody id="repLedgerBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer" style="justify-content: space-between;">
+        <span class="text-muted" id="repTimeUk" style="font-size: 11px; align-self: center;">Report as of: --</span>
+        <button id="btnDownloadJson" class="btn btn-secondary">💾 DOWNLOAD JSON REPORT</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONFIGURATION MODAL -->
+  <div id="settingsModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>SYSTEM SETTINGS & API CONFIGURATION</h3>
+        <button id="btnCloseModal" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="inputFinnhubKey">Finnhub API Key:</label>
+          <input type="password" id="inputFinnhubKey" class="cyber-input" placeholder="Enter your Finnhub API Key">
+          <small class="form-hint">Leave blank to run on internal high-fidelity simulation engine.</small>
+        </div>
+
+        <div class="form-group">
+          <label for="selectSimMode">Operating Mode:</label>
+          <select id="selectSimMode" class="cyber-select">
+            <option value="true">Simulation / Paper Trading (Recommended)</option>
+            <option value="false">Live Execution (eToro Bridge)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="inputRiskPct">Risk Per Trade (% of Capital):</label>
+          <input type="number" id="inputRiskPct" class="cyber-input" step="0.5" min="0.5" max="10" value="2.0">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnSaveConfig" class="btn btn-primary">SAVE CONFIG</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

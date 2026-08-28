@@ -1,0 +1,303 @@
+{
+  "initial_capital_gbp": 1000.0,
+  "final_equity_gbp": 1013.29,
+  "total_net_pnl_gbp": 13.29,
+  "pnl_pct": 1.33,
+  "total_trades": 8,
+  "win_count": 7,
+  "loss_count": 1,
+  "win_rate_pct": 87.5,
+  "profit_factor": 8.42,
+  "max_drawdown_pct": 0.0,
+  "hourly_snapshots": [
+    {
+      "time": "09:30",
+      "equity": 1000.0,
+      "cash": 839.97,
+      "open_positions": 2,
+      "regime": "WARN"
+    },
+    {
+      "time": "10:18",
+      "equity": 1000.34,
+      "cash": 759.98,
+      "open_positions": 3,
+      "regime": "WARN"
+    },
+    {
+      "time": "11:07",
+      "equity": 1001.26,
+      "cash": 678.2,
+      "open_positions": 4,
+      "regime": "WARN"
+    },
+    {
+      "time": "11:56",
+      "equity": 1002.43,
+      "cash": 598.22,
+      "open_positions": 5,
+      "regime": "WARN"
+    },
+    {
+      "time": "12:45",
+      "equity": 1003.19,
+      "cash": 598.22,
+      "open_positions": 5,
+      "regime": "WARN"
+    },
+    {
+      "time": "13:33",
+      "equity": 1007.24,
+      "cash": 601.64,
+      "open_positions": 5,
+      "regime": "WARN"
+    },
+    {
+      "time": "14:22",
+      "equity": 1009.24,
+      "cash": 601.64,
+      "open_positions": 5,
+      "regime": "WARN"
+    },
+    {
+      "time": "15:11",
+      "equity": 1011.13,
+      "cash": 605.0,
+      "open_positions": 5,
+      "regime": "WARN"
+    },
+    {
+      "time": "15:56",
+      "equity": 1012.82,
+      "cash": 605.0,
+      "open_positions": 5,
+      "regime": "WARN"
+    }
+  ],
+  "trade_ledger": [
+    {
+      "id": "tr_d51eb014",
+      "symbol": "QQQ",
+      "direction": "LONG",
+      "shares": 0.1621,
+      "entry_price": 493.41,
+      "exit_price": 494.8,
+      "cost_basis_usd": 79.98,
+      "exit_value_usd": 80.21,
+      "realized_pnl_usd": 0.23,
+      "realized_pnl_pct": 0.29,
+      "win": true,
+      "entry_time": "2026-08-28T12:58:08.904889+00:00",
+      "exit_time": "2026-08-28T12:58:08.996314+00:00",
+      "entry_rationale": "Autonomous LONG on QQQ. Score: +0.38 (momentum_trend). Rationale: EMA(9) 488.01 > EMA(21) 484.57 with positive MACD (+3.27)",
+      "exit_rationale": "End-of-day market close session settlement",
+      "contributing_models": {
+        "momentum_trend": 1.0,
+        "mean_reversion": -1.0,
+        "volatility_breakout": 0.606,
+        "news_sentiment": 0.45
+      },
+      "mistake_analysis": null
+    },
+    {
+      "id": "tr_89e3b749",
+      "symbol": "NVDA",
+      "direction": "SHORT",
+      "shares": 0.6671,
+      "entry_price": 119.93,
+      "exit_price": 116.62,
+      "cost_basis_usd": 80.01,
+      "exit_value_usd": 82.22,
+      "realized_pnl_usd": 2.21,
+      "realized_pnl_pct": 2.76,
+      "win": true,
+      "entry_time": "2026-08-28T12:58:08.799947+00:00",
+      "exit_time": "2026-08-28T12:58:08.996284+00:00",
+      "entry_rationale": "Autonomous SHORT on NVDA. Score: -0.32 (mean_reversion). Rationale: EMA(9) 121.20 < EMA(21) 122.01 with negative MACD (-0.93)",
+      "exit_rationale": "End-of-day market close session settlement",
+      "contributing_models": {
+        "momentum_trend": -0.997,
+        "mean_reversion": 1.0,
+        "volatility_breakout": -0.965,
+        "news_sentiment": -0.37
+      },
+      "mistake_analysis": null
+    },
+    {
+      "id": "tr_5d0c3ae5",
+      "symbol": "META",
+      "direction": "LONG",
+      "shares": 0.1533,
+      "entry_price": 521.72,
+      "exit_price": 529.72,
+      "cost_basis_usd": 79.98,
+      "exit_value_usd": 81.21,
+      "realized_pnl_usd": 1.23,
+      "realized_pnl_pct": 1.54,
+      "win": true,
+      "entry_time": "2026-08-28T12:58:08.712515+00:00",
+      "exit_time": "2026-08-28T12:58:08.996252+00:00",
+      "entry_rationale": "Autonomous LONG on META. Score: +0.32 (mean_reversion). Rationale: EMAs converging; no directional trend dominance",
+      "exit_rationale": "End-of-day market close session settlement",
+      "contributing_models": {
+        "momentum_trend": 0.243,
+        "mean_reversion": 0.767,
+        "volatility_breakout": 0.0,
+        "news_sentiment": 0.01
+      },
+      "mistake_analysis": null
+    },
+    {
+      "id": "tr_e0c3287f",
+      "symbol": "MSFT",
+      "direction": "LONG",
+      "shares": 0.1803,
+      "entry_price": 443.67,
+      "exit_price": 458.49,
+      "cost_basis_usd": 79.99,
+      "exit_value_usd": 82.67,
+      "realized_pnl_usd": 2.68,
+      "realized_pnl_pct": 3.35,
+      "win": true,
+      "entry_time": "2026-08-28T12:58:08.580966+00:00",
+      "exit_time": "2026-08-28T12:58:08.996216+00:00",
+      "entry_rationale": "Autonomous LONG on MSFT. Score: +0.30 (momentum_trend). Rationale: EMA(9) 443.69 > EMA(21) 442.58 with positive MACD (+1.52)",
+      "exit_rationale": "End-of-day market close session settlement",
+      "contributing_models": {
+        "momentum_trend": 0.96,
+        "mean_reversion": 0.3,
+        "volatility_breakout": 0.0,
+        "news_sentiment": -0.05
+      },
+      "mistake_analysis": null
+    },
+    {
+      "id": "tr_617fe153",
+      "symbol": "TSLA",
+      "direction": "LONG",
+      "shares": 0.3641,
+      "entry_price": 219.71,
+      "exit_price": 225.17,
+      "cost_basis_usd": 80.0,
+      "exit_value_usd": 81.98,
+      "realized_pnl_usd": 1.98,
+      "realized_pnl_pct": 2.48,
+      "win": true,
+      "entry_time": "2026-08-28T12:58:08.553483+00:00",
+      "exit_time": "2026-08-28T12:58:08.996171+00:00",
+      "entry_rationale": "Autonomous LONG on TSLA. Score: +0.28 (momentum_trend). Rationale: EMA(9) 219.86 > EMA(21) 218.54 with positive MACD (+1.46)",
+      "exit_rationale": "End-of-day market close session settlement",
+      "contributing_models": {
+        "momentum_trend": 1.0,
+        "mean_reversion": 0.0,
+        "volatility_breakout": 0.0,
+        "news_sentiment": 0.12
+      },
+      "mistake_analysis": null
+    },
+    {
+      "id": "tr_3a6b7ad2",
+      "symbol": "QQQ",
+      "direction": "LONG",
+      "shares": 0.169,
+      "entry_price": 473.48,
+      "exit_price": 493.16,
+      "cost_basis_usd": 80.02,
+      "exit_value_usd": 83.34,
+      "realized_pnl_usd": 3.32,
+      "realized_pnl_pct": 4.15,
+      "win": true,
+      "entry_time": "2026-08-28T12:58:08.632358+00:00",
+      "exit_time": "2026-08-28T12:58:08.904658+00:00",
+      "entry_rationale": "Autonomous LONG on QQQ. Score: +0.28 (momentum_trend). Rationale: EMA(9) 471.42 > EMA(21) 470.23 with positive MACD (+1.19)",
+      "exit_rationale": "Take-Profit hit at 493.16 (Target TP: 492.42)",
+      "contributing_models": {
+        "momentum_trend": 0.799,
+        "mean_reversion": -0.37,
+        "volatility_breakout": 0.435,
+        "news_sentiment": 0.26
+      },
+      "mistake_analysis": null
+    },
+    {
+      "id": "tr_c4f8a383",
+      "symbol": "NVDA",
+      "direction": "SHORT",
+      "shares": 0.6339,
+      "entry_price": 126.21,
+      "exit_price": 120.8,
+      "cost_basis_usd": 80.0,
+      "exit_value_usd": 83.43,
+      "realized_pnl_usd": 3.43,
+      "realized_pnl_pct": 4.29,
+      "win": true,
+      "entry_time": "2026-08-28T12:58:08.645499+00:00",
+      "exit_time": "2026-08-28T12:58:08.796107+00:00",
+      "entry_rationale": "Autonomous SHORT on NVDA. Score: -0.33 (mean_reversion). Rationale: EMA(9) 127.84 < EMA(21) 128.78 with negative MACD (-0.79)",
+      "exit_rationale": "Take-Profit hit on SHORT at 120.80 (Target TP: 121.16)",
+      "contributing_models": {
+        "momentum_trend": -0.98,
+        "mean_reversion": 1.0,
+        "volatility_breakout": -0.833,
+        "news_sentiment": -0.49
+      },
+      "mistake_analysis": null
+    },
+    {
+      "id": "tr_726ec018",
+      "symbol": "SPY",
+      "direction": "LONG",
+      "shares": 0.1425,
+      "entry_price": 561.58,
+      "exit_price": 549.08,
+      "cost_basis_usd": 80.03,
+      "exit_value_usd": 78.24,
+      "realized_pnl_usd": -1.79,
+      "realized_pnl_pct": -2.24,
+      "win": false,
+      "entry_time": "2026-08-28T12:58:08.555423+00:00",
+      "exit_time": "2026-08-28T12:58:08.654208+00:00",
+      "entry_rationale": "Autonomous LONG on SPY. Score: +0.32 (momentum_trend). Rationale: EMA(9) 554.87 > EMA(21) 551.84 with positive MACD (+2.31)",
+      "exit_rationale": "Stop-Loss hit at 549.08 (Target SL: 550.35)",
+      "contributing_models": {
+        "momentum_trend": 1.0,
+        "mean_reversion": -1.0,
+        "volatility_breakout": 0.827,
+        "news_sentiment": 0.44
+      },
+      "mistake_analysis": "Adverse trend continuation against LONG position on SPY hitting Stop-Loss."
+    }
+  ],
+  "learning_stats": {
+    "strategy_weights": {
+      "momentum_trend": 0.416,
+      "mean_reversion": 0.116,
+      "volatility_breakout": 0.201,
+      "news_sentiment": 0.267
+    },
+    "total_trades_evaluated": 8,
+    "win_rate_pct": 87.5,
+    "avg_win_usd": 2.15,
+    "avg_loss_usd": 1.79,
+    "profit_factor": 8.42,
+    "mistake_history": [
+      {
+        "timestamp": "2026-08-28T12:58:08.654236+00:00",
+        "trade_id": "tr_726ec018",
+        "symbol": "SPY",
+        "direction": "LONG",
+        "pnl_usd": -1.79,
+        "primary_failure_cause": "Adverse trend continuation against LONG position on SPY hitting Stop-Loss.",
+        "adaptation_action": "Adjusted momentum_trend sensitivity and lowered entry risk budget.",
+        "adjusted_weights": {
+          "momentum_trend": 0.25,
+          "mean_reversion": 0.25,
+          "volatility_breakout": 0.25,
+          "news_sentiment": 0.25
+        }
+      }
+    ],
+    "learning_rate": 0.08,
+    "last_calibration_time": "2026-08-28T12:58:08.654267+00:00"
+  }
+}

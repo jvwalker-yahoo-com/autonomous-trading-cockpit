@@ -1,0 +1,19 @@
+{
+  "initial_capital": 10000.0,
+  "cash": 10000.0,
+  "peak_equity": 10000.0,
+  "positions": {},
+  "trade_ledger": [],
+  "learner_weights": {
+    "momentum_trend": 0.25,
+    "mean_reversion": 0.25,
+    "volatility_breakout": 0.25,
+    "news_sentiment": 0.25
+  },
+  "mistake_history": [],
+  "total_trades_evaluated": 0,
+  "winning_trades_count": 0,
+  "losing_trades_count": 0,
+  "total_win_usd": 0.0,
+  "total_loss_usd": 0.0
+}
