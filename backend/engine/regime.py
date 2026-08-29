@@ -30,15 +30,19 @@ class RegimeModule:
         else:
             mode = "CRITICAL"
 
-        # Determine structural trend
+        # Determine structural trend using cinar/indicator ADX & SuperTrend
         ema_9 = indicators.get("ema_9", 100.0)
         ema_21 = indicators.get("ema_21", 100.0)
         rsi = indicators.get("rsi_14", 50.0)
         macd = indicators.get("macd_line", 0.0)
+        adx = indicators.get("adx", 22.0)
+        st_dir = indicators.get("supertrend_dir", 1.0)
 
-        if ema_9 > ema_21 and rsi > 52.0 and macd > 0:
+        if adx < 20.0:
+            trend = "CHOPPY"
+        elif ema_9 > ema_21 and rsi > 50.0 and st_dir == 1.0:
             trend = "BULL_TREND"
-        elif ema_9 < ema_21 and rsi < 48.0 and macd < 0:
+        elif ema_9 < ema_21 and rsi < 50.0 and st_dir == -1.0:
             trend = "BEAR_TREND"
         else:
             trend = "CHOPPY"

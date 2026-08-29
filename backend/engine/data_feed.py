@@ -46,6 +46,8 @@ class MarketDataPoint:
         self.change = price - prev_close
         self.change_pct = (self.change / prev_close) * 100.0 if prev_close > 0 else 0.0
 
+from .indicators import TechnicalIndicators
+
 class DataFeedManager:
     def __init__(self, api_key: str = ""):
         self.api_key = api_key
@@ -175,39 +177,50 @@ class DataFeedManager:
 
     def get_technical_indicators(self, symbol: str) -> Dict[str, float]:
         """
-        Calculates EMA(9), EMA(21), RSI(14), MACD, Bollinger Bands, and ATR.
+        Calculates comprehensive quantitative indicators based on cinar/indicator:
+        EMA(9), EMA(21), RSI(14), MACD, Bollinger Bands, ATR, ADX, SuperTrend, VWAP, MFI, and Keltner Channels.
         """
         prices = np.array(self.history_windows.get(symbol, [100.0]))
+        volumes = np.array(self.volume_windows.get(symbol, [100000.0]))
+        
+        # Synthetic highs and lows from rolling prices
+        highs = prices * 1.004
+        lows = prices * 0.996
+
         if len(prices) < 20:
+            p = float(prices[-1])
             return {
-                "ema_9": float(prices[-1]),
-                "ema_21": float(prices[-1]),
+                "ema_9": p,
+                "ema_21": p,
                 "rsi_14": 50.0,
                 "macd_line": 0.0,
                 "macd_signal": 0.0,
-                "bb_upper": float(prices[-1] * 1.02),
-                "bb_lower": float(prices[-1] * 0.98),
-                "bb_mid": float(prices[-1]),
-                "atr": float(prices[-1] * 0.015),
-                "volatility_std": float(prices[-1] * 0.01)
+                "bb_upper": round(p * 1.02, 2),
+                "bb_lower": round(p * 0.98, 2),
+                "bb_mid": p,
+                "atr": round(p * 0.015, 2),
+                "volatility_std": round(p * 0.01, 2),
+                "adx": 22.0,
+                "plus_di": 20.0,
+                "minus_di": 20.0,
+                "supertrend_val": round(p * 0.98, 2),
+                "supertrend_dir": 1.0,
+                "vwap": p,
+                "mfi": 50.0,
+                "keltner_upper": round(p * 1.02, 2),
+                "keltner_mid": p,
+                "keltner_lower": round(p * 0.98, 2)
             }
 
-        # EMA function
-        def calc_ema(arr: np.ndarray, period: int) -> float:
-            alpha = 2.0 / (period + 1.0)
-            ema = arr[0]
-            for val in arr[1:]:
-                ema = alpha * val + (1.0 - alpha) * ema
-            return float(ema)
-
-        ema_9 = calc_ema(prices, 9)
-        ema_21 = calc_ema(prices, 21)
-        ema_12 = calc_ema(prices, 12)
-        ema_26 = calc_ema(prices, 26)
+        # 1. EMAs & MACD
+        ema_9 = TechnicalIndicators.calc_ema(prices, 9)
+        ema_21 = TechnicalIndicators.calc_ema(prices, 21)
+        ema_12 = TechnicalIndicators.calc_ema(prices, 12)
+        ema_26 = TechnicalIndicators.calc_ema(prices, 26)
         macd_line = ema_12 - ema_26
-        macd_signal = calc_ema(prices[-9:], 9) - calc_ema(prices[-26:], 26)
+        macd_signal = TechnicalIndicators.calc_ema(prices[-9:], 9) - TechnicalIndicators.calc_ema(prices[-26:], 26)
 
-        # RSI(14)
+        # 2. RSI(14)
         deltas = np.diff(prices[-15:])
         gains = np.where(deltas > 0, deltas, 0.0)
         losses = np.where(deltas < 0, -deltas, 0.0)
@@ -219,15 +232,30 @@ class DataFeedManager:
             rs = avg_gain / avg_loss
             rsi = 100.0 - (100.0 / (1.0 + rs))
 
-        # Bollinger Bands (20 periods, 2 std)
+        # 3. Bollinger Bands
         window = prices[-20:]
         bb_mid = float(np.mean(window))
         std = float(np.std(window))
         bb_upper = bb_mid + (2.0 * std)
         bb_lower = bb_mid - (2.0 * std)
 
-        # ATR estimate
-        atr = float(np.mean(np.abs(np.diff(prices[-14:])))) if len(prices) >= 15 else (prices[-1] * 0.015)
+        # 4. ATR
+        atr = TechnicalIndicators.calc_atr(highs, lows, prices, 14)
+
+        # 5. cinar/indicator: ADX Trend Strength
+        adx, plus_di, minus_di = TechnicalIndicators.calc_adx(highs, lows, prices, 14)
+
+        # 6. cinar/indicator: SuperTrend
+        st_val, st_dir = TechnicalIndicators.calc_supertrend(highs, lows, prices, 10, 3.0)
+
+        # 7. cinar/indicator: VWAP
+        vwap = TechnicalIndicators.calc_vwap(prices, volumes)
+
+        # 8. cinar/indicator: MFI
+        mfi = TechnicalIndicators.calc_mfi(highs, lows, prices, volumes, 14)
+
+        # 9. cinar/indicator: Keltner Channels
+        k_upper, k_mid, k_lower = TechnicalIndicators.calc_keltner_channel(highs, lows, prices, 20, 10, 2.0)
 
         return {
             "ema_9": round(ema_9, 2),
@@ -239,7 +267,17 @@ class DataFeedManager:
             "bb_lower": round(bb_lower, 2),
             "bb_mid": round(bb_mid, 2),
             "atr": round(atr, 3),
-            "volatility_std": round(std, 3)
+            "volatility_std": round(std, 3),
+            "adx": round(adx, 2),
+            "plus_di": round(plus_di, 2),
+            "minus_di": round(minus_di, 2),
+            "supertrend_val": round(st_val, 2),
+            "supertrend_dir": float(st_dir),
+            "vwap": round(vwap, 2),
+            "mfi": round(mfi, 2),
+            "keltner_upper": round(k_upper, 2),
+            "keltner_mid": round(k_mid, 2),
+            "keltner_lower": round(k_lower, 2)
         }
 
     def get_news_sentiment(self, symbol: str) -> float:
