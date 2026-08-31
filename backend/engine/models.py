@@ -164,3 +164,27 @@ class PortfolioSummary(BaseModel):
     open_positions: List[Position]
     active_symbol: str
     simulation_mode: bool
+
+class StockPerformanceSummary(BaseModel):
+    symbol: str
+    amount_traded_usd: float
+    total_trades: int
+    hits: int  # Number of winning trades
+    misses: int  # Number of losing trades
+    hit_rate_pct: float
+    net_pnl_usd: float
+    net_pnl_pct: float
+    average_trade_pnl_usd: float
+
+class MultiDayPerformanceReport(BaseModel):
+    period_title: str
+    total_amount_traded_usd: float
+    total_trades: int
+    total_hits: int
+    total_misses: int
+    overall_hit_rate_pct: float
+    total_net_pnl_usd: float
+    total_net_pnl_pct: float
+    stock_summaries: List[StockPerformanceSummary]
+    generated_at_uk: str
+

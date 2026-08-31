@@ -399,73 +399,132 @@
 
   </main>
 
-  <!-- DAILY REPORT & LEARNING AUDIT MODAL -->
+  <!-- DAILY REPORT & 5-DAY PERFORMANCE AUDIT MODAL -->
   <div id="dailyReportModal" class="modal-overlay hidden">
-    <div class="modal-card" style="max-width: 800px; max-height: 85vh; display: flex; flex-direction: column;">
+    <div class="modal-card" style="max-width: 950px; max-height: 88vh; display: flex; flex-direction: column;">
       <div class="modal-header">
-        <h3>📊 END-OF-DAY PERFORMANCE & LEARNING AUDIT</h3>
+        <h3>📊 END-OF-DAY & 5-DAY PERFORMANCE AUDIT</h3>
         <button id="btnCloseReportModal" class="btn-close">&times;</button>
       </div>
-      <div class="modal-body" style="overflow-y: auto; gap: 16px;">
+      <div class="modal-body" style="overflow-y: auto; gap: 14px;">
         
-        <!-- Summary Cards -->
+        <!-- Report View Selector Tabs -->
+        <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+          <button id="tabBtnDailyStock" class="btn btn-primary" style="font-size: 11px;">📅 TODAY'S PER-STOCK SUMMARY</button>
+          <button id="tabBtn5DayReport" class="btn btn-secondary" style="font-size: 11px;">🗓️ LAST 5 WORKING DAYS REPORT</button>
+          <button id="tabBtnFullLedger" class="btn btn-outline" style="font-size: 11px;">📜 COMPLETE TRADE LEDGER</button>
+        </div>
+
+        <!-- Summary KPI Cards -->
         <div class="portfolio-stats-bar" style="margin-bottom: 0;">
           <div class="stat-card">
-            <span class="stat-title">ENDING EQUITY</span>
+            <span class="stat-title" id="repHeadingEquity">ENDING EQUITY</span>
             <span class="stat-number stat-highlight" id="repEquity">$0.00</span>
           </div>
           <div class="stat-card">
-            <span class="stat-title">NET REALIZED P&L</span>
+            <span class="stat-title" id="repHeadingPnl">NET REALIZED P&L</span>
             <span class="stat-number" id="repNetPnl">+$0.00 (+0.0%)</span>
           </div>
           <div class="stat-card">
-            <span class="stat-title">WIN RATE / TRADES</span>
-            <span class="stat-number" id="repWinRate">0.0% (0/0)</span>
+            <span class="stat-title">HITS / MISSES (WIN RATE)</span>
+            <span class="stat-number" id="repWinRate">0.0% (0 Hits / 0 Misses)</span>
           </div>
           <div class="stat-card">
-            <span class="stat-title">PROFIT FACTOR</span>
-            <span class="stat-number" id="repProfitFactor">0.00</span>
+            <span class="stat-title">TOTAL VOLUME TRADED</span>
+            <span class="stat-number stat-highlight" id="repVolTraded">$0.00</span>
           </div>
         </div>
 
-        <!-- Strategy Weight Adaptations -->
-        <div class="mistake-audit-container">
-          <span class="audit-heading">🧠 STRATEGY RE-CALIBRATION & WEIGHT EVOLUTION:</span>
-          <div id="repWeightEvolution" class="grid grid-cols-2 gap-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px;"></div>
-        </div>
-
-        <!-- Diagnosed Mistakes -->
-        <div class="mistake-audit-container">
-          <span class="audit-heading">🔴 DIAGNOSED MISTAKES & POLICY ADAPTATIONS:</span>
-          <div id="repMistakesList" class="mistake-log-list" style="max-height: 140px;"></div>
-        </div>
-
-        <!-- Full Trade Ledger -->
-        <div>
-          <span class="audit-heading" style="margin-bottom: 6px; display: block;">📜 COMPLETE SESSION TRADE LEDGER:</span>
+        <!-- VIEW 1: TODAY'S PER-STOCK SUMMARY TABLE -->
+        <div id="viewDailyStockSummary">
+          <span class="audit-heading" style="margin-bottom: 6px; display: block;">📈 TODAY'S INDIVIDUAL STOCK PERFORMANCE SUMMARY:</span>
           <div class="table-responsive">
             <table class="cyber-table">
               <thead>
                 <tr>
-                  <th>TIME</th>
                   <th>SYMBOL</th>
-                  <th>DIR</th>
-                  <th>SHARES</th>
-                  <th>ENTRY</th>
-                  <th>EXIT</th>
-                  <th>P&L</th>
-                  <th>RATIONALE</th>
+                  <th>AMOUNT TRADED ($)</th>
+                  <th>TOTAL TRADES</th>
+                  <th>HITS (WINS)</th>
+                  <th>MISSES (LOSSES)</th>
+                  <th>HIT RATE (%)</th>
+                  <th>TOTAL P&L ($ UP/DOWN)</th>
+                  <th>RETURN (%)</th>
                 </tr>
               </thead>
-              <tbody id="repLedgerBody"></tbody>
+              <tbody id="repPerStockBody"></tbody>
+              <tfoot id="repPerStockFoot" style="font-weight: bold; background: rgba(255,255,255,0.05); border-top: 2px solid var(--border-color);"></tfoot>
             </table>
+          </div>
+        </div>
+
+        <!-- VIEW 2: LAST 5 WORKING DAYS PERFORMANCE TABLE -->
+        <div id="view5DaySummary" class="hidden">
+          <span class="audit-heading" style="margin-bottom: 6px; display: block;">🗓️ LAST 5 WORKING DAYS CUMULATIVE SUMMARY (PER STOCK):</span>
+          <div class="table-responsive">
+            <table class="cyber-table">
+              <thead>
+                <tr>
+                  <th>SYMBOL</th>
+                  <th>5-DAY VOLUME TRADED ($)</th>
+                  <th>TOTAL TRADES</th>
+                  <th>5-DAY HITS</th>
+                  <th>5-DAY MISSES</th>
+                  <th>HIT RATE (%)</th>
+                  <th>5-DAY NET P&L ($)</th>
+                  <th>RETURN (%)</th>
+                </tr>
+              </thead>
+              <tbody id="rep5DayStockBody"></tbody>
+              <tfoot id="rep5DayStockFoot" style="font-weight: bold; background: rgba(255,255,255,0.05); border-top: 2px solid var(--border-color);"></tfoot>
+            </table>
+          </div>
+        </div>
+
+        <!-- VIEW 3: FULL CHRONOLOGICAL LEDGER & ADAPTIVE LEARNING -->
+        <div id="viewFullLedger" class="hidden">
+          <!-- Strategy Weight Adaptations -->
+          <div class="mistake-audit-container">
+            <span class="audit-heading">🧠 STRATEGY RE-CALIBRATION & WEIGHT EVOLUTION:</span>
+            <div id="repWeightEvolution" class="grid grid-cols-2 gap-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px;"></div>
+          </div>
+
+          <!-- Diagnosed Mistakes -->
+          <div class="mistake-audit-container" style="margin-top: 10px;">
+            <span class="audit-heading">🔴 DIAGNOSED MISTAKES & POLICY ADAPTATIONS:</span>
+            <div id="repMistakesList" class="mistake-log-list" style="max-height: 120px;"></div>
+          </div>
+
+          <!-- Chronological Ledger -->
+          <div style="margin-top: 10px;">
+            <span class="audit-heading" style="margin-bottom: 6px; display: block;">📜 CHRONOLOGICAL TRADE-BY-TRADE LOG:</span>
+            <div class="table-responsive" style="max-height: 180px; overflow-y: auto;">
+              <table class="cyber-table">
+                <thead>
+                  <tr>
+                    <th>TIME</th>
+                    <th>SYMBOL</th>
+                    <th>DIR</th>
+                    <th>SHARES</th>
+                    <th>ENTRY</th>
+                    <th>EXIT</th>
+                    <th>P&L ($)</th>
+                    <th>RATIONALE</th>
+                  </tr>
+                </thead>
+                <tbody id="repLedgerBody"></tbody>
+              </table>
+            </div>
           </div>
         </div>
 
       </div>
       <div class="modal-footer" style="justify-content: space-between;">
         <span class="text-muted" id="repTimeUk" style="font-size: 11px; align-self: center;">Report as of: --</span>
-        <button id="btnDownloadJson" class="btn btn-secondary">💾 DOWNLOAD JSON REPORT</button>
+        <div style="display: flex; gap: 8px;">
+          <button id="btnDownloadJson" class="btn btn-secondary">💾 DOWNLOAD JSON REPORT</button>
+          <button id="btnDownloadCsv" class="btn btn-outline" style="border-color: var(--accent-cyan); color: var(--accent-cyan);">📊 EXPORT CSV</button>
+        </div>
       </div>
     </div>
   </div>

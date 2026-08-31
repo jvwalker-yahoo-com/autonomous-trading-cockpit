@@ -438,12 +438,170 @@ el.btnSaveConfig.addEventListener("click", async () => {
   fetchCockpitData();
 });
 
-// Daily Report Modal
+// Daily & 5-Day Report Modal
 const btnDailyReport = document.getElementById("btnDailyReport");
 const dailyReportModal = document.getElementById("dailyReportModal");
 const btnCloseReportModal = document.getElementById("btnCloseReportModal");
 const btnDownloadJson = document.getElementById("btnDownloadJson");
+const btnDownloadCsv = document.getElementById("btnDownloadCsv");
+
+const tabBtnDailyStock = document.getElementById("tabBtnDailyStock");
+const tabBtn5DayReport = document.getElementById("tabBtn5DayReport");
+const tabBtnFullLedger = document.getElementById("tabBtnFullLedger");
+
+const viewDailyStockSummary = document.getElementById("viewDailyStockSummary");
+const view5DaySummary = document.getElementById("view5DaySummary");
+const viewFullLedger = document.getElementById("viewFullLedger");
+
 let lastDailyReportData = null;
+let last5DayReportData = null;
+let activeReportTab = "daily";
+
+function setReportTab(tab) {
+  activeReportTab = tab;
+  [tabBtnDailyStock, tabBtn5DayReport, tabBtnFullLedger].forEach(b => {
+    if (b) b.className = "btn btn-outline";
+  });
+  [viewDailyStockSummary, view5DaySummary, viewFullLedger].forEach(v => {
+    if (v) v.classList.add("hidden");
+  });
+
+  if (tab === "daily") {
+    if (tabBtnDailyStock) tabBtnDailyStock.className = "btn btn-primary";
+    if (viewDailyStockSummary) viewDailyStockSummary.classList.remove("hidden");
+  } else if (tab === "5day") {
+    if (tabBtn5DayReport) tabBtn5DayReport.className = "btn btn-primary";
+    if (view5DaySummary) view5DaySummary.classList.remove("hidden");
+  } else if (tab === "ledger") {
+    if (tabBtnFullLedger) tabBtnFullLedger.className = "btn btn-primary";
+    if (viewFullLedger) viewFullLedger.classList.remove("hidden");
+  }
+}
+
+if (tabBtnDailyStock) tabBtnDailyStock.addEventListener("click", () => setReportTab("daily"));
+if (tabBtn5DayReport) {
+  tabBtn5DayReport.addEventListener("click", async () => {
+    setReportTab("5day");
+    if (!last5DayReportData) {
+      try {
+        const res = await fetch(`${BASE_URL}/api/reports/five_day`);
+        if (res.ok) {
+          const data = await res.json();
+          last5DayReportData = data;
+          render5DayTable(data);
+        }
+      } catch (e) {
+        console.error("Error fetching 5-day report:", e);
+      }
+    }
+  });
+}
+if (tabBtnFullLedger) tabBtnFullLedger.addEventListener("click", () => setReportTab("ledger"));
+
+function renderPerStockTable(stockList) {
+  const tbody = document.getElementById("repPerStockBody");
+  const tfoot = document.getElementById("repPerStockFoot");
+  if (!tbody) return;
+
+  if (!stockList || stockList.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted">No individual stock trades executed today yet.</td></tr>`;
+    if (tfoot) tfoot.innerHTML = "";
+    return;
+  }
+
+  let grandVol = 0, grandTrades = 0, grandHits = 0, grandMisses = 0, grandPnl = 0;
+
+  tbody.innerHTML = stockList.map(s => {
+    grandVol += s.amount_traded_usd;
+    grandTrades += s.total_trades;
+    grandHits += s.hits;
+    grandMisses += s.misses;
+    grandPnl += s.net_pnl_usd;
+
+    const pnlColor = s.net_pnl_usd >= 0 ? "color-success" : "color-danger";
+    const sign = s.net_pnl_usd >= 0 ? "+" : "";
+    return `
+      <tr>
+        <td><strong>${s.symbol}</strong></td>
+        <td>$${s.amount_traded_usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        <td><strong>${s.total_trades}</strong></td>
+        <td><span class="badge badge-ok">${s.hits} Hits</span></td>
+        <td><span class="badge ${s.misses > 0 ? 'badge-critical' : 'badge-normal'}">${s.misses} Misses</span></td>
+        <td>${s.hit_rate_pct.toFixed(1)}%</td>
+        <td class="${pnlColor}"><strong>${sign}$${s.net_pnl_usd.toFixed(2)}</strong></td>
+        <td class="${pnlColor}">${sign}${s.net_pnl_pct.toFixed(2)}%</td>
+      </tr>
+    `;
+  }).join("");
+
+  const grandHitRate = grandTrades > 0 ? (grandHits / grandTrades * 100.0) : 0.0;
+  const grandPnlColor = grandPnl >= 0 ? "color-success" : "color-danger";
+  const grandSign = grandPnl >= 0 ? "+" : "";
+  const grandRetPct = grandVol > 0 ? (grandPnl / grandVol * 100.0) : 0.0;
+
+  if (tfoot) {
+    tfoot.innerHTML = `
+      <tr>
+        <td>TOTALS:</td>
+        <td>$${grandVol.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        <td>${grandTrades}</td>
+        <td>${grandHits} Hits</td>
+        <td>${grandMisses} Misses</td>
+        <td>${grandHitRate.toFixed(1)}%</td>
+        <td class="${grandPnlColor}"><strong>${grandSign}$${grandPnl.toFixed(2)}</strong></td>
+        <td class="${grandPnlColor}">${grandSign}${grandRetPct.toFixed(2)}%</td>
+      </tr>
+    `;
+  }
+}
+
+function render5DayTable(data) {
+  const tbody = document.getElementById("rep5DayStockBody");
+  const tfoot = document.getElementById("rep5DayStockFoot");
+  if (!tbody) return;
+
+  const stockList = data.stock_summaries || [];
+  if (stockList.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted">No 5-day trading records available yet.</td></tr>`;
+    if (tfoot) tfoot.innerHTML = "";
+    return;
+  }
+
+  tbody.innerHTML = stockList.map(s => {
+    const pnlColor = s.net_pnl_usd >= 0 ? "color-success" : "color-danger";
+    const sign = s.net_pnl_usd >= 0 ? "+" : "";
+    return `
+      <tr>
+        <td><strong>${s.symbol}</strong></td>
+        <td>$${s.amount_traded_usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        <td><strong>${s.total_trades}</strong></td>
+        <td><span class="badge badge-ok">${s.hits}</span></td>
+        <td><span class="badge ${s.misses > 0 ? 'badge-critical' : 'badge-normal'}">${s.misses}</span></td>
+        <td>${s.hit_rate_pct.toFixed(1)}%</td>
+        <td class="${pnlColor}"><strong>${sign}$${s.net_pnl_usd.toFixed(2)}</strong></td>
+        <td class="${pnlColor}">${sign}${s.net_pnl_pct.toFixed(2)}%</td>
+      </tr>
+    `;
+  }).join("");
+
+  const grandPnlColor = data.total_net_pnl_usd >= 0 ? "color-success" : "color-danger";
+  const grandSign = data.total_net_pnl_usd >= 0 ? "+" : "";
+
+  if (tfoot) {
+    tfoot.innerHTML = `
+      <tr>
+        <td>5-DAY GRAND TOTAL:</td>
+        <td>$${data.total_amount_traded_usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        <td>${data.total_trades}</td>
+        <td>${data.total_hits} Hits</td>
+        <td>${data.total_misses} Misses</td>
+        <td>${data.overall_hit_rate_pct.toFixed(1)}%</td>
+        <td class="${grandPnlColor}"><strong>${grandSign}$${data.total_net_pnl_usd.toFixed(2)}</strong></td>
+        <td class="${grandPnlColor}">${grandSign}${data.total_net_pnl_pct.toFixed(2)}%</td>
+      </tr>
+    `;
+  }
+}
 
 if (btnDailyReport) {
   btnDailyReport.addEventListener("click", async () => {
@@ -461,62 +619,75 @@ if (btnDailyReport) {
       repNetPnlEl.textContent = `${pnlSign}$${rep.net_pnl_usd.toFixed(2)} (${pnlSign}${rep.net_pnl_pct.toFixed(2)}%)`;
       repNetPnlEl.className = `stat-number ${rep.net_pnl_usd >= 0 ? 'color-success' : 'color-danger'}`;
 
-      document.getElementById("repWinRate").textContent = `${rep.win_rate_pct.toFixed(1)}% (${rep.winning_trades}W / ${rep.losing_trades}L)`;
-      document.getElementById("repProfitFactor").textContent = rep.profit_factor.toFixed(2);
+      document.getElementById("repWinRate").textContent = `${rep.win_rate_pct.toFixed(1)}% (${rep.winning_trades} Hits / ${rep.losing_trades} Misses)`;
+      
+      const totalVol = (rep.per_stock_summary || []).reduce((acc, s) => acc + s.amount_traded_usd, 0.0);
+      document.getElementById("repVolTraded").textContent = `$${totalVol.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+
       document.getElementById("repTimeUk").textContent = `Report generated: ${rep.report_time_uk}`;
+
+      // Render per-stock table
+      renderPerStockTable(rep.per_stock_summary || []);
 
       // Render weight evolution
       const wCont = document.getElementById("repWeightEvolution");
-      wCont.innerHTML = Object.entries(rep.strategy_weight_evolution || {}).map(([name, data]) => `
-        <div class="fed-model-item">
-          <div class="fed-model-header">
-            <strong>${name.replace('_', ' ').toUpperCase()}</strong>
-            <span class="color-warn">${data.current_pct} (Δ ${data.shift_from_baseline})</span>
+      if (wCont) {
+        wCont.innerHTML = Object.entries(rep.strategy_weight_evolution || {}).map(([name, data]) => `
+          <div class="fed-model-item">
+            <div class="fed-model-header">
+              <strong>${name.replace('_', ' ').toUpperCase()}</strong>
+              <span class="color-warn">${data.current_pct} (Δ ${data.shift_from_baseline})</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" style="width: ${data.current_pct}; background: var(--accent-purple);"></div>
+            </div>
           </div>
-          <div class="progress-track">
-            <div class="progress-fill" style="width: ${data.current_pct}; background: var(--accent-purple);"></div>
-          </div>
-        </div>
-      `).join("");
+        `).join("");
+      }
 
       // Render diagnosed mistakes
       const mistCont = document.getElementById("repMistakesList");
-      if (rep.diagnosed_mistakes && rep.diagnosed_mistakes.length > 0) {
-        mistCont.innerHTML = rep.diagnosed_mistakes.map(m => `
-          <div class="mistake-item">
-            <div class="mistake-cause">🔴 [${m.symbol} ${m.direction}] -$${Math.abs(m.pnl_usd).toFixed(2)}: ${m.primary_failure_cause}</div>
-            <div class="mistake-action">↳ <strong>Adaptation:</strong> ${m.adaptation_action}</div>
-          </div>
-        `).join("");
-      } else {
-        mistCont.innerHTML = `<span class="text-muted" style="font-size: 11px;">No trade losses recorded today. Zero mistakes logged.</span>`;
+      if (mistCont) {
+        if (rep.diagnosed_mistakes && rep.diagnosed_mistakes.length > 0) {
+          mistCont.innerHTML = rep.diagnosed_mistakes.map(m => `
+            <div class="mistake-item">
+              <div class="mistake-cause">🔴 [${m.symbol} ${m.direction}] -$${Math.abs(m.pnl_usd).toFixed(2)}: ${m.primary_failure_cause}</div>
+              <div class="mistake-action">↳ <strong>Adaptation:</strong> ${m.adaptation_action}</div>
+            </div>
+          `).join("");
+        } else {
+          mistCont.innerHTML = `<span class="text-muted" style="font-size: 11px;">No trade losses recorded today. Zero mistakes logged.</span>`;
+        }
       }
 
       // Render full ledger
       const legBody = document.getElementById("repLedgerBody");
-      if (rep.full_trade_ledger && rep.full_trade_ledger.length > 0) {
-        legBody.innerHTML = rep.full_trade_ledger.map(t => {
-          const isLong = t.direction === "LONG";
-          const pnlColor = t.realized_pnl_usd >= 0 ? "color-success" : "color-danger";
-          const pnlSign = t.realized_pnl_usd >= 0 ? "+" : "";
-          const timeShort = t.exit_time ? t.exit_time.split("T")[1].substring(0, 8) : "--";
-          return `
-            <tr>
-              <td>${timeShort}</td>
-              <td><strong>${t.symbol}</strong></td>
-              <td><span class="badge ${isLong ? 'badge-ok' : 'badge-critical'}">${t.direction}</span></td>
-              <td>${t.shares.toFixed(4)}</td>
-              <td>$${t.entry_price.toFixed(2)}</td>
-              <td>$${t.exit_price.toFixed(2)}</td>
-              <td class="${pnlColor}"><strong>${pnlSign}$${t.realized_pnl_usd.toFixed(2)} (${pnlSign}${t.realized_pnl_pct.toFixed(2)}%)</strong></td>
-              <td><small>${t.entry_rationale} | <em>${t.exit_rationale}</em></small></td>
-            </tr>
-          `;
-        }).join("");
-      } else {
-        legBody.innerHTML = `<tr><td colspan="8" class="text-center text-muted">No trades executed in this session yet.</td></tr>`;
+      if (legBody) {
+        if (rep.full_trade_ledger && rep.full_trade_ledger.length > 0) {
+          legBody.innerHTML = rep.full_trade_ledger.map(t => {
+            const isLong = t.direction === "LONG";
+            const pnlColor = t.realized_pnl_usd >= 0 ? "color-success" : "color-danger";
+            const sign = t.realized_pnl_usd >= 0 ? "+" : "";
+            const timeShort = t.exit_time ? t.exit_time.split("T")[1].substring(0, 8) : "--";
+            return `
+              <tr>
+                <td>${timeShort}</td>
+                <td><strong>${t.symbol}</strong></td>
+                <td><span class="badge ${isLong ? 'badge-ok' : 'badge-critical'}">${t.direction}</span></td>
+                <td>${t.shares.toFixed(4)}</td>
+                <td>$${t.entry_price.toFixed(2)}</td>
+                <td>$${t.exit_price.toFixed(2)}</td>
+                <td class="${pnlColor}"><strong>${sign}$${t.realized_pnl_usd.toFixed(2)}</strong></td>
+                <td><small>${t.entry_rationale} | <em>${t.exit_rationale}</em></small></td>
+              </tr>
+            `;
+          }).join("");
+        } else {
+          legBody.innerHTML = `<tr><td colspan="8" class="text-center text-muted">No trades executed in this session yet.</td></tr>`;
+        }
       }
 
+      setReportTab("daily");
       dailyReportModal.classList.remove("hidden");
     } catch (e) {
       alert("Error loading daily report: " + e.message);
@@ -534,14 +705,41 @@ if (btnCloseReportModal) {
 
 if (btnDownloadJson) {
   btnDownloadJson.addEventListener("click", () => {
-    if (!lastDailyReportData) return;
-    const blob = new Blob([JSON.stringify(lastDailyReportData, null, 2)], { type: "application/json" });
+    const exportData = activeReportTab === "5day" ? last5DayReportData : lastDailyReportData;
+    if (!exportData) return;
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `trading_session_report_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `trading_report_${activeReportTab}_${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  });
+}
+
+if (btnDownloadCsv) {
+  btnDownloadCsv.addEventListener("click", () => {
+    const list = activeReportTab === "5day"
+      ? (last5DayReportData?.stock_summaries || [])
+      : (lastDailyReportData?.per_stock_summary || []);
+    
+    if (list.length === 0) {
+      alert("No data available to export to CSV.");
+      return;
+    }
+
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += "Symbol,Amount Traded ($),Total Trades,Hits (Wins),Misses (Losses),Hit Rate (%),Net P&L ($),Return (%)\n";
+
+    list.forEach(s => {
+      csvContent += `${s.symbol},${s.amount_traded_usd.toFixed(2)},${s.total_trades},${s.hits},${s.misses},${s.hit_rate_pct.toFixed(1)}%,${s.net_pnl_usd.toFixed(2)},${s.net_pnl_pct.toFixed(2)}%\n`;
+    });
+
+    const encodedUri = encodeURI(csvContent);
+    const a = document.createElement("a");
+    a.href = encodedUri;
+    a.download = `per_stock_summary_${activeReportTab}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
   });
 }
 

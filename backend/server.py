@@ -356,6 +356,9 @@ def get_daily_report():
         for k, v in learning.strategy_weights.items()
     }
 
+    # Calculate per-stock aggregated summary
+    stock_summaries = broker.get_per_stock_summary()
+
     return {
         "report_generated_time_utc": now_utc.isoformat(),
         "report_time_uk": now_utc.strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -371,10 +374,20 @@ def get_daily_report():
         "profit_factor": summary.profit_factor,
         "max_drawdown_pct": summary.max_drawdown_pct,
         "open_positions": [p.model_dump() for p in broker.positions.values()],
+        "per_stock_summary": [s.model_dump() for s in stock_summaries],
         "strategy_weight_evolution": weight_shifts,
         "diagnosed_mistakes": [m.model_dump() for m in learning.mistake_history],
         "full_trade_ledger": [t.model_dump() for t in broker.trade_ledger]
     }
+
+@app.get("/api/reports/five_day", tags=["Audit & Reporting"])
+@app.get("/api/reports/multi_day", tags=["Audit & Reporting"])
+def get_five_day_report(days: int = 5):
+    """
+    Returns aggregated performance over the last 5 working days,
+    summarized per individual stock and across the total portfolio.
+    """
+    return broker.get_multi_day_report(days=days)
 
 @app.get("/api/learning/stats", response_model=LearningStatsOutput, tags=["Adaptive Learning"])
 def get_learning_stats():

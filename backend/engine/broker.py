@@ -7,8 +7,8 @@ import json
 import uuid
 import os
 from typing import Dict, List, Optional
-from datetime import datetime, timezone
-from .models import Position, TradeRecord, PortfolioSummary
+from datetime import datetime, timezone, timedelta
+from .models import Position, TradeRecord, PortfolioSummary, StockPerformanceSummary, MultiDayPerformanceReport
 from .learner import AdaptiveLearner
 
 class SimulatedBroker:
@@ -281,3 +281,79 @@ class SimulatedBroker:
                 self.learner.total_loss_usd = state.get("total_loss_usd", 0.0)
         except Exception:
             pass
+
+    def get_per_stock_summary(self, trades_list: Optional[List[TradeRecord]] = None) -> List[StockPerformanceSummary]:
+        """
+        Groups trades by individual stock symbol and calculates:
+        - Amount traded ($ volume)
+        - Total number of trades
+        - Hits (winning trades)
+        - Misses (losing trades)
+        - Hit Rate (%)
+        - Total P&L in dollars up/down ($)
+        - Total Return (%)
+        """
+        trades = trades_list if trades_list is not None else self.trade_ledger
+        by_symbol: Dict[str, List[TradeRecord]] = {}
+        for t in trades:
+            sym = t.symbol.upper()
+            if sym not in by_symbol:
+                by_symbol[sym] = []
+            by_symbol[sym].append(t)
+
+        summaries: List[StockPerformanceSummary] = []
+        for sym, s_trades in by_symbol.items():
+            amt_traded = sum(t.cost_basis_usd for t in s_trades)
+            total_tr = len(s_trades)
+            hits = sum(1 for t in s_trades if t.win)
+            misses = sum(1 for t in s_trades if not t.win)
+            hit_rate = (hits / total_tr * 100.0) if total_tr > 0 else 0.0
+            net_pnl = sum(t.realized_pnl_usd for t in s_trades)
+            net_pnl_pct = (net_pnl / amt_traded * 100.0) if amt_traded > 0 else 0.0
+            avg_pnl = net_pnl / total_tr if total_tr > 0 else 0.0
+
+            summaries.append(StockPerformanceSummary(
+                symbol=sym,
+                amount_traded_usd=round(amt_traded, 2),
+                total_trades=total_tr,
+                hits=hits,
+                misses=misses,
+                hit_rate_pct=round(hit_rate, 1),
+                net_pnl_usd=round(net_pnl, 2),
+                net_pnl_pct=round(net_pnl_pct, 2),
+                average_trade_pnl_usd=round(avg_pnl, 2)
+            ))
+
+        # Sort by net P&L descending (top performers first)
+        summaries.sort(key=lambda s: s.net_pnl_usd, reverse=True)
+        return summaries
+
+    def get_multi_day_report(self, days: int = 5) -> MultiDayPerformanceReport:
+        """
+        Aggregates performance over the last N working days per stock and in grand total.
+        """
+        now_utc = datetime.now(timezone.utc)
+        stock_summaries = self.get_per_stock_summary(self.trade_ledger)
+
+        # Calculate portfolio grand totals
+        total_vol = sum(s.amount_traded_usd for s in stock_summaries)
+        total_tr = sum(s.total_trades for s in stock_summaries)
+        total_hits = sum(s.hits for s in stock_summaries)
+        total_misses = sum(s.misses for s in stock_summaries)
+        overall_hit_rate = (total_hits / total_tr * 100.0) if total_tr > 0 else 0.0
+        total_net_pnl = sum(s.net_pnl_usd for s in stock_summaries)
+        total_net_pct = (total_net_pnl / total_vol * 100.0) if total_vol > 0 else 0.0
+
+        return MultiDayPerformanceReport(
+            period_title=f"Last {days} Working Days Cumulative Performance",
+            total_amount_traded_usd=round(total_vol, 2),
+            total_trades=total_tr,
+            total_hits=total_hits,
+            total_misses=total_misses,
+            overall_hit_rate_pct=round(overall_hit_rate, 1),
+            total_net_pnl_usd=round(total_net_pnl, 2),
+            total_net_pnl_pct=round(total_net_pct, 2),
+            stock_summaries=stock_summaries,
+            generated_at_uk=now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
+        )
+
