@@ -48,8 +48,18 @@ class SystemConfig(BaseModel):
         "MARA", "IREN", "SOXL", "TQQQ", "MSFT", "META", "APLD", "SPY", "QQQ", "BULL", "URA", "HOOD", "SOFI"
     ]
     
+    # Email Reporting (PDF Delivery to lisawalker6898@gmail.com)
+    report_recipient_email: str = os.getenv("REPORT_RECIPIENT_EMAIL", "lisawalker6898@gmail.com")
+    smtp_host: str = os.getenv("SMTP_HOST", "")
+    smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user: str = os.getenv("SMTP_USER", "")
+    smtp_pass: str = os.getenv("SMTP_PASS", "")
+    smtp_sender: str = os.getenv("SMTP_SENDER", "Autonomous Cockpit <reports@autonomous-trading-cockpit.com>")
+    auto_email_at_market_close: bool = os.getenv("AUTO_EMAIL_REPORTS", "true").lower() in ("true", "1", "yes")
+
     # Storage & Persistence
     db_path: str = str(DATA_DIR / "trading_state.json")
 
 config = SystemConfig()
+
 

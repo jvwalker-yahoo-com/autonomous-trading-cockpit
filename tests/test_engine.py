@@ -244,3 +244,30 @@ def test_backtest_api_endpoints():
     assert r.status_code == 200
     assert r.json()["status"] == "applied"
 
+def test_pdf_and_email_report_endpoints():
+    client = TestClient(app)
+
+    # 1. Test Daily PDF generation
+    r = client.get("/api/reports/pdf?report_type=daily")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert len(r.content) > 1000
+
+    # 2. Test 5-Day PDF generation
+    r = client.get("/api/reports/pdf?report_type=5day")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert len(r.content) > 1000
+
+    # 3. Test Email Dispatch endpoint to lisawalker6898@gmail.com
+    r = client.post("/api/reports/email", json={
+        "recipient": "lisawalker6898@gmail.com",
+        "report_type": "daily"
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "success"
+    assert data["recipient"] == "lisawalker6898@gmail.com"
+    assert "trading_report_daily_" in data["filename"]
+
+

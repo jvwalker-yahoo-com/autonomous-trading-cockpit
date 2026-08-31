@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from .config import config
@@ -27,6 +27,7 @@ from .engine.telemetry import TelemetryModule
 from .engine.learner import AdaptiveLearner
 from .engine.broker import SimulatedBroker
 from .engine.backtester import BacktesterEngine, BacktestResult, OptimizationResult
+from .engine.reporter import ReportPDFGenerator, EmailReportDispatcher
 from .engine.data_feed import BASE_PRICES
 from .engine.models import (
     RegimeState, FederationOutput, ArbitrationOutput,
@@ -391,6 +392,80 @@ def get_five_day_report(days: int = 5):
     summarized per individual stock and across the total portfolio.
     """
     return broker.get_multi_day_report(days=days)
+
+class EmailReportRequest(BaseModel):
+    recipient: Optional[str] = None
+    report_type: Optional[str] = "daily" # "daily" or "5day"
+
+@app.get("/api/reports/pdf", tags=["Audit & Reporting"])
+def download_pdf_report(report_type: str = "daily"):
+    """
+    Generates and returns an executive PDF performance audit report.
+    """
+    now_utc = datetime.now(timezone.utc)
+    date_str = now_utc.strftime("%Y-%m-%d")
+    is_5day = report_type.lower() in ("5day", "fiveday", "weekly")
+
+    if is_5day:
+        report_data = broker.get_multi_day_report(days=5).model_dump()
+        filename = f"trading_report_5day_{date_str}.pdf"
+    else:
+        report_data = get_daily_report()
+        filename = f"trading_report_daily_{date_str}.pdf"
+
+    pdf_bytes = ReportPDFGenerator.generate_pdf(report_data, is_five_day=is_5day)
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-cache, no-store, must-revalidate"
+        }
+    )
+
+@app.post("/api/reports/email", tags=["Audit & Reporting"])
+def email_pdf_report(req: EmailReportRequest):
+    """
+    Generates a PDF audit report and emails it to the recipient (e.g. lisawalker6898@gmail.com).
+    """
+    recipient = (req.recipient or config.report_recipient_email).strip()
+    if not recipient:
+        recipient = "lisawalker6898@gmail.com"
+
+    now_utc = datetime.now(timezone.utc)
+    date_str = now_utc.strftime("%Y-%m-%d")
+    is_5day = (req.report_type or "daily").lower() in ("5day", "fiveday", "weekly")
+
+    if is_5day:
+        report_data = broker.get_multi_day_report(days=5).model_dump()
+        filename = f"trading_report_5day_{date_str}.pdf"
+    else:
+        report_data = get_daily_report()
+        filename = f"trading_report_daily_{date_str}.pdf"
+
+    pdf_bytes = ReportPDFGenerator.generate_pdf(report_data, is_five_day=is_5day)
+
+    success, message = EmailReportDispatcher.send_report_email(
+        recipient_email=recipient,
+        pdf_bytes=pdf_bytes,
+        filename=filename,
+        report_data=report_data,
+        smtp_host=config.smtp_host,
+        smtp_port=config.smtp_port,
+        smtp_user=config.smtp_user,
+        smtp_pass=config.smtp_pass,
+        smtp_sender=config.smtp_sender,
+        is_five_day=is_5day
+    )
+
+    return {
+        "status": "success" if success else "error",
+        "recipient": recipient,
+        "filename": filename,
+        "message": message
+    }
+
 
 @app.get("/api/learning/stats", response_model=LearningStatsOutput, tags=["Adaptive Learning"])
 def get_learning_stats():

@@ -757,6 +757,52 @@ if (btnDownloadCsv) {
   });
 }
 
+// PDF Report Download Handler
+const btnDownloadPdf = document.getElementById("btnDownloadPdf");
+if (btnDownloadPdf) {
+  btnDownloadPdf.addEventListener("click", () => {
+    btnDownloadPdf.textContent = "⌛ GENERATING...";
+    const reportType = activeReportTab === "5day" ? "5day" : "daily";
+    window.location.href = `${BASE_URL}/api/reports/pdf?report_type=${reportType}`;
+    setTimeout(() => {
+      btnDownloadPdf.textContent = "📄 DOWNLOAD PDF";
+    }, 2000);
+  });
+}
+
+// Email PDF Report Handler (Default: lisawalker6898@gmail.com)
+const btnEmailReport = document.getElementById("btnEmailReport");
+if (btnEmailReport) {
+  btnEmailReport.addEventListener("click", async () => {
+    const defaultEmail = "lisawalker6898@gmail.com";
+    const userEmail = prompt("Send performance audit PDF report to:", defaultEmail);
+    if (!userEmail) return;
+
+    btnEmailReport.textContent = "⌛ SENDING...";
+    try {
+      const reportType = activeReportTab === "5day" ? "5day" : "daily";
+      const res = await fetch(`${BASE_URL}/api/reports/email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipient: userEmail.trim(),
+          report_type: reportType
+        })
+      });
+      const data = await res.json();
+      if (data.status === "success") {
+        alert(`✓ ${data.message}\n\nFile attached: ${data.filename}\nRecipient: ${data.recipient}`);
+      } else {
+        alert(`Notice: ${data.message}`);
+      }
+    } catch (e) {
+      alert("Email dispatch error: " + e.message);
+    } finally {
+      btnEmailReport.textContent = "📧 EMAIL COPY";
+    }
+  });
+}
+
 // ==========================================
 // QUANTITATIVE BACKTESTER & OPTIMIZER UI
 // ==========================================
