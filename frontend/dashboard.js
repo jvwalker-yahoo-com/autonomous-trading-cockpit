@@ -545,6 +545,179 @@ if (btnDownloadJson) {
   });
 }
 
+// ==========================================
+// QUANTITATIVE BACKTESTER & OPTIMIZER UI
+// ==========================================
+const btnBacktestModal = document.getElementById("btnBacktestModal");
+const backtestModal = document.getElementById("backtestModal");
+const btnCloseBacktestModal = document.getElementById("btnCloseBacktestModal");
+const btnCloseBtFooter = document.getElementById("btnCloseBtFooter");
+const btnRunBacktest = document.getElementById("btnRunBacktest");
+const btnAutoOptimize = document.getElementById("btnAutoOptimize");
+const btnApplyOptimal = document.getElementById("btnApplyOptimal");
+const btStatusMsg = document.getElementById("btStatusMsg");
+
+if (btnBacktestModal) {
+  btnBacktestModal.addEventListener("click", () => {
+    backtestModal.classList.remove("hidden");
+  });
+}
+
+[btnCloseBacktestModal, btnCloseBtFooter].forEach(btn => {
+  if (btn) {
+    btn.addEventListener("click", () => {
+      backtestModal.classList.add("hidden");
+    });
+  }
+});
+
+function renderBacktestResults(res) {
+  const pnlSign = res.net_pnl_usd >= 0 ? "+" : "";
+  const pnlEl = document.getElementById("btPnl");
+  pnlEl.textContent = `${pnlSign}$${res.net_pnl_usd.toFixed(2)} (${pnlSign}${res.net_pnl_pct.toFixed(2)}%)`;
+  pnlEl.className = `stat-number ${res.net_pnl_usd >= 0 ? 'color-success' : 'color-danger'}`;
+
+  document.getElementById("btWinRate").textContent = `${res.win_rate_pct.toFixed(1)}% (${res.winning_trades}W / ${res.losing_trades}L)`;
+  document.getElementById("btProfitFactor").textContent = res.profit_factor.toFixed(2);
+  document.getElementById("btMaxDd").textContent = `${res.max_drawdown_pct.toFixed(2)}%`;
+
+  const tbody = document.getElementById("btTradesBody");
+  if (res.trades && res.trades.length > 0) {
+    tbody.innerHTML = res.trades.map(t => {
+      const isLong = t.direction === "LONG";
+      const pnlColor = t.realized_pnl_usd >= 0 ? "color-success" : "color-danger";
+      const sign = t.realized_pnl_usd >= 0 ? "+" : "";
+      return `
+        <tr>
+          <td>${t.entry_time} → ${t.exit_time}</td>
+          <td><span class="badge ${isLong ? 'badge-ok' : 'badge-critical'}">${t.direction}</span></td>
+          <td>${t.shares.toFixed(4)}</td>
+          <td>$${t.entry_price.toFixed(2)}</td>
+          <td>$${t.exit_price.toFixed(2)}</td>
+          <td class="${pnlColor}"><strong>${sign}$${t.realized_pnl_usd.toFixed(2)} (${sign}${t.realized_pnl_pct.toFixed(2)}%)</strong></td>
+          <td><small>${t.rationale}</small></td>
+        </tr>
+      `;
+    }).join("");
+  } else {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">No trades triggered during backtest with current filters.</td></tr>`;
+  }
+}
+
+if (btnRunBacktest) {
+  btnRunBacktest.addEventListener("click", async () => {
+    const symbol = document.getElementById("btSymbolSelect").value;
+    const sl = parseFloat(document.getElementById("btStopLoss").value) / 100.0;
+    const tp = parseFloat(document.getElementById("btTakeProfit").value) / 100.0;
+    const adx = parseFloat(document.getElementById("btAdxFilter").value);
+
+    btnRunBacktest.textContent = "⌛ SIMULATING...";
+    btStatusMsg.textContent = "Running quantitative simulation...";
+    try {
+      const res = await fetch(`${BASE_URL}/api/backtest/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: symbol,
+          stop_loss_pct: sl,
+          take_profit_pct: tp,
+          adx_threshold: adx,
+          num_ticks: 160
+        })
+      });
+      if (!res.ok) throw new Error("Backtest simulation failed");
+      const data = await res.json();
+      renderBacktestResults(data);
+      btStatusMsg.textContent = `Simulation complete for ${symbol}.`;
+    } catch (e) {
+      alert("Error: " + e.message);
+      btStatusMsg.textContent = "Error running backtest.";
+    } finally {
+      btnRunBacktest.textContent = "▶ RUN BACKTEST";
+    }
+  });
+}
+
+if (btnAutoOptimize) {
+  btnAutoOptimize.addEventListener("click", async () => {
+    const symbol = document.getElementById("btSymbolSelect").value;
+    btnAutoOptimize.textContent = "⌛ OPTIMIZING GRID...";
+    btStatusMsg.textContent = `Testing 48 parameter combinations for ${symbol}...`;
+    try {
+      const res = await fetch(`${BASE_URL}/api/backtest/optimize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: symbol })
+      });
+      if (!res.ok) throw new Error("Optimization failed");
+      const data = await res.json();
+
+      // Show recommendation banner
+      document.getElementById("btRecBanner").classList.remove("hidden");
+      document.getElementById("btRecText").textContent = data.recommendation_summary;
+
+      // Populate input boxes with optimal values
+      const opt = data.optimal_candidate;
+      document.getElementById("btStopLoss").value = (opt.stop_loss_pct * 100.0).toFixed(1);
+      document.getElementById("btTakeProfit").value = (opt.take_profit_pct * 100.0).toFixed(1);
+      document.getElementById("btAdxFilter").value = opt.adx_threshold.toFixed(0);
+
+      // Render top candidates table
+      document.getElementById("btOptSection").classList.remove("hidden");
+      const cBody = document.getElementById("btOptCandidatesBody");
+      cBody.innerHTML = data.top_candidates.map(c => `
+        <tr style="${c.rank === 1 ? 'background: rgba(0,255,136,0.08); font-weight: bold;' : ''}">
+          <td><span class="badge ${c.rank === 1 ? 'badge-ok' : 'badge-normal'}">#${c.rank}</span></td>
+          <td>${(c.stop_loss_pct * 100).toFixed(1)}%</td>
+          <td>${(c.take_profit_pct * 100).toFixed(1)}%</td>
+          <td>ADX ≥ ${c.adx_threshold.toFixed(0)}</td>
+          <td>${c.win_rate_pct.toFixed(1)}%</td>
+          <td>${c.profit_factor.toFixed(2)}</td>
+          <td>${c.max_drawdown_pct.toFixed(2)}%</td>
+          <td class="${c.net_pnl_pct >= 0 ? 'color-success' : 'color-danger'}">+${c.net_pnl_pct.toFixed(2)}%</td>
+        </tr>
+      `).join("");
+
+      // Trigger a run with the optimal values to show the trade ledger
+      btnRunBacktest.click();
+      btStatusMsg.textContent = `✓ Grid optimization complete! Optimal parameters loaded.`;
+    } catch (e) {
+      alert("Error: " + e.message);
+      btStatusMsg.textContent = "Optimization failed.";
+    } finally {
+      btnAutoOptimize.textContent = "✨ AUTO-OPTIMIZE (GRID SEARCH)";
+    }
+  });
+}
+
+if (btnApplyOptimal) {
+  btnApplyOptimal.addEventListener("click", async () => {
+    const symbol = document.getElementById("btSymbolSelect").value;
+    const sl = parseFloat(document.getElementById("btStopLoss").value) / 100.0;
+    const tp = parseFloat(document.getElementById("btTakeProfit").value) / 100.0;
+    const adx = parseFloat(document.getElementById("btAdxFilter").value);
+
+    try {
+      const res = await fetch(`${BASE_URL}/api/backtest/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: symbol,
+          stop_loss_pct: sl,
+          take_profit_pct: tp,
+          adx_threshold: adx
+        })
+      });
+      if (!res.ok) throw new Error("Failed to apply parameters");
+      const d = await res.json();
+      btStatusMsg.textContent = `🚀 Applied: SL ${(sl*100).toFixed(1)}% / TP ${(tp*100).toFixed(1)}% / ADX ≥ ${adx} active!`;
+      alert(d.message);
+    } catch (e) {
+      alert("Error applying settings: " + e.message);
+    }
+  });
+}
+
 // Initialization & Loop
 fetchCockpitData();
 pollTimer = setInterval(fetchCockpitData, 1500);

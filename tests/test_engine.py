@@ -182,3 +182,65 @@ def test_all_api_endpoints():
     r = client.post("/api/portfolio/reset")
     assert r.status_code == 200
     assert r.json()["cash"] == 10000.0
+
+def test_backtester_and_optimizer():
+    from backend.engine.backtester import BacktesterEngine
+    bt = BacktesterEngine()
+
+    # 1. Run backtest simulation
+    res = bt.run_backtest(
+        symbol="SOXL",
+        initial_capital=10000.0,
+        stop_loss_pct=0.03,
+        take_profit_pct=0.06,
+        adx_threshold=20.0,
+        num_ticks=100
+    )
+    assert res.symbol == "SOXL"
+    assert res.starting_capital == 10000.0
+    assert res.ending_equity > 0
+    assert isinstance(res.trades, list)
+
+    # 2. Run parameter optimizer
+    opt = bt.optimize_parameters(symbol="SOXL", initial_capital=10000.0)
+    assert opt.symbol == "SOXL"
+    assert opt.total_combinations_tested == 48
+    assert opt.optimal_candidate is not None
+    assert opt.optimal_candidate.rank == 1
+    assert len(opt.top_candidates) == 5
+    assert "Optimal configuration for SOXL" in opt.recommendation_summary
+
+def test_backtest_api_endpoints():
+    client = TestClient(app)
+
+    # Test backtest run endpoint
+    r = client.post("/api/backtest/run", json={
+        "symbol": "TQQQ",
+        "stop_loss_pct": 0.025,
+        "take_profit_pct": 0.050,
+        "adx_threshold": 20.0,
+        "num_ticks": 80
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["symbol"] == "TQQQ"
+    assert "ending_equity" in data
+    assert "win_rate_pct" in data
+
+    # Test backtest optimize endpoint
+    r = client.post("/api/backtest/optimize", json={"symbol": "MARA"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["symbol"] == "MARA"
+    assert "optimal_candidate" in data
+
+    # Test backtest apply endpoint
+    r = client.post("/api/backtest/apply", json={
+        "symbol": "MARA",
+        "stop_loss_pct": 0.035,
+        "take_profit_pct": 0.075,
+        "adx_threshold": 22.0
+    })
+    assert r.status_code == 200
+    assert r.json()["status"] == "applied"
+

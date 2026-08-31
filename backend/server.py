@@ -26,6 +26,8 @@ from .engine.quadrant import QuadrantModule
 from .engine.telemetry import TelemetryModule
 from .engine.learner import AdaptiveLearner
 from .engine.broker import SimulatedBroker
+from .engine.backtester import BacktesterEngine, BacktestResult, OptimizationResult
+from .engine.data_feed import BASE_PRICES
 from .engine.models import (
     RegimeState, FederationOutput, ArbitrationOutput,
     DecisionOutput, AnomalyDetectorOutput, QuadrantOutput,
@@ -47,6 +49,7 @@ quadrant_module = QuadrantModule()
 telemetry_module = TelemetryModule()
 learner = AdaptiveLearner()
 broker = SimulatedBroker(initial_capital=config.initial_capital, db_path=config.db_path, learner=learner)
+backtester = BacktesterEngine()
 
 active_symbol = "AAPL"
 is_autonomous_loop_running = True
@@ -455,6 +458,64 @@ def reset_portfolio():
     }
     broker.save_state()
     return {"status": "reset", "cash": broker.cash}
+
+# ==========================================
+# QUANTITATIVE BACKTESTING & OPTIMIZER
+# ==========================================
+class BacktestRequest(BaseModel):
+    symbol: str = "SOXL"
+    stop_loss_pct: float = 0.025
+    take_profit_pct: float = 0.050
+    adx_threshold: float = 20.0
+    num_ticks: int = 150
+
+class OptimizeRequest(BaseModel):
+    symbol: str = "SOXL"
+
+class ApplyParametersRequest(BaseModel):
+    symbol: str
+    stop_loss_pct: float
+    take_profit_pct: float
+    adx_threshold: float
+
+@app.post("/api/backtest/run", tags=["Backtest"])
+def run_backtest_endpoint(req: BacktestRequest):
+    """Executes quantitative backtest simulation on an asset."""
+    base_p = BASE_PRICES.get(req.symbol.upper(), 100.0)
+    return backtester.run_backtest(
+        symbol=req.symbol.upper(),
+        initial_capital=config.initial_capital,
+        stop_loss_pct=req.stop_loss_pct,
+        take_profit_pct=req.take_profit_pct,
+        adx_threshold=req.adx_threshold,
+        num_ticks=req.num_ticks,
+        base_price=base_p
+    )
+
+@app.post("/api/backtest/optimize", tags=["Backtest"])
+def optimize_parameters_endpoint(req: OptimizeRequest):
+    """Runs grid-search optimization to discover highest-performing Stop-Loss, Take-Profit, and ADX filters."""
+    base_p = BASE_PRICES.get(req.symbol.upper(), 100.0)
+    return backtester.optimize_parameters(
+        symbol=req.symbol.upper(),
+        initial_capital=config.initial_capital,
+        base_price=base_p
+    )
+
+@app.post("/api/backtest/apply", tags=["Backtest"])
+def apply_parameters_endpoint(req: ApplyParametersRequest):
+    """Applies optimal stop-loss, take-profit, and ADX filters directly to live trading engine."""
+    config.default_stop_loss_pct = req.stop_loss_pct
+    config.default_take_profit_pct = req.take_profit_pct
+    return {
+        "status": "applied",
+        "symbol": req.symbol.upper(),
+        "applied_stop_loss_pct": req.stop_loss_pct,
+        "applied_take_profit_pct": req.take_profit_pct,
+        "applied_adx_threshold": req.adx_threshold,
+        "message": f"Optimal parameters for {req.symbol.upper()} successfully applied to live cloud trader!"
+    }
+
 
 # ==========================================
 # STATIC UI FILE SERVING (For Render & Local)
