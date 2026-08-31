@@ -16,15 +16,22 @@ class ArbitrationModule:
         current_exposure_pct: float,
         max_exposure_limit_pct: float,
         active_positions_count: int,
-        max_concurrent_positions: int = 5
+        max_concurrent_positions: int = 5,
+        market_open: bool = True,
+        enforce_market_hours: bool = True
     ) -> ArbitrationOutput:
         """
-        Arbitrates final execution mode and trade clearance based on risk gates.
+        Arbitrates final execution mode and trade clearance based on risk gates and market hours.
         """
         reasons = []
         approved = True
         circuit_breaker = False
         final_mode = main_mode
+
+        # 0. Market Hours Gate (eToro UK: 14:30 - 21:00 UK Time)
+        if enforce_market_hours and not market_open:
+            approved = False
+            reasons.append("Outside eToro UK US-market trading hours (14:30 - 21:00 UK / Mon-Fri)")
 
         # 1. Max Drawdown Circuit Breaker
         if current_drawdown_pct >= max_drawdown_limit_pct:

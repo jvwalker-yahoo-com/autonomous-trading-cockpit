@@ -150,6 +150,17 @@ function renderCockpit(data) {
   el.pillRegime.textContent = state.mode;
   el.pillRegime.className = `pill-val mode-badge-${state.mode.toLowerCase()}`;
 
+  const pillMarketHours = document.getElementById("pillMarketHours");
+  if (pillMarketHours && sync_drift) {
+    if (sync_drift.market_open) {
+      pillMarketHours.textContent = "OPEN (14:30-21:00 UK)";
+      pillMarketHours.className = "pill-val mode-badge-ok";
+    } else {
+      pillMarketHours.textContent = "CLOSED (14:30 UK)";
+      pillMarketHours.className = "pill-val mode-badge-warn";
+    }
+  }
+
   // 2. Summary Stats Strip
   if (portfolio) {
     el.statEquity.textContent = `$${portfolio.equity.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
@@ -221,10 +232,13 @@ function renderCockpit(data) {
   el.arbitrationApprovedBadge.textContent = arbitration.approved ? "APPROVED" : "RESTRICTED";
   el.arbitrationApprovedBadge.className = `badge ${arbitration.approved ? "badge-ok" : "badge-critical"}`;
   
+  const gateMarketHours = document.getElementById("gateMarketHours");
+  if (gateMarketHours && sync_drift) {
+    updateGateItem(gateMarketHours, sync_drift.market_open, "eToro Hours (14:30 - 21:00 UK)");
+  }
   updateGateItem(el.gateDrawdown, arbitration.drawdown_ok, "Drawdown Gate (< 15%)");
   updateGateItem(el.gateExposure, arbitration.exposure_ok, "Exposure Gate (< 75%)");
   updateGateItem(el.gateAnomaly, arbitration.risk_gate_passed, "Anomaly / Risk Gate");
-  updateGateItem(el.gateCircuit, !arbitration.circuit_breaker_active, "Circuit Breaker Normal");
 
   el.arbitrationReasonsList.innerHTML = arbitration.reasons.map(r => `<li>• ${r}</li>`).join("");
 

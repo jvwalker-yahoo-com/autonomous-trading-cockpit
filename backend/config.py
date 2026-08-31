@@ -36,6 +36,13 @@ class SystemConfig(BaseModel):
     slippage_bps: float = float(os.getenv("SIM_SLIPPAGE_BPS", "5.0")) # 5 bps simulated slippage
     spread_pct: float = float(os.getenv("SIM_SPREAD_PCT", "0.0005")) # 0.05% eToro spread simulation
     
+    # eToro UK Trading Hours Restriction (14:30 to 21:00 UK Time / 09:30 - 16:00 US EST, Monday - Friday)
+    enforce_market_hours: bool = os.getenv("ENFORCE_MARKET_HOURS", "true").lower() in ("true", "1", "yes")
+    market_open_hour_utc: int = 13 # 13:30 UTC = 14:30 UK BST (09:30 US EST)
+    market_open_minute_utc: int = 30
+    market_close_hour_utc: int = 20 # 20:00 UTC = 21:00 UK BST (16:00 US EST)
+    market_close_minute_utc: int = 0
+    
     # Target Watchlist (High Beta Equities, Leveraged ETFs & Mega-caps)
     watchlist: List[str] = [
         "MARA", "IREN", "SOXL", "TQQQ", "MSFT", "META", "APLD", "SPY", "QQQ", "BULL", "URA", "HOOD", "SOFI"
@@ -45,3 +52,4 @@ class SystemConfig(BaseModel):
     db_path: str = str(DATA_DIR / "trading_state.json")
 
 config = SystemConfig()
+

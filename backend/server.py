@@ -128,12 +128,13 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     # 7. Model Federation (Multi-Strategy Scoring + Adaptive Weights)
     federation = federation_module.model_federation(indicators, quote.price, sentiment, learner.weights)
 
-    # 8. Arbitration & Risk Gates
+    # 8. Arbitration & Risk Gates (including eToro UK Market Hours gate)
     equity = broker.get_equity()
     peak = max(broker.peak_equity, equity)
     drawdown_pct = (peak - equity) / max(1.0, peak)
     total_invested = sum(p.market_value_usd for p in broker.positions.values())
     exposure_pct = total_invested / max(1.0, equity)
+    sync = telemetry_module.sync_drift()
     
     arbitration = arbitration_module.arbitration(
         main_mode=regime.mode,
@@ -143,7 +144,9 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
         max_drawdown_limit_pct=config.max_drawdown_limit_pct,
         current_exposure_pct=exposure_pct,
         max_exposure_limit_pct=config.max_portfolio_exposure_pct,
-        active_positions_count=len(broker.positions)
+        active_positions_count=len(broker.positions),
+        market_open=sync.market_open,
+        enforce_market_hours=config.enforce_market_hours
     )
 
     # 9. Decision Engine & Autonomous Execution

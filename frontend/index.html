@@ -51,6 +51,10 @@
     <!-- Telemetry Badges & Quick Controls -->
     <div class="telemetry-toolbar">
       <div class="telemetry-pill">
+        <span class="pill-label">eToro UK HOURS</span>
+        <span class="pill-val mode-badge-ok" id="pillMarketHours">14:30 - 21:00 UK</span>
+      </div>
+      <div class="telemetry-pill">
         <span class="pill-label">SYNC DRIFT</span>
         <span class="pill-val status-ok" id="pillSyncDrift">0ms</span>
       </div>
@@ -233,7 +237,11 @@
         <span class="badge" id="arbitrationApprovedBadge">APPROVED</span>
       </div>
       <div class="panel-body">
-        <div class="gate-status-grid">
+        <div class="gate-status-grid" style="grid-template-columns: repeat(2, 1fr);">
+          <div class="gate-item" id="gateMarketHours">
+            <span class="gate-icon">✓</span>
+            <span class="gate-name">eToro Hours (14:30 - 21:00 UK)</span>
+          </div>
           <div class="gate-item" id="gateDrawdown">
             <span class="gate-icon">✓</span>
             <span class="gate-name">Drawdown Gate (< 15%)</span>
@@ -245,10 +253,6 @@
           <div class="gate-item" id="gateAnomaly">
             <span class="gate-icon">✓</span>
             <span class="gate-name">Anomaly Gate (Normal)</span>
-          </div>
-          <div class="gate-item" id="gateCircuit">
-            <span class="gate-icon">✓</span>
-            <span class="gate-name">Circuit Breaker (Armed)</span>
           </div>
         </div>
 
