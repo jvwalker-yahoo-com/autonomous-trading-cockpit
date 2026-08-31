@@ -134,7 +134,7 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     drawdown_pct = (peak - equity) / max(1.0, peak)
     total_invested = sum(p.market_value_usd for p in broker.positions.values())
     exposure_pct = total_invested / max(1.0, equity)
-    sync = telemetry_module.sync_drift()
+    market_open, session_msg = telemetry_module.is_etoro_uk_market_open(symbol)
     
     arbitration = arbitration_module.arbitration(
         main_mode=regime.mode,
@@ -145,7 +145,7 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
         current_exposure_pct=exposure_pct,
         max_exposure_limit_pct=config.max_portfolio_exposure_pct,
         active_positions_count=len(broker.positions),
-        market_open=sync.market_open,
+        market_open=market_open,
         enforce_market_hours=config.enforce_market_hours
     )
 
