@@ -540,9 +540,9 @@ class WatchlistPresetRequest(BaseModel):
     preset_key: str
 
 @app.get("/api/screener/scan", tags=["Market Screener"])
-def scan_market(top_n: int = 30):
-    """Scans all 100+ stocks in universe and returns ranked high-probability opportunities."""
-    return MarketScreener.scan_universe(data_feed, top_n=top_n)
+def scan_market(category: Optional[str] = None, top_n: int = 35):
+    """Scans all multi-asset instruments across Crypto, Commodities, Indices, ETFs, and Equities."""
+    return MarketScreener.scan_universe(data_feed, category_filter=category, top_n=top_n)
 
 @app.get("/api/screener/universe", tags=["Market Screener"])
 def get_market_universe():

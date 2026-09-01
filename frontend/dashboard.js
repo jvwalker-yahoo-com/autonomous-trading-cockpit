@@ -1053,17 +1053,24 @@ async function updateWatchlistUI() {
   }
 }
 
-async function loadScreenerScan() {
+let currentScreenerCategory = "all";
+
+async function loadScreenerScan(category = "all") {
+  currentScreenerCategory = category;
   if (!screenerTableBody) return;
-  screenerTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted">⌛ Scanning 100+ stock universe in real-time...</td></tr>`;
+  screenerTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted">⌛ Scanning multi-asset universe (${category}) in real-time...</td></tr>`;
 
   try {
-    const res = await fetch(`${BASE_URL}/api/screener/scan?top_n=35`);
+    const url = category === "all"
+      ? `${BASE_URL}/api/screener/scan?top_n=40`
+      : `${BASE_URL}/api/screener/scan?category=${encodeURIComponent(category)}&top_n=40`;
+
+    const res = await fetch(url);
     if (!res.ok) throw new Error("Screener failed");
     const screened = await res.json();
 
     if (screened.length === 0) {
-      screenerTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted">No opportunities found.</td></tr>`;
+      screenerTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted">No opportunities found for category: ${category}.</td></tr>`;
       return;
     }
 
@@ -1081,8 +1088,11 @@ async function loadScreenerScan() {
             <strong>${s.symbol}</strong>
             <span style="display: block; font-size: 10px; color: var(--text-muted);">${s.name}</span>
           </td>
-          <td><span class="badge badge-normal" style="font-size: 10px;">${s.category}</span></td>
-          <td><strong>$${s.price.toFixed(2)}</strong></td>
+          <td>
+            <span class="badge badge-normal" style="font-size: 10px;">${s.asset_class || s.category}</span>
+            <span style="display: block; font-size: 9px; color: var(--text-muted); margin-top: 2px;">${s.trading_hours || ''}</span>
+          </td>
+          <td><strong>$${s.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong></td>
           <td class="${chgColor}">${chgSign}${s.change_pct.toFixed(2)}%</td>
           <td><span class="badge ${s.adx >= 25 ? 'badge-ok' : 'badge-normal'}">${s.adx}</span></td>
           <td><span class="badge ${isBull ? 'badge-ok' : 'badge-critical'}">${s.supertrend}</span></td>
@@ -1154,8 +1164,22 @@ if (btnCloseScreenerFooter) {
   btnCloseScreenerFooter.addEventListener("click", () => screenerModal.classList.add("hidden"));
 }
 if (btnRefreshScreener) {
-  btnRefreshScreener.addEventListener("click", () => loadScreenerScan());
+  btnRefreshScreener.addEventListener("click", () => loadScreenerScan(currentScreenerCategory));
 }
+
+// Category Tab Switching (All, Crypto, Commodities, Indices, ETFs, Equities)
+document.querySelectorAll(".btn-cat-tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".btn-cat-tab").forEach(t => {
+      t.classList.remove("active", "btn-primary");
+      t.classList.add("btn-secondary");
+    });
+    tab.classList.remove("btn-secondary");
+    tab.classList.add("active", "btn-primary");
+    const cat = tab.getAttribute("data-cat");
+    loadScreenerScan(cat);
+  });
+});
 
 if (btnAddCustomTicker && inputCustomTicker) {
   const handleAddTicker = async () => {

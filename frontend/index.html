@@ -707,21 +707,23 @@
       </div>
       <div class="modal-body" style="overflow-y: auto; gap: 14px;">
         
-        <!-- Quick Add Any Stock Bar -->
+        <!-- Quick Add Any Stock / Asset Bar -->
         <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
           <div style="flex: 1; min-width: 250px;">
-            <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 4px;">ADD ANY STOCK / ETF TICKER TO BOT:</label>
+            <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 4px;">ADD ANY CRYPTO / COMMODITY / INDEX / ETF / STOCK TICKER:</label>
             <div style="display: flex; gap: 8px;">
-              <input type="text" id="inputCustomTicker" class="cyber-input" placeholder="e.g. TSLA, PLTR, COIN, SMCI, AMD, BABA..." style="flex: 1; text-transform: uppercase;">
+              <input type="text" id="inputCustomTicker" class="cyber-input" placeholder="e.g. BTC, ETH, GOLD, OIL, SPX500, TSLA, PLTR, QQQ..." style="flex: 1; text-transform: uppercase;">
               <button id="btnAddCustomTicker" class="btn btn-primary" style="font-weight: bold;">➕ ADD TO BOT</button>
             </div>
           </div>
           <div style="border-left: 1px solid var(--border-color); padding-left: 10px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
-            <span style="font-size: 10px; color: var(--text-muted); width: 100%;">1-CLICK PRESET WATCHLISTS:</span>
-            <button class="btn btn-secondary btn-preset-wl" data-preset="crypto_high_beta" style="font-size: 11px;">🚀 Crypto Runners</button>
+            <span style="font-size: 10px; color: var(--text-muted); width: 100%;">1-CLICK MULTI-ASSET PRESETS:</span>
+            <button class="btn btn-secondary btn-preset-wl" data-preset="crypto_top_coins" style="font-size: 11px;">🪙 Top Crypto (24/7)</button>
+            <button class="btn btn-secondary btn-preset-wl" data-preset="commodities_metals_energy" style="font-size: 11px;">🛢️ Commodities</button>
+            <button class="btn btn-secondary btn-preset-wl" data-preset="global_indices" style="font-size: 11px;">📈 Global Indices</button>
+            <button class="btn btn-secondary btn-preset-wl" data-preset="top_etfs" style="font-size: 11px;">🌐 Top ETFs</button>
             <button class="btn btn-secondary btn-preset-wl" data-preset="ai_tech_titans" style="font-size: 11px;">⚡ AI Tech Titans</button>
-            <button class="btn btn-secondary btn-preset-wl" data-preset="leveraged_etfs" style="font-size: 11px;">🌐 Leveraged ETFs</button>
-            <button class="btn btn-secondary btn-preset-wl" data-preset="all_top_50" style="font-size: 11px;">🌍 Top 50 Universe</button>
+            <button class="btn btn-primary btn-preset-wl" data-preset="multi_asset_macro" style="font-size: 11px; background: linear-gradient(135deg, #8b5cf6, #6d28d9);">🌍 Multi-Asset Macro (30)</button>
             <button class="btn btn-outline btn-preset-wl" data-preset="custom_13" style="font-size: 11px;">🎯 Default 13</button>
           </div>
         </div>
@@ -729,7 +731,7 @@
         <!-- Active Bot Watchlist Pills -->
         <div style="background: rgba(0, 255, 136, 0.03); border: 1px solid rgba(0, 255, 136, 0.2); border-radius: 6px; padding: 10px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <span style="font-size: 11px; font-weight: bold; color: var(--accent-green);">🤖 ACTIVE AUTONOMOUS BOT WATCHLIST (<span id="activeWlCount">13</span> Assets Active):</span>
+            <span style="font-size: 11px; font-weight: bold; color: var(--accent-green);">🤖 ACTIVE AUTONOMOUS BOT WATCHLIST (<span id="activeWlCount">13</span> Instruments Scanning):</span>
             <button id="btnAutoAddTopScreened" class="btn btn-primary" style="font-size: 10px; padding: 4px 8px;">✨ AUTO-POPULATE TOP SCREENED</button>
           </div>
           <div id="activeWatchlistPills" style="display: flex; flex-wrap: wrap; gap: 6px; max-height: 80px; overflow-y: auto;">
@@ -737,30 +739,37 @@
           </div>
         </div>
 
-        <!-- Live Quantitative Screener Table -->
+        <!-- Category Filter Tabs & Live Screener Table -->
         <div>
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <span class="audit-heading">📈 REAL-TIME QUANTITATIVE MOMENTUM & BREAKOUT SCREENER:</span>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;" id="screenerCategoryTabs">
+              <button class="btn btn-primary btn-cat-tab active" data-cat="all" style="font-size: 11px; padding: 4px 10px;">🌟 All Multi-Assets</button>
+              <button class="btn btn-secondary btn-cat-tab" data-cat="Crypto" style="font-size: 11px; padding: 4px 10px;">🪙 Crypto (24/7)</button>
+              <button class="btn btn-secondary btn-cat-tab" data-cat="Commodities" style="font-size: 11px; padding: 4px 10px;">🛢️ Commodities</button>
+              <button class="btn btn-secondary btn-cat-tab" data-cat="Indices" style="font-size: 11px; padding: 4px 10px;">📈 Indices</button>
+              <button class="btn btn-secondary btn-cat-tab" data-cat="ETFs" style="font-size: 11px; padding: 4px 10px;">🌐 ETFs</button>
+              <button class="btn btn-secondary btn-cat-tab" data-cat="AI & Tech Titans" style="font-size: 11px; padding: 4px 10px;">⚡ Equities</button>
+            </div>
             <button id="btnRefreshScreener" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;">🔄 REFRESH SCAN</button>
           </div>
           <div class="table-responsive" style="max-height: 320px; overflow-y: auto;">
             <table class="cyber-table">
               <thead>
                 <tr>
-                  <th>TICKER / NAME</th>
-                  <th>CATEGORY</th>
+                  <th>INSTRUMENT / ASSET</th>
+                  <th>CLASS / HOURS</th>
                   <th>PRICE ($)</th>
                   <th>24H CHG (%)</th>
                   <th>ADX (TREND)</th>
                   <th>SUPERTREND</th>
                   <th>RSI</th>
                   <th>SIGNAL</th>
-                  <th>OPPORTUNITY SCORE</th>
+                  <th>SCORE</th>
                   <th>ACTION</th>
                 </tr>
               </thead>
               <tbody id="screenerTableBody">
-                <tr><td colspan="10" class="text-center text-muted">Scanning 100+ stock universe...</td></tr>
+                <tr><td colspan="10" class="text-center text-muted">Scanning multi-asset universe...</td></tr>
               </tbody>
             </table>
           </div>
@@ -768,7 +777,7 @@
 
       </div>
       <div class="modal-footer" style="justify-content: space-between;">
-        <span id="screenerStatusMsg" class="text-muted" style="font-size: 11px;">Universe: 100+ verified eToro equities & ETFs loaded.</span>
+        <span id="screenerStatusMsg" class="text-muted" style="font-size: 11px;">Universe: 100+ verified multi-asset eToro instruments loaded (Crypto, Commodities, Indices, ETFs, Stocks).</span>
         <button id="btnCloseScreenerFooter" class="btn btn-secondary">CLOSE</button>
       </div>
     </div>
