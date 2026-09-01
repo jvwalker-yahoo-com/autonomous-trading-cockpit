@@ -976,6 +976,258 @@ if (btnApplyOptimal) {
   });
 }
 
+// ==========================================
+// UNIVERSAL MARKET SCREENER & WATCHLIST UI
+// ==========================================
+const btnScreenerModal = document.getElementById("btnScreenerModal");
+const screenerModal = document.getElementById("screenerModal");
+const btnCloseScreenerModal = document.getElementById("btnCloseScreenerModal");
+const btnCloseScreenerFooter = document.getElementById("btnCloseScreenerFooter");
+const btnAddCustomTicker = document.getElementById("btnAddCustomTicker");
+const inputCustomTicker = document.getElementById("inputCustomTicker");
+const activeWatchlistPills = document.getElementById("activeWatchlistPills");
+const activeWlCount = document.getElementById("activeWlCount");
+const screenerTableBody = document.getElementById("screenerTableBody");
+const btnRefreshScreener = document.getElementById("btnRefreshScreener");
+const btnAutoAddTopScreened = document.getElementById("btnAutoAddTopScreened");
+const screenerStatusMsg = document.getElementById("screenerStatusMsg");
+
+async function updateWatchlistUI() {
+  try {
+    const res = await fetch(`${BASE_URL}/api/watchlist`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const list = data.active_watchlist || [];
+    
+    if (activeWlCount) activeWlCount.textContent = list.length;
+    
+    // Update active pills
+    if (activeWatchlistPills) {
+      activeWatchlistPills.innerHTML = list.map(sym => `
+        <span style="display: inline-flex; align-items: center; background: rgba(0, 255, 136, 0.12); border: 1px solid var(--accent-green); color: var(--accent-green); border-radius: 4px; padding: 2px 6px; font-size: 11px; font-weight: bold;">
+          <a href="#" class="wl-pill-select" data-sym="${sym}" style="color: var(--accent-green); text-decoration: none; margin-right: 6px;">${sym}</a>
+          <button class="btn-remove-sym" data-sym="${sym}" style="background: none; border: none; color: #f43f5e; cursor: pointer; padding: 0; font-size: 11px; line-height: 1;" title="Remove ${sym}">&times;</button>
+        </span>
+      `).join("");
+
+      // Add click to select
+      document.querySelectorAll(".wl-pill-select").forEach(el => {
+        el.addEventListener("click", (e) => {
+          e.preventDefault();
+          const sym = el.getAttribute("data-sym");
+          if (assetSelect) {
+            assetSelect.value = sym;
+            currentSymbol = sym;
+            fetchCockpitData();
+          }
+        });
+      });
+
+      // Add remove handler
+      document.querySelectorAll(".btn-remove-sym").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const sym = btn.getAttribute("data-sym");
+          await fetch(`${BASE_URL}/api/watchlist/remove`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ symbol: sym })
+          });
+          updateWatchlistUI();
+        });
+      });
+    }
+
+    // Update Header Asset Dropdown with all active watchlist items
+    if (assetSelect) {
+      const cur = currentSymbol;
+      assetSelect.innerHTML = list.map(s => `<option value="${s}">${s}</option>`).join("");
+      if (list.includes(cur)) {
+        assetSelect.value = cur;
+      } else if (list.length > 0) {
+        assetSelect.value = list[0];
+        currentSymbol = list[0];
+      }
+    }
+  } catch (e) {
+    console.error("Watchlist fetch error:", e);
+  }
+}
+
+async function loadScreenerScan() {
+  if (!screenerTableBody) return;
+  screenerTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted">⌛ Scanning 100+ stock universe in real-time...</td></tr>`;
+
+  try {
+    const res = await fetch(`${BASE_URL}/api/screener/scan?top_n=35`);
+    if (!res.ok) throw new Error("Screener failed");
+    const screened = await res.json();
+
+    if (screened.length === 0) {
+      screenerTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted">No opportunities found.</td></tr>`;
+      return;
+    }
+
+    screenerTableBody.innerHTML = screened.map((s, idx) => {
+      const chgColor = s.change_pct >= 0 ? "color-success" : "color-danger";
+      const chgSign = s.change_pct >= 0 ? "+" : "";
+      const isBull = s.supertrend === "BULLISH";
+      const isBuy = s.signal.startsWith("BUY");
+      const sigBadge = isBuy ? "badge-ok" : "badge-critical";
+      const scoreColor = s.opportunity_score >= 80 ? "color-success" : (s.opportunity_score >= 65 ? "var(--accent-cyan)" : "var(--text-color)");
+
+      return `
+        <tr>
+          <td>
+            <strong>${s.symbol}</strong>
+            <span style="display: block; font-size: 10px; color: var(--text-muted);">${s.name}</span>
+          </td>
+          <td><span class="badge badge-normal" style="font-size: 10px;">${s.category}</span></td>
+          <td><strong>$${s.price.toFixed(2)}</strong></td>
+          <td class="${chgColor}">${chgSign}${s.change_pct.toFixed(2)}%</td>
+          <td><span class="badge ${s.adx >= 25 ? 'badge-ok' : 'badge-normal'}">${s.adx}</span></td>
+          <td><span class="badge ${isBull ? 'badge-ok' : 'badge-critical'}">${s.supertrend}</span></td>
+          <td>${s.rsi}</td>
+          <td><span class="badge ${sigBadge}">${s.signal}</span></td>
+          <td><strong style="color: ${scoreColor}; font-size: 13px;">${s.opportunity_score}</strong>/100</td>
+          <td>
+            <div style="display: flex; gap: 4px;">
+              <button class="btn btn-outline btn-screener-select" data-sym="${s.symbol}" style="font-size: 10px; padding: 2px 6px;" title="View in Cockpit">⚡ VIEW</button>
+              <button class="btn btn-primary btn-screener-add" data-sym="${s.symbol}" style="font-size: 10px; padding: 2px 6px;" title="Add to Automated Bot">➕ ADD</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("");
+
+    // Hook buttons
+    document.querySelectorAll(".btn-screener-select").forEach(b => {
+      b.addEventListener("click", () => {
+        const sym = b.getAttribute("data-sym");
+        currentSymbol = sym;
+        if (assetSelect) {
+          if (!Array.from(assetSelect.options).some(o => o.value === sym)) {
+            const opt = document.createElement("option");
+            opt.value = sym;
+            opt.textContent = sym;
+            assetSelect.appendChild(opt);
+          }
+          assetSelect.value = sym;
+        }
+        screenerModal.classList.add("hidden");
+        fetchCockpitData();
+      });
+    });
+
+    document.querySelectorAll(".btn-screener-add").forEach(b => {
+      b.addEventListener("click", async () => {
+        const sym = b.getAttribute("data-sym");
+        b.textContent = "✓ ADDED";
+        await fetch(`${BASE_URL}/api/watchlist/add`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbol: sym })
+        });
+        updateWatchlistUI();
+      });
+    });
+
+    if (screenerStatusMsg) {
+      screenerStatusMsg.textContent = `✓ Top ${screened.length} ranked opportunities updated at ${new Date().toLocaleTimeString()}.`;
+    }
+  } catch (e) {
+    screenerTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted">Error loading scan: ${e.message}</td></tr>`;
+  }
+}
+
+if (btnScreenerModal) {
+  btnScreenerModal.addEventListener("click", () => {
+    screenerModal.classList.remove("hidden");
+    updateWatchlistUI();
+    loadScreenerScan();
+  });
+}
+
+if (btnCloseScreenerModal) {
+  btnCloseScreenerModal.addEventListener("click", () => screenerModal.classList.add("hidden"));
+}
+if (btnCloseScreenerFooter) {
+  btnCloseScreenerFooter.addEventListener("click", () => screenerModal.classList.add("hidden"));
+}
+if (btnRefreshScreener) {
+  btnRefreshScreener.addEventListener("click", () => loadScreenerScan());
+}
+
+if (btnAddCustomTicker && inputCustomTicker) {
+  const handleAddTicker = async () => {
+    const sym = inputCustomTicker.value.trim().toUpperCase();
+    if (!sym) return;
+    btnAddCustomTicker.textContent = "⌛ ADDING...";
+    try {
+      const res = await fetch(`${BASE_URL}/api/watchlist/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: sym })
+      });
+      const d = await res.json();
+      inputCustomTicker.value = "";
+      updateWatchlistUI();
+      alert(`✓ ${sym} successfully added to the autonomous trading bot!`);
+    } catch (e) {
+      alert("Error adding ticker: " + e.message);
+    } finally {
+      btnAddCustomTicker.textContent = "➕ ADD TO BOT";
+    }
+  };
+
+  btnAddCustomTicker.addEventListener("click", handleAddTicker);
+  inputCustomTicker.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") handleAddTicker();
+  });
+}
+
+// Preset Watchlist Buttons
+document.querySelectorAll(".btn-preset-wl").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    const preset = btn.getAttribute("data-preset");
+    btn.textContent = "⌛ LOADING...";
+    try {
+      const res = await fetch(`${BASE_URL}/api/watchlist/preset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preset_key: preset })
+      });
+      const d = await res.json();
+      updateWatchlistUI();
+      alert(`✓ Preset loaded: ${d.preset_title}\n(${d.active_watchlist.length} symbols active)`);
+    } catch (e) {
+      alert("Error loading preset: " + e.message);
+    } finally {
+      btn.textContent = btn.getAttribute("data-preset").replace("_", " ").toUpperCase();
+    }
+  });
+});
+
+if (btnAutoAddTopScreened) {
+  btnAutoAddTopScreened.addEventListener("click", async () => {
+    btnAutoAddTopScreened.textContent = "⌛ POPULATING...";
+    try {
+      const res = await fetch(`${BASE_URL}/api/screener/auto_add_top`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ top_n: 15 })
+      });
+      const d = await res.json();
+      updateWatchlistUI();
+      alert(`✓ Auto-populated top ${d.added_symbols.length} screened opportunities into active trading bot!`);
+    } catch (e) {
+      alert("Error auto-adding: " + e.message);
+    } finally {
+      btnAutoAddTopScreened.textContent = "✨ AUTO-POPULATE TOP SCREENED";
+    }
+  });
+}
+
 // Initialization & Loop
+updateWatchlistUI();
 fetchCockpitData();
 pollTimer = setInterval(fetchCockpitData, 1500);

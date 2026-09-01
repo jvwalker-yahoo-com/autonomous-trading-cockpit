@@ -282,15 +282,29 @@ class SimulatedBroker:
         except Exception:
             pass
 
-    def get_per_stock_summary(self, trades_list: Optional[List[TradeRecord]] = None) -> List[StockPerformanceSummary]:
+    def close_all_positions(self, current_prices: Optional[Dict[str, float]] = None, exit_rationale: str = "End-of-day market close") -> List[TradeRecord]:
+        """Closes all currently open positions at their latest prices and logs them to the trade ledger."""
+        closed_trades = []
+        symbols = list(self.positions.keys())
+        for sym in symbols:
+            pos = self.positions.get(sym)
+            if not pos:
+                continue
+            price = current_prices.get(sym, pos.current_price) if current_prices else pos.current_price
+            tr = self.close_position(sym, price, exit_rationale=exit_rationale)
+            if tr:
+                closed_trades.append(tr)
+        return closed_trades
+
+    def get_per_stock_summary(self, trades_list: Optional[List[TradeRecord]] = None, include_open: bool = True) -> List[StockPerformanceSummary]:
         """
         Groups trades by individual stock symbol and calculates:
-        - Amount traded ($ volume)
+        - Amount traded ($ volume) across closed trades and active open positions
         - Total number of trades
-        - Hits (winning trades)
-        - Misses (losing trades)
+        - Hits (winning trades / profitable positions)
+        - Misses (losing trades / negative positions)
         - Hit Rate (%)
-        - Total P&L in dollars up/down ($)
+        - Total P&L in dollars up/down ($ Realized + Unrealized)
         - Total Return (%)
         """
         trades = trades_list if trades_list is not None else self.trade_ledger
@@ -301,14 +315,44 @@ class SimulatedBroker:
                 by_symbol[sym] = []
             by_symbol[sym].append(t)
 
+        # Also collect active open positions
+        open_by_symbol: Dict[str, List[Position]] = {}
+        if include_open:
+            for p in self.positions.values():
+                sym = p.symbol.upper()
+                if sym not in open_by_symbol:
+                    open_by_symbol[sym] = []
+                open_by_symbol[sym].append(p)
+
+        all_symbols = set(by_symbol.keys()) | set(open_by_symbol.keys())
         summaries: List[StockPerformanceSummary] = []
-        for sym, s_trades in by_symbol.items():
-            amt_traded = sum(t.cost_basis_usd for t in s_trades)
-            total_tr = len(s_trades)
-            hits = sum(1 for t in s_trades if t.win)
-            misses = sum(1 for t in s_trades if not t.win)
+
+        for sym in all_symbols:
+            s_trades = by_symbol.get(sym, [])
+            s_open = open_by_symbol.get(sym, [])
+
+            amt_closed = sum(t.cost_basis_usd for t in s_trades)
+            amt_open = sum(p.cost_basis_usd for p in s_open)
+            amt_traded = amt_closed + amt_open
+
+            closed_count = len(s_trades)
+            open_count = len(s_open)
+            total_tr = closed_count + open_count
+
+            closed_hits = sum(1 for t in s_trades if t.win)
+            open_hits = sum(1 for p in s_open if p.unrealized_pnl_usd > 0)
+            hits = closed_hits + open_hits
+
+            closed_misses = sum(1 for t in s_trades if not t.win)
+            open_misses = sum(1 for p in s_open if p.unrealized_pnl_usd < 0)
+            misses = closed_misses + open_misses
+
             hit_rate = (hits / total_tr * 100.0) if total_tr > 0 else 0.0
-            net_pnl = sum(t.realized_pnl_usd for t in s_trades)
+
+            realized_pnl = sum(t.realized_pnl_usd for t in s_trades)
+            unrealized_pnl = sum(p.unrealized_pnl_usd for p in s_open)
+            net_pnl = realized_pnl + unrealized_pnl
+
             net_pnl_pct = (net_pnl / amt_traded * 100.0) if amt_traded > 0 else 0.0
             avg_pnl = net_pnl / total_tr if total_tr > 0 else 0.0
 
@@ -327,6 +371,7 @@ class SimulatedBroker:
         # Sort by net P&L descending (top performers first)
         summaries.sort(key=lambda s: s.net_pnl_usd, reverse=True)
         return summaries
+
 
     def get_multi_day_report(self, days: int = 5) -> MultiDayPerformanceReport:
         """

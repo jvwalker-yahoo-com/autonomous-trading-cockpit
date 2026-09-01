@@ -68,6 +68,7 @@
       </div>
 
       <div class="action-btn-group">
+        <button id="btnScreenerModal" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981, #059669);" title="Market Screener & Universal Stock Universe">🔍 SCREENER / STOCKS</button>
         <button id="btnDailyReport" class="btn btn-primary" title="View Full Day Performance & Learning Audit">📊 DAILY REPORT</button>
         <button id="btnBacktestModal" class="btn btn-secondary" title="Quantitative Backtester & Parameter Optimizer">🧪 BACKTEST</button>
         <button id="btnTickStep" class="btn btn-secondary" title="Trigger Instant Analysis Step">⚡ STEP</button>
@@ -693,6 +694,82 @@
       </div>
       <div class="modal-footer" style="justify-content: flex-end;">
         <button id="btnCloseBtFooter" class="btn btn-secondary">CLOSE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- UNIVERSAL MARKET SCREENER & WATCHLIST MODAL -->
+  <div id="screenerModal" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width: 1050px; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <h3>🔍 MARKET SCREENER & UNIVERSAL STOCK UNIVERSE (100+ ASSETS)</h3>
+        <button id="btnCloseScreenerModal" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body" style="overflow-y: auto; gap: 14px;">
+        
+        <!-- Quick Add Any Stock Bar -->
+        <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 250px;">
+            <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 4px;">ADD ANY STOCK / ETF TICKER TO BOT:</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="inputCustomTicker" class="cyber-input" placeholder="e.g. TSLA, PLTR, COIN, SMCI, AMD, BABA..." style="flex: 1; text-transform: uppercase;">
+              <button id="btnAddCustomTicker" class="btn btn-primary" style="font-weight: bold;">➕ ADD TO BOT</button>
+            </div>
+          </div>
+          <div style="border-left: 1px solid var(--border-color); padding-left: 10px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+            <span style="font-size: 10px; color: var(--text-muted); width: 100%;">1-CLICK PRESET WATCHLISTS:</span>
+            <button class="btn btn-secondary btn-preset-wl" data-preset="crypto_high_beta" style="font-size: 11px;">🚀 Crypto Runners</button>
+            <button class="btn btn-secondary btn-preset-wl" data-preset="ai_tech_titans" style="font-size: 11px;">⚡ AI Tech Titans</button>
+            <button class="btn btn-secondary btn-preset-wl" data-preset="leveraged_etfs" style="font-size: 11px;">🌐 Leveraged ETFs</button>
+            <button class="btn btn-secondary btn-preset-wl" data-preset="all_top_50" style="font-size: 11px;">🌍 Top 50 Universe</button>
+            <button class="btn btn-outline btn-preset-wl" data-preset="custom_13" style="font-size: 11px;">🎯 Default 13</button>
+          </div>
+        </div>
+
+        <!-- Active Bot Watchlist Pills -->
+        <div style="background: rgba(0, 255, 136, 0.03); border: 1px solid rgba(0, 255, 136, 0.2); border-radius: 6px; padding: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 11px; font-weight: bold; color: var(--accent-green);">🤖 ACTIVE AUTONOMOUS BOT WATCHLIST (<span id="activeWlCount">13</span> Assets Active):</span>
+            <button id="btnAutoAddTopScreened" class="btn btn-primary" style="font-size: 10px; padding: 4px 8px;">✨ AUTO-POPULATE TOP SCREENED</button>
+          </div>
+          <div id="activeWatchlistPills" style="display: flex; flex-wrap: wrap; gap: 6px; max-height: 80px; overflow-y: auto;">
+            <!-- Active symbols rendered dynamically -->
+          </div>
+        </div>
+
+        <!-- Live Quantitative Screener Table -->
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span class="audit-heading">📈 REAL-TIME QUANTITATIVE MOMENTUM & BREAKOUT SCREENER:</span>
+            <button id="btnRefreshScreener" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;">🔄 REFRESH SCAN</button>
+          </div>
+          <div class="table-responsive" style="max-height: 320px; overflow-y: auto;">
+            <table class="cyber-table">
+              <thead>
+                <tr>
+                  <th>TICKER / NAME</th>
+                  <th>CATEGORY</th>
+                  <th>PRICE ($)</th>
+                  <th>24H CHG (%)</th>
+                  <th>ADX (TREND)</th>
+                  <th>SUPERTREND</th>
+                  <th>RSI</th>
+                  <th>SIGNAL</th>
+                  <th>OPPORTUNITY SCORE</th>
+                  <th>ACTION</th>
+                </tr>
+              </thead>
+              <tbody id="screenerTableBody">
+                <tr><td colspan="10" class="text-center text-muted">Scanning 100+ stock universe...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer" style="justify-content: space-between;">
+        <span id="screenerStatusMsg" class="text-muted" style="font-size: 11px;">Universe: 100+ verified eToro equities & ETFs loaded.</span>
+        <button id="btnCloseScreenerFooter" class="btn btn-secondary">CLOSE</button>
       </div>
     </div>
   </div>

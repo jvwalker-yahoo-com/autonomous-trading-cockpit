@@ -270,4 +270,40 @@ def test_pdf_and_email_report_endpoints():
     assert data["recipient"] == "lisawalker6898@gmail.com"
     assert "trading_report_daily_" in data["filename"]
 
+def test_screener_and_dynamic_watchlist():
+    client = TestClient(app)
+
+    # 1. Test Universe Endpoint
+    r = client.get("/api/screener/universe")
+    assert r.status_code == 200
+    u = r.json()
+    assert u["total_instruments"] >= 50
+    assert "NVDA" in u["universe"]
+    assert "TSLA" in u["universe"]
+
+    # 2. Test Real-time Market Screener Scan
+    r = client.get("/api/screener/scan?top_n=20")
+    assert r.status_code == 200
+    screened = r.json()
+    assert len(screened) == 20
+    assert "opportunity_score" in screened[0]
+    assert "supertrend" in screened[0]
+
+    # 3. Test Adding custom stock (e.g. TSLA, PLTR)
+    r = client.post("/api/watchlist/add", json={"symbol": "PLTR"})
+    assert r.status_code == 200
+    assert "PLTR" in r.json()["active_watchlist"]
+
+    # 4. Test Preset Loading
+    r = client.post("/api/watchlist/preset", json={"preset_key": "ai_tech_titans"})
+    assert r.status_code == 200
+    assert "NVDA" in r.json()["active_watchlist"]
+    assert "PLTR" in r.json()["active_watchlist"]
+
+    # 5. Test Auto-Add Top Screened
+    r = client.post("/api/screener/auto_add_top?top_n=10")
+    assert r.status_code == 200
+    assert r.json()["status"] == "success"
+
+
 

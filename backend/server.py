@@ -28,6 +28,7 @@ from .engine.learner import AdaptiveLearner
 from .engine.broker import SimulatedBroker
 from .engine.backtester import BacktesterEngine, BacktestResult, OptimizationResult
 from .engine.reporter import ReportPDFGenerator, EmailReportDispatcher
+from .engine.screener import MarketScreener, MASTER_STOCK_UNIVERSE, PRESET_WATCHLISTS
 from .engine.data_feed import BASE_PRICES
 from .engine.models import (
     RegimeState, FederationOutput, ArbitrationOutput,
@@ -527,6 +528,90 @@ def update_system_config(req: ConfigUpdateRequest):
     if req.risk_per_trade_pct is not None:
         config.risk_per_trade_pct = req.risk_per_trade_pct
     return {"status": "updated", "config": get_system_config()}
+
+# ==========================================
+# UNIVERSAL MARKET SCREENER & WATCHLIST APIS
+# ==========================================
+
+class WatchlistAddRequest(BaseModel):
+    symbol: str
+
+class WatchlistPresetRequest(BaseModel):
+    preset_key: str
+
+@app.get("/api/screener/scan", tags=["Market Screener"])
+def scan_market(top_n: int = 30):
+    """Scans all 100+ stocks in universe and returns ranked high-probability opportunities."""
+    return MarketScreener.scan_universe(data_feed, top_n=top_n)
+
+@app.get("/api/screener/universe", tags=["Market Screener"])
+def get_market_universe():
+    """Returns complete list of 100+ tradable assets, sectors, and presets."""
+    return {
+        "total_instruments": len(MASTER_STOCK_UNIVERSE),
+        "universe": MASTER_STOCK_UNIVERSE,
+        "presets": PRESET_WATCHLISTS
+    }
+
+@app.get("/api/watchlist", tags=["Watchlist Manager"])
+def get_watchlist():
+    """Returns active bot watchlist and available preset packages."""
+    return {
+        "active_watchlist": config.watchlist,
+        "count": len(config.watchlist),
+        "presets": {k: v["title"] for k, v in PRESET_WATCHLISTS.items()}
+    }
+
+@app.post("/api/watchlist/add", tags=["Watchlist Manager"])
+def add_to_watchlist(req: WatchlistAddRequest):
+    """Adds ANY custom stock ticker to the active trading bot."""
+    sym = req.symbol.strip().upper()
+    if not sym:
+        raise HTTPException(status_code=400, detail="Symbol cannot be empty")
+    if sym not in config.watchlist:
+        config.watchlist.append(sym)
+    # Warmup data feed for new symbol
+    data_feed.get_latest_quote(sym)
+    return {"status": "added", "symbol": sym, "active_watchlist": config.watchlist}
+
+@app.post("/api/watchlist/remove", tags=["Watchlist Manager"])
+def remove_from_watchlist(req: WatchlistAddRequest):
+    """Removes a stock ticker from the active trading bot."""
+    sym = req.symbol.strip().upper()
+    if sym in config.watchlist:
+        config.watchlist.remove(sym)
+    return {"status": "removed", "symbol": sym, "active_watchlist": config.watchlist}
+
+@app.post("/api/watchlist/preset", tags=["Watchlist Manager"])
+def set_watchlist_preset(req: WatchlistPresetRequest):
+    """Loads a pre-built watchlist preset (e.g. all_top_50, crypto_high_beta, ai_tech_titans)."""
+    preset = PRESET_WATCHLISTS.get(req.preset_key)
+    if not preset:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    config.watchlist = list(preset["symbols"])
+    # Warmup quotes for all symbols in preset
+    for s in config.watchlist:
+        data_feed.get_latest_quote(s)
+    return {
+        "status": "loaded",
+        "preset_title": preset["title"],
+        "active_watchlist": config.watchlist
+    }
+
+@app.post("/api/screener/auto_add_top", tags=["Market Screener"])
+def auto_add_top_screened(top_n: int = 15):
+    """Automatically scans universe and adds top ranked momentum opportunities to the active trading bot."""
+    screened = MarketScreener.scan_universe(data_feed, top_n=top_n)
+    top_symbols = [s["symbol"] for s in screened]
+    for sym in top_symbols:
+        if sym not in config.watchlist:
+            config.watchlist.append(sym)
+    return {
+        "status": "success",
+        "added_symbols": top_symbols,
+        "active_watchlist": config.watchlist
+    }
+
 
 @app.post("/api/portfolio/reset", tags=["Portfolio"])
 def reset_portfolio():

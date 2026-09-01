@@ -10,28 +10,17 @@ import requests
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+from .screener import MASTER_STOCK_UNIVERSE
 
-# Reference seed prices for US equities, high-beta assets & ETFs
-BASE_PRICES = {
-    "MARA": 18.50,
-    "IREN": 9.80,
-    "SOXL": 38.40,
-    "TQQQ": 72.60,
-    "MSFT": 448.20,
-    "META": 512.90,
-    "APLD": 8.70,
-    "SPY": 560.10,
-    "QQQ": 482.40,
-    "BULL": 24.50,
-    "URA": 28.60,
-    "HOOD": 22.40,
-    "SOFI": 7.90,
-    "AAPL": 224.50,
-    "NVDA": 128.80,
-    "TSLA": 215.30,
-    "AMZN": 186.40,
-    "GOOGL": 165.70
+# Reference seed prices for all 100+ US equities, high-beta assets & ETFs
+BASE_PRICES: Dict[str, float] = {
+    sym: data["base_price"] for sym, data in MASTER_STOCK_UNIVERSE.items()
 }
+# Fallback defaults for major indices/cryptos if requested
+BASE_PRICES.update({
+    "BTC": 64200.0, "ETH": 2540.0, "SOL": 142.0, "XRP": 0.58, "GOLD": 2510.0, "OIL": 74.50
+})
+
 
 class MarketDataPoint:
     def __init__(self, symbol: str, price: float, high: float, low: float, open_p: float, prev_close: float, volume: float, timestamp: float):
