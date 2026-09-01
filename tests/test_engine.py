@@ -213,7 +213,7 @@ def test_backtester_and_optimizer():
 def test_backtest_api_endpoints():
     client = TestClient(app)
 
-    # Test backtest run endpoint
+    # Test single-asset backtest run endpoint
     r = client.post("/api/backtest/run", json={
         "symbol": "TQQQ",
         "stop_loss_pct": 0.025,
@@ -226,6 +226,26 @@ def test_backtest_api_endpoints():
     assert data["symbol"] == "TQQQ"
     assert "ending_equity" in data
     assert "win_rate_pct" in data
+
+    # Test Portfolio-Wide (ALL) backtest run endpoint
+    r_all = client.post("/api/backtest/run", json={
+        "symbol": "ALL",
+        "stop_loss_pct": 0.025,
+        "take_profit_pct": 0.050,
+        "adx_threshold": 20.0,
+        "num_ticks": 60
+    })
+    assert r_all.status_code == 200
+    all_data = r_all.json()
+    assert "PORTFOLIO" in all_data["symbol"]
+    assert "per_stock_breakdown" in all_data
+    assert len(all_data["per_stock_breakdown"]) >= 5
+
+    # Test Crypto & Commodity backtesting
+    r_btc = client.post("/api/backtest/run", json={"symbol": "BTC", "num_ticks": 60})
+    assert r_btc.status_code == 200
+    r_gold = client.post("/api/backtest/run", json={"symbol": "GOLD", "num_ticks": 60})
+    assert r_gold.status_code == 200
 
     # Test backtest optimize endpoint
     r = client.post("/api/backtest/optimize", json={"symbol": "MARA"})

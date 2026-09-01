@@ -814,9 +814,72 @@ const btnRunBacktest = document.getElementById("btnRunBacktest");
 const btnAutoOptimize = document.getElementById("btnAutoOptimize");
 const btnApplyOptimal = document.getElementById("btnApplyOptimal");
 const btStatusMsg = document.getElementById("btStatusMsg");
+const btSymbolSelect = document.getElementById("btSymbolSelect");
+const btPerStockSection = document.getElementById("btPerStockSection");
+const btPerStockBody = document.getElementById("btPerStockBody");
+
+async function populateBacktestSymbolDropdown() {
+  if (!btSymbolSelect) return;
+  try {
+    const [wlRes, uniRes] = await Promise.all([
+      fetch(`${BASE_URL}/api/watchlist`),
+      fetch(`${BASE_URL}/api/screener/universe`)
+    ]);
+
+    const wlData = wlRes.ok ? await wlRes.json() : { active_watchlist: [] };
+    const uniData = uniRes.ok ? await uniRes.json() : { universe: {} };
+
+    const activeList = wlData.active_watchlist || [];
+    const universe = uniData.universe || {};
+
+    const curVal = btSymbolSelect.value || "ALL";
+
+    let html = `<option value="ALL">🌐 ALL ACTIVE WATCHLIST STOCKS (${activeList.length} Assets Portfolio-Wide)</option>`;
+
+    // 1. Active Watchlist Optgroup
+    if (activeList.length > 0) {
+      html += `<optgroup label="⭐ Active Bot Watchlist (${activeList.length} Assets)">`;
+      activeList.forEach(s => {
+        const u = universe[s] || {};
+        html += `<option value="${s}">⭐ ${s} - ${u.name || s} (${u.category || 'Active'})</option>`;
+      });
+      html += `</optgroup>`;
+    }
+
+    // Group remaining universe by category
+    const categories = {
+      "Crypto": "🪙 Cryptocurrencies (24/7)",
+      "Commodities": "🛢️ Commodities (Metals, Energy, Softs)",
+      "Indices": "📈 Global Benchmark Indices",
+      "ETFs": "🌐 Benchmark & Leveraged ETFs",
+      "Leveraged ETFs": "⚡ 3X Leveraged Bull/Bear ETFs",
+      "AI & Tech Titans": "⚡ AI, Semi & Mega-Cap Tech",
+      "Crypto Runners": "🚀 Crypto Miners & Runners",
+      "Fintech & Growth": "💳 Fintech & Growth Equities",
+      "Global Blue Chips": "🏛️ Global Blue Chips & Value"
+    };
+
+    for (const [catKey, catLabel] of Object.entries(categories)) {
+      const items = Object.entries(universe).filter(([sym, data]) => data.category === catKey || data.asset_class === catKey);
+      if (items.length > 0) {
+        html += `<optgroup label="${catLabel}">`;
+        items.forEach(([sym, data]) => {
+          html += `<option value="${sym}">${sym} - ${data.name} ($${data.base_price})</option>`;
+        });
+        html += `</optgroup>`;
+      }
+    }
+
+    btSymbolSelect.innerHTML = html;
+    if (curVal) btSymbolSelect.value = curVal;
+  } catch (e) {
+    console.error("Backtest symbol dropdown error:", e);
+  }
+}
 
 if (btnBacktestModal) {
   btnBacktestModal.addEventListener("click", () => {
+    populateBacktestSymbolDropdown();
     backtestModal.classList.remove("hidden");
   });
 }
@@ -839,6 +902,32 @@ function renderBacktestResults(res) {
   document.getElementById("btProfitFactor").textContent = res.profit_factor.toFixed(2);
   document.getElementById("btMaxDd").textContent = `${res.max_drawdown_pct.toFixed(2)}%`;
 
+  // Render Per-Stock Breakdown table (if portfolio backtest)
+  if (res.per_stock_breakdown && res.per_stock_breakdown.length > 0) {
+    if (btPerStockSection) btPerStockSection.classList.remove("hidden");
+    if (btPerStockBody) {
+      btPerStockBody.innerHTML = res.per_stock_breakdown.map(s => {
+        const pnlColor = s.net_pnl_usd >= 0 ? "color-success" : "color-danger";
+        const sign = s.net_pnl_usd >= 0 ? "+" : "";
+        return `
+          <tr>
+            <td><strong>${s.symbol}</strong></td>
+            <td>${s.name}</td>
+            <td><span class="badge badge-normal" style="font-size: 10px;">${s.asset_class}</span></td>
+            <td>${s.total_trades}</td>
+            <td><span class="badge badge-ok">${s.hits}W</span></td>
+            <td><span class="badge ${s.misses > 0 ? 'badge-critical' : 'badge-normal'}">${s.misses}L</span></td>
+            <td>${s.hit_rate_pct.toFixed(1)}%</td>
+            <td class="${pnlColor}"><strong>${sign}$${s.net_pnl_usd.toFixed(2)}</strong></td>
+            <td class="${pnlColor}">${sign}${s.net_pnl_pct.toFixed(2)}%</td>
+          </tr>
+        `;
+      }).join("");
+    }
+  } else {
+    if (btPerStockSection) btPerStockSection.classList.add("hidden");
+  }
+
   const tbody = document.getElementById("btTradesBody");
   if (res.trades && res.trades.length > 0) {
     tbody.innerHTML = res.trades.map(t => {
@@ -853,7 +942,7 @@ function renderBacktestResults(res) {
           <td>$${t.entry_price.toFixed(2)}</td>
           <td>$${t.exit_price.toFixed(2)}</td>
           <td class="${pnlColor}"><strong>${sign}$${t.realized_pnl_usd.toFixed(2)} (${sign}${t.realized_pnl_pct.toFixed(2)}%)</strong></td>
-          <td><small>${t.rationale}</small></td>
+          <td><small>[<strong>${t.symbol}</strong>] ${t.rationale}</small></td>
         </tr>
       `;
     }).join("");

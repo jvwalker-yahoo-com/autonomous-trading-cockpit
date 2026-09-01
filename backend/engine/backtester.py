@@ -1,8 +1,8 @@
 """
 Quantitative Backtester and Parameter Optimizer Engine.
-Simulates trading sessions on historical/synthetic price series using the full
-cinar/indicator quantitative pipeline (ADX, SuperTrend, VWAP, MFI, Keltner, Federation).
-Performs grid search optimization to find optimal Stop-Loss, Take-Profit, and ADX filters.
+Simulates trading sessions on multi-asset price series (Cryptos, Commodities, Indices, ETFs, Equities)
+using the cinar/indicator quantitative pipeline (ADX, SuperTrend, VWAP, MFI, Keltner, Federation).
+Supports single-asset backtesting and portfolio-wide multi-stock backtesting with individual breakdowns.
 """
 import time
 import math
@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from .indicators import TechnicalIndicators
 from .federation import FederationModule
-from .models import TradeRecord
+from .screener import MASTER_STOCK_UNIVERSE
 
 class BacktestResult(BaseModel):
     symbol: str
@@ -31,6 +31,7 @@ class BacktestResult(BaseModel):
     take_profit_pct: float
     adx_threshold: float
     trades: List[Dict[str, Any]]
+    per_stock_breakdown: Optional[List[Dict[str, Any]]] = None
 
 class OptimizationCandidate(BaseModel):
     rank: int
@@ -56,9 +57,27 @@ class BacktesterEngine:
         self.federation_mod = FederationModule()
 
     def generate_price_series(self, symbol: str, num_ticks: int = 150, base_price: float = 100.0) -> Tuple[np.ndarray, np.ndarray]:
-        """Generates realistic trending/oscillating intraday price and volume series."""
+        """Generates realistic trending/oscillating intraday price and volume series with asset-class specific volatility."""
+        sym_upper = symbol.upper()
+        if sym_upper in MASTER_STOCK_UNIVERSE and base_price == 100.0:
+            base_price = float(MASTER_STOCK_UNIVERSE[sym_upper]["base_price"])
+
         np.random.seed(abs(hash(symbol)) % 100000)
-        volatility = 0.008 if symbol in ("MARA", "IREN", "SOXL", "TQQQ", "APLD") else 0.003
+        
+        info = MASTER_STOCK_UNIVERSE.get(sym_upper, {})
+        ac = info.get("asset_class", "Stock")
+        cat = info.get("category", "")
+
+        if ac == "Crypto" or "Crypto" in cat:
+            volatility = 0.015
+        elif "Leveraged" in cat:
+            volatility = 0.012
+        elif ac == "Commodity":
+            volatility = 0.007
+        elif ac == "Index":
+            volatility = 0.003
+        else:
+            volatility = 0.006
         
         drift = 0.0003 * np.sin(np.linspace(0, 3 * np.pi, num_ticks))
         returns = np.random.normal(drift, volatility, num_ticks)
@@ -76,11 +95,27 @@ class BacktesterEngine:
         num_ticks: int = 150,
         base_price: float = 100.0,
         provided_prices: Optional[np.ndarray] = None,
-        provided_volumes: Optional[np.ndarray] = None
+        provided_volumes: Optional[np.ndarray] = None,
+        watchlist_symbols: Optional[List[str]] = None
     ) -> BacktestResult:
         """
-        Executes an end-to-end backtest on a price series.
+        Executes an end-to-end backtest on a single instrument or portfolio-wide across all active stocks.
         """
+        sym_upper = symbol.upper()
+        if sym_upper in ("ALL", "PORTFOLIO", "WATCHLIST", "TOTAL"):
+            target_symbols = watchlist_symbols if watchlist_symbols else ["MARA", "IREN", "SOXL", "TQQQ", "MSFT", "META", "APLD", "SPY", "QQQ", "BULL", "URA", "HOOD", "SOFI"]
+            return self.run_portfolio_backtest(
+                symbols=target_symbols,
+                initial_capital=initial_capital,
+                stop_loss_pct=stop_loss_pct,
+                take_profit_pct=take_profit_pct,
+                adx_threshold=adx_threshold,
+                num_ticks=num_ticks
+            )
+
+        if sym_upper in MASTER_STOCK_UNIVERSE and base_price == 100.0:
+            base_price = float(MASTER_STOCK_UNIVERSE[sym_upper]["base_price"])
+
         if provided_prices is not None and len(provided_prices) > 20:
             prices = provided_prices
             volumes = provided_volumes if provided_volumes is not None else np.ones(len(prices)) * 100000
@@ -282,43 +317,126 @@ class BacktesterEngine:
             stop_loss_pct=stop_loss_pct,
             take_profit_pct=take_profit_pct,
             adx_threshold=adx_threshold,
-            trades=trades
+            trades=trades,
+            per_stock_breakdown=None
+        )
+
+    def run_portfolio_backtest(
+        self,
+        symbols: List[str],
+        initial_capital: float = 10000.0,
+        stop_loss_pct: float = 0.025,
+        take_profit_pct: float = 0.050,
+        adx_threshold: float = 20.0,
+        num_ticks: int = 150
+    ) -> BacktestResult:
+        """
+        Executes an aggregated multi-asset portfolio backtest across all given symbols simultaneously.
+        """
+        all_trades: List[Dict[str, Any]] = []
+        per_stock_list: List[Dict[str, Any]] = []
+        
+        cap_per_sym = initial_capital / max(1, len(symbols))
+        tot_net_pnl = 0.0
+        tot_gross_wins = 0.0
+        tot_gross_losses = 0.0
+        max_dd = 0.0
+
+        for sym in symbols:
+            res = self.run_backtest(
+                symbol=sym,
+                initial_capital=cap_per_sym,
+                stop_loss_pct=stop_loss_pct,
+                take_profit_pct=take_profit_pct,
+                adx_threshold=adx_threshold,
+                num_ticks=num_ticks
+            )
+            
+            all_trades.extend(res.trades)
+            tot_net_pnl += res.net_pnl_usd
+            tot_gross_wins += sum(t["realized_pnl_usd"] for t in res.trades if t["win"])
+            tot_gross_losses += abs(sum(t["realized_pnl_usd"] for t in res.trades if not t["win"]))
+            if res.max_drawdown_pct > max_dd:
+                max_dd = res.max_drawdown_pct
+
+            info = MASTER_STOCK_UNIVERSE.get(sym.upper(), {})
+            per_stock_list.append({
+                "symbol": sym,
+                "name": info.get("name", sym),
+                "asset_class": info.get("asset_class", "Stock"),
+                "total_trades": res.total_trades,
+                "hits": res.winning_trades,
+                "misses": res.losing_trades,
+                "hit_rate_pct": res.win_rate_pct,
+                "net_pnl_usd": res.net_pnl_usd,
+                "net_pnl_pct": res.net_pnl_pct,
+                "profit_factor": res.profit_factor
+            })
+
+        per_stock_list.sort(key=lambda s: s["net_pnl_usd"], reverse=True)
+
+        tot_trades = len(all_trades)
+        tot_wins = sum(1 for t in all_trades if t["win"])
+        tot_losses = sum(1 for t in all_trades if not t["win"])
+        overall_win_rate = (tot_wins / tot_trades * 100.0) if tot_trades > 0 else 0.0
+        overall_pf = (tot_gross_wins / tot_gross_losses) if tot_gross_losses > 0 else (tot_gross_wins if tot_gross_wins > 0 else 1.0)
+        ending_eq = initial_capital + tot_net_pnl
+        net_pct = (tot_net_pnl / initial_capital) * 100.0
+
+        return BacktestResult(
+            symbol=f"PORTFOLIO ({len(symbols)} Assets)",
+            starting_capital=initial_capital,
+            ending_equity=round(ending_eq, 2),
+            net_pnl_usd=round(tot_net_pnl, 2),
+            net_pnl_pct=round(net_pct, 2),
+            total_trades=tot_trades,
+            winning_trades=tot_wins,
+            losing_trades=tot_losses,
+            win_rate_pct=round(overall_win_rate, 1),
+            profit_factor=round(overall_pf, 2),
+            max_drawdown_pct=round(max_dd, 2),
+            stop_loss_pct=stop_loss_pct,
+            take_profit_pct=take_profit_pct,
+            adx_threshold=adx_threshold,
+            trades=all_trades,
+            per_stock_breakdown=per_stock_list
         )
 
     def optimize_parameters(
         self,
         symbol: str,
         initial_capital: float = 10000.0,
-        base_price: float = 100.0
+        num_ticks: int = 150,
+        watchlist_symbols: Optional[List[str]] = None
     ) -> OptimizationResult:
         """
-        Runs grid search parameter optimization across Stop-Loss, Take-Profit, and ADX filters.
+        Executes a 48-combination grid-search optimization across Stop-Loss, Take-Profit, and ADX filters.
         """
-        prices, volumes = self.generate_price_series(symbol, 180, base_price)
+        stop_loss_grid = [0.015, 0.025, 0.035, 0.045]
+        take_profit_grid = [0.030, 0.050, 0.070, 0.090]
+        adx_grid = [18.0, 22.0, 26.0]
 
-        sl_candidates = [0.015, 0.025, 0.035, 0.045]
-        tp_candidates = [0.030, 0.050, 0.070, 0.090]
-        adx_candidates = [18.0, 22.0, 26.0]
+        candidates: List[OptimizationCandidate] = []
 
-        results: List[OptimizationCandidate] = []
-
-        for sl in sl_candidates:
-            for tp in tp_candidates:
-                for adx in adx_candidates:
+        for sl in stop_loss_grid:
+            for tp in take_profit_grid:
+                for adx in adx_grid:
                     res = self.run_backtest(
                         symbol=symbol,
                         initial_capital=initial_capital,
                         stop_loss_pct=sl,
                         take_profit_pct=tp,
                         adx_threshold=adx,
-                        provided_prices=prices,
-                        provided_volumes=volumes
+                        num_ticks=num_ticks,
+                        watchlist_symbols=watchlist_symbols
                     )
-                    
-                    # Fitness score: balances Return, Profit Factor, Win Rate, and penalizes Drawdown
-                    score = (res.net_pnl_pct * 2.0) + (res.win_rate_pct * 0.5) + (res.profit_factor * 10.0) - (res.max_drawdown_pct * 3.0)
-                    
-                    results.append(OptimizationCandidate(
+
+                    # Score = Return% * 0.4 + WinRate% * 0.3 + ProfitFactor * 10.0 - MaxDD% * 0.3
+                    score = (res.net_pnl_pct * 0.4) + (res.win_rate_pct * 0.3) + (res.profit_factor * 10.0) - (res.max_drawdown_pct * 0.3)
+                    if res.total_trades == 0:
+                        score = -999.0
+
+                    candidates.append(OptimizationCandidate(
                         rank=0,
                         stop_loss_pct=sl,
                         take_profit_pct=tp,
@@ -331,18 +449,23 @@ class BacktesterEngine:
                         score=round(score, 2)
                     ))
 
-        # Sort by fitness score descending
-        results.sort(key=lambda x: x.score, reverse=True)
-        for i, c in enumerate(results):
-            c.rank = i + 1
+        candidates.sort(key=lambda c: c.score, reverse=True)
+        for idx, c in enumerate(candidates):
+            c.rank = idx + 1
 
-        optimal = results[0]
-        summary = f"Optimal configuration for {symbol}: Stop-Loss {(optimal.stop_loss_pct*100):.1f}%, Take-Profit {(optimal.take_profit_pct*100):.1f}%, ADX filter {optimal.adx_threshold:.0f} (Yields {optimal.win_rate_pct:.1f}% Win Rate, {optimal.profit_factor:.2f} Profit Factor, +{optimal.net_pnl_pct:.2f}% Return)."
+        optimal = candidates[0]
+        top_5 = candidates[:5]
+
+        rec = (
+            f"Optimal configuration for {symbol}: "
+            f"Stop-Loss {(optimal.stop_loss_pct*100):.1f}%, Take-Profit {(optimal.take_profit_pct*100):.1f}%, ADX threshold >= {optimal.adx_threshold:.0f}. "
+            f"Achieved {optimal.net_pnl_pct:+.2f}% projected return across {optimal.total_trades} trades with {optimal.win_rate_pct:.1f}% win rate and {optimal.profit_factor:.2f} profit factor."
+        )
 
         return OptimizationResult(
             symbol=symbol,
-            total_combinations_tested=len(results),
+            total_combinations_tested=len(candidates),
             optimal_candidate=optimal,
-            top_candidates=results[:5],
-            recommendation_summary=summary
+            top_candidates=top_5,
+            recommendation_summary=rec
         )

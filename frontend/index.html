@@ -581,21 +581,10 @@
         <!-- Controls Strip -->
         <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
           <div>
-            <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 4px;">TARGET ASSET:</label>
+            <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 4px;">TARGET ASSET / UNIVERSE:</label>
             <select id="btSymbolSelect" class="cyber-select" style="width: 100%;">
-              <option value="SOXL">SOXL (Semi Bull 3X)</option>
-              <option value="MARA">MARA (Marathon Digital)</option>
-              <option value="TQQQ">TQQQ (Nasdaq Bull 3X)</option>
-              <option value="IREN">IREN (Iris Energy)</option>
-              <option value="APLD">APLD (Applied Digital)</option>
-              <option value="NVDA">NVDA (NVIDIA)</option>
-              <option value="MSFT">MSFT (Microsoft)</option>
-              <option value="META">META (Meta)</option>
-              <option value="SPY">SPY (S&P 500 ETF)</option>
-              <option value="QQQ">QQQ (Nasdaq ETF)</option>
-              <option value="HOOD">HOOD (Robinhood)</option>
-              <option value="SOFI">SOFI (SoFi Tech)</option>
-              <option value="URA">URA (Uranium ETF)</option>
+              <option value="ALL" selected>🌐 ALL ACTIVE WATCHLIST STOCKS (Portfolio-Wide)</option>
+              <!-- Dynamic symbols populated by JavaScript -->
             </select>
           </div>
           <div>
@@ -643,6 +632,27 @@
           <div class="stat-card">
             <span class="stat-title">MAX DRAWDOWN</span>
             <span class="stat-number" id="btMaxDd">0.0%</span>
+          </div>
+        <!-- Individual Stock Performance Breakdown (For Portfolio / Multi-Stock Backtest) -->
+        <div id="btPerStockSection" class="hidden">
+          <span class="audit-heading" style="margin-bottom: 6px; display: block;">📊 INDIVIDUAL STOCK PERFORMANCE BREAKDOWN:</span>
+          <div class="table-responsive" style="max-height: 200px; overflow-y: auto;">
+            <table class="cyber-table">
+              <thead>
+                <tr>
+                  <th>SYMBOL</th>
+                  <th>INSTRUMENT / NAME</th>
+                  <th>CLASS</th>
+                  <th>TOTAL TRADES</th>
+                  <th>HITS (WINS)</th>
+                  <th>MISSES</th>
+                  <th>WIN RATE (%)</th>
+                  <th>NET P&L ($)</th>
+                  <th>RETURN (%)</th>
+                </tr>
+              </thead>
+              <tbody id="btPerStockBody"></tbody>
+            </table>
           </div>
         </div>
 

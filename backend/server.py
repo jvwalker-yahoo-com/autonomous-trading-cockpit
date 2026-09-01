@@ -656,7 +656,7 @@ class ApplyParametersRequest(BaseModel):
 
 @app.post("/api/backtest/run", tags=["Backtest"])
 def run_backtest_endpoint(req: BacktestRequest):
-    """Executes quantitative backtest simulation on an asset."""
+    """Executes quantitative backtest simulation on an individual asset or portfolio-wide across all active stocks."""
     base_p = BASE_PRICES.get(req.symbol.upper(), 100.0)
     return backtester.run_backtest(
         symbol=req.symbol.upper(),
@@ -665,17 +665,17 @@ def run_backtest_endpoint(req: BacktestRequest):
         take_profit_pct=req.take_profit_pct,
         adx_threshold=req.adx_threshold,
         num_ticks=req.num_ticks,
-        base_price=base_p
+        base_price=base_p,
+        watchlist_symbols=config.watchlist
     )
 
 @app.post("/api/backtest/optimize", tags=["Backtest"])
 def optimize_parameters_endpoint(req: OptimizeRequest):
     """Runs grid-search optimization to discover highest-performing Stop-Loss, Take-Profit, and ADX filters."""
-    base_p = BASE_PRICES.get(req.symbol.upper(), 100.0)
     return backtester.optimize_parameters(
         symbol=req.symbol.upper(),
         initial_capital=config.initial_capital,
-        base_price=base_p
+        watchlist_symbols=config.watchlist
     )
 
 @app.post("/api/backtest/apply", tags=["Backtest"])
