@@ -184,6 +184,24 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
         existing = broker.positions.get(symbol)
         if not existing or (existing.direction != ("LONG" if signal == "BUY" else "SHORT")):
             trade_dir = "LONG" if signal == "BUY" else "SHORT"
+            
+            # When in Live mode, dispatch real order to official eToro REST API
+            if config.execution_mode == "live" and etoro_client.is_configured():
+                inst_id = etoro_client.resolve_instrument_id(symbol)
+                logger.info(f"⚡ [LIVE ETORO ORDER] Dispatching {trade_dir} on {symbol} (ID: {inst_id}) for ${allocated_usd:.2f}...")
+                try:
+                    etoro_client.create_order(
+                        instrument_id=inst_id or 1001,
+                        direction=trade_dir,
+                        amount_usd=allocated_usd,
+                        stop_loss_rate=round(quote.price * (1.0 - config.default_stop_loss_pct), 2),
+                        take_profit_rate=round(quote.price * (1.0 + config.default_take_profit_pct), 2),
+                        mode="real"
+                    )
+                except Exception as e:
+                    logger.error(f"eToro live order execution exception: {e}")
+
+            # Execute in local broker ledger & self-learning memory
             broker.execute_order(
                 symbol=symbol,
                 direction=trade_dir,
@@ -194,6 +212,12 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
                 rationale=f"Autonomous {trade_dir} entry on {symbol}. {rationale}. Dominant: {federation.federation}",
                 contributing_models=federation.outputs
             )
+
+            # Auto-sync newly traded stock to eToro Watchlist
+            try:
+                etoro_client.sync_symbols_to_watchlist([symbol], watchlist_name="Autonomous Cockpit")
+            except Exception as e:
+                logger.warning(f"Watchlist auto-sync notice for {symbol}: {e}")
 
     decision = DecisionOutput(
         symbol=symbol,
@@ -575,7 +599,7 @@ def test_etoro_connection():
 
 @app.post("/api/mode/switch", tags=["eToro Live Integration"])
 def switch_execution_mode(req: ModeSwitchRequest):
-    """Switches execution mode between demo (learning/simulation) and live (eToro real orders)."""
+    """Switches execution mode between demo (learning/simulation) and live (eToro real orders). Automatically builds 5-day proven watchlist when switching to live."""
     target_mode = req.mode.strip().lower()
     if target_mode not in ("demo", "live"):
         raise HTTPException(status_code=400, detail="Invalid mode. Must be 'demo' or 'live'.")
@@ -588,10 +612,61 @@ def switch_execution_mode(req: ModeSwitchRequest):
 
     config.execution_mode = target_mode
     logger.info(f"Execution mode switched to: {config.execution_mode.upper()}")
+
+    sync_info = None
+    if target_mode == "live":
+        # Build 5-day historical traded stocks + active watchlist
+        five_day_rep = broker.get_multi_day_report(5)
+        traded_symbols = [s.symbol for s in five_day_rep.stock_summaries if s.symbol]
+        combined_symbols = list(dict.fromkeys(traded_symbols + config.watchlist))
+        if not combined_symbols:
+            combined_symbols = ["TQQQ", "QQQ", "MARA", "BULL", "MSFT", "AAPL", "URA", "SOXL", "IREN"]
+
+        sync_info = etoro_client.sync_symbols_to_watchlist(
+            symbols=combined_symbols,
+            watchlist_name="Autonomous Cockpit"
+        )
+        logger.info(f"✓ Initialized live eToro Watchlist 'Autonomous Cockpit' with {len(combined_symbols)} proven stocks: {combined_symbols}")
+
     return {
         "status": "success",
         "execution_mode": config.execution_mode,
-        "message": f"Switched to {'⚡ LIVE eToro Trading' if target_mode == 'live' else '🛡️ Demo & Learning Simulation'}"
+        "message": f"Switched to {'⚡ LIVE eToro Trading' if target_mode == 'live' else '🛡️ Demo & Learning Simulation'}",
+        "watchlist_sync": sync_info
+    }
+
+@app.post("/api/etoro/sync_5day_trades", tags=["eToro Live Integration"])
+def sync_5day_trades_to_etoro():
+    """Builds and synchronizes an eToro Watchlist containing all stocks traded over the last 5 working days."""
+    five_day_rep = broker.get_multi_day_report(5)
+    traded_symbols = [s.symbol for s in five_day_rep.stock_summaries if s.symbol]
+    combined_symbols = list(dict.fromkeys(traded_symbols + config.watchlist))
+    if not combined_symbols:
+        combined_symbols = ["TQQQ", "QQQ", "MARA", "BULL", "MSFT", "AAPL", "URA", "SOXL", "IREN"]
+
+    res = etoro_client.sync_symbols_to_watchlist(
+        symbols=combined_symbols,
+        watchlist_name="Autonomous Cockpit"
+    )
+    return {
+        "status": "success",
+        "synced_stocks_count": len(combined_symbols),
+        "synced_symbols": combined_symbols,
+        "details": res
+    }
+
+@app.post("/api/etoro/sync_watchlist", tags=["eToro Live Integration"])
+def sync_active_watchlist_to_etoro():
+    """Synchronizes all currently active bot watchlist stocks to the eToro Watchlist."""
+    res = etoro_client.sync_symbols_to_watchlist(
+        symbols=config.watchlist,
+        watchlist_name="Autonomous Cockpit"
+    )
+    return {
+        "status": "success",
+        "synced_stocks_count": len(config.watchlist),
+        "synced_symbols": config.watchlist,
+        "details": res
     }
 
 # ==========================================

@@ -359,5 +359,25 @@ def test_etoro_api_client_and_mode_switching():
     assert r_demo.status_code == 200
     assert r_demo.json()["execution_mode"] == "demo"
 
+    # 5. Test Instrument ID Resolution
+    assert client_instance.resolve_instrument_id("AAPL") == 1002
+    assert client_instance.resolve_instrument_id("BTC") == 1
+    assert client_instance.resolve_instrument_id("GOLD") == 101
+    assert client_instance.resolve_instrument_id("TQQQ") == 2009
+
+    # 6. Test 5-Day Trade Watchlist Sync Endpoint
+    r_sync_5d = test_app_client.post("/api/etoro/sync_5day_trades")
+    assert r_sync_5d.status_code == 200
+    d_5d = r_sync_5d.json()
+    assert d_5d["status"] == "success"
+    assert d_5d["synced_stocks_count"] >= 5
+
+    # 7. Test Active Watchlist Sync Endpoint
+    r_sync_wl = test_app_client.post("/api/etoro/sync_watchlist")
+    assert r_sync_wl.status_code == 200
+    d_wl = r_sync_wl.json()
+    assert d_wl["status"] == "success"
+    assert len(d_wl["synced_symbols"]) >= 5
+
 
 

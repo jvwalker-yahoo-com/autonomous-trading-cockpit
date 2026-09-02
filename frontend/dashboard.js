@@ -604,6 +604,52 @@ if (el.btnTestEtoroConn) {
   });
 }
 
+// Sync 5-Day Traded Stocks to eToro Watchlist
+const btnSync5DayToEtoro = document.getElementById("btnSync5DayToEtoro");
+if (btnSync5DayToEtoro) {
+  btnSync5DayToEtoro.addEventListener("click", async () => {
+    btnSync5DayToEtoro.textContent = "⌛ SYNCHRONIZING...";
+    try {
+      const res = await fetch(`${BASE_URL}/api/etoro/sync_5day_trades`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`✓ Successfully synchronized ${data.synced_stocks_count} proven stocks from the last 5 days to your eToro Watchlist!\n\nStocks: ${data.synced_symbols.join(", ")}`);
+        if (el.etoroTestStatus) {
+          el.etoroTestStatus.textContent = `✓ Synced ${data.synced_stocks_count} stocks to eToro Watchlist at ${new Date().toLocaleTimeString()}`;
+          el.etoroTestStatus.style.color = "#10b981";
+        }
+      } else {
+        alert("Sync error: " + (data.detail || "Failed to sync to eToro."));
+      }
+    } catch (e) {
+      alert("Error: " + e.message);
+    } finally {
+      btnSync5DayToEtoro.textContent = "🔄 SYNC 5-DAY TRADES TO ETORO";
+    }
+  });
+}
+
+// Sync Active Watchlist to eToro Watchlist
+const btnSyncWlToEtoro = document.getElementById("btnSyncWlToEtoro");
+if (btnSyncWlToEtoro) {
+  btnSyncWlToEtoro.addEventListener("click", async () => {
+    btnSyncWlToEtoro.textContent = "⌛ SYNCING...";
+    try {
+      const res = await fetch(`${BASE_URL}/api/etoro/sync_watchlist`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`✓ Successfully synchronized all ${data.synced_stocks_count} active bot stocks to your eToro Watchlist!\n\nStocks: ${data.synced_symbols.join(", ")}`);
+      } else {
+        alert("Sync error: " + (data.detail || "Failed to sync to eToro."));
+      }
+    } catch (e) {
+      alert("Error: " + e.message);
+    } finally {
+      btnSyncWlToEtoro.textContent = "🔄 SYNC TO ETORO";
+    }
+  });
+}
+
 // Settings Modal
 el.btnSettings.addEventListener("click", async () => {
   try {
