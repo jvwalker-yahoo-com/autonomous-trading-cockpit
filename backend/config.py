@@ -29,10 +29,10 @@ class SystemConfig(BaseModel):
     simulation_mode: bool = os.getenv("SIMULATION_MODE", "true").lower() in ("true", "1", "yes")
     execution_loop_interval: float = float(os.getenv("EXECUTION_LOOP_INTERVAL", "2.0")) # seconds
     
-    # Portfolio & Sizing
-    initial_capital: float = float(os.getenv("INITIAL_CAPITAL", "10000.0"))
-    max_position_size_usd: float = float(os.getenv("MAX_POSITION_SIZE_USD", "1500.0"))
-    risk_per_trade_pct: float = float(os.getenv("RISK_PER_TRADE_PCT", "0.02")) # 2% max risk per trade
+    # Portfolio & Sizing (Calibrated for £1,000 GBP / ~$1,300 USD account)
+    initial_capital: float = float(os.getenv("INITIAL_CAPITAL", "1300.0")) # £1,000 GBP ≈ $1,300 USD
+    max_position_size_usd: float = float(os.getenv("MAX_POSITION_SIZE_USD", "200.0")) # ~15% max per position
+    risk_per_trade_pct: float = float(os.getenv("RISK_PER_TRADE_PCT", "0.02")) # 2% max risk per trade ($26 max risk)
     max_portfolio_exposure_pct: float = float(os.getenv("MAX_PORTFOLIO_EXPOSURE_PCT", "0.75")) # Max 75% deployed
     max_drawdown_limit_pct: float = float(os.getenv("MAX_DRAWDOWN_LIMIT_PCT", "0.15")) # 15% circuit breaker
     

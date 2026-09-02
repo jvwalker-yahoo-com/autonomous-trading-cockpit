@@ -175,9 +175,10 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
 
     # Execution if arbitration approved
     if arbitration.approved and signal in ("BUY", "SHORT"):
-        # Position sizing based on confidence & risk budget
-        alloc_base = config.max_position_size_usd * confidence
-        allocated_usd = max(50.0, min(config.max_position_size_usd, alloc_base))
+        # Position sizing based on confidence & risk budget (scaled to account equity)
+        max_alloc = min(config.max_position_size_usd, max(50.0, equity * 0.15))
+        alloc_base = max_alloc * confidence
+        allocated_usd = max(25.0, min(max_alloc, alloc_base))
         target_shares = round(allocated_usd / max(0.01, quote.price), 4)
 
         # Autonomous trade entry (if not already holding this direction)

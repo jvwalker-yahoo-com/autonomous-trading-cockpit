@@ -5,6 +5,7 @@ and Autonomous Trading Engine.
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.config import config
 from backend.server import app
 from backend.engine.data_feed import DataFeedManager
 from backend.engine.metrics import MetricsModule
@@ -181,7 +182,7 @@ def test_all_api_endpoints():
 
     r = client.post("/api/portfolio/reset")
     assert r.status_code == 200
-    assert r.json()["cash"] == 10000.0
+    assert r.json()["cash"] == config.initial_capital
 
 def test_backtester_and_optimizer():
     from backend.engine.backtester import BacktesterEngine
