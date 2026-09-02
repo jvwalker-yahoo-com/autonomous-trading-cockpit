@@ -384,33 +384,36 @@ class EToroClient:
         mode: str = "real"
     ) -> Dict[str, Any]:
         """
-        Submits a market order to eToro (Demo or Real environment).
+        Submits a market order by amount to eToro using the official execution endpoints.
         """
+        is_demo = mode.lower() == "demo"
         payload = {
-            "InstrumentID": instrument_id,
-            "instrumentId": instrument_id,
+            "InstrumentID": int(instrument_id),
             "IsBuy": direction.upper() in ("BUY", "LONG"),
-            "isBuy": direction.upper() in ("BUY", "LONG"),
-            "Amount": amount_usd,
-            "amount": amount_usd,
-            "Leverage": leverage,
-            "leverage": leverage
+            "Amount": round(float(amount_usd), 2),
+            "Leverage": int(leverage)
         }
         if stop_loss_rate is not None:
-            payload["StopLossRate"] = stop_loss_rate
-            payload["stopLossRate"] = stop_loss_rate
+            payload["StopLossRate"] = round(float(stop_loss_rate), 4)
         if take_profit_rate is not None:
-            payload["TakeProfitRate"] = take_profit_rate
-            payload["takeProfitRate"] = take_profit_rate
+            payload["TakeProfitRate"] = round(float(take_profit_rate), 4)
 
-        # Try trading endpoints
-        for ep in (f"/api/v1/trading/{mode.lower()}/orders", f"/api/v1/trading/orders", f"/api/v1/trading/market-orders", f"/api/v1/orders"):
+        # Official eToro execution endpoints
+        endpoints = [
+            f"/api/v1/trading/execution/{'demo/' if is_demo else ''}market-open-orders/by-amount",
+            f"/trading/execution/{'demo/' if is_demo else ''}market-open-orders/by-amount",
+            f"/api/v1/trading/{mode.lower()}/orders",
+            f"/api/v1/trading/orders"
+        ]
+
+        for ep in endpoints:
             success, code, data = self._request("POST", ep, json_data=payload)
-            if success:
+            if success or code in (200, 201, 202):
                 logger.info(f"⚡ [eToro Live Order Submitted] {direction} ${amount_usd:.2f} on Instrument {instrument_id} -> HTTP {code}: {data}")
                 return {"success": True, "status_code": code, "order": data}
 
-        return {"success": False, "status_code": 404, "order": {"InstrumentID": instrument_id, "direction": direction, "amount": amount_usd}}
+        logger.warning(f"eToro order execution returned non-200 for Instrument {instrument_id}: {payload}")
+        return {"success": False, "status_code": 404, "order": payload}
 
     def close_position(
         self,
@@ -421,11 +424,20 @@ class EToroClient:
         """
         Closes an open position on eToro (Demo or Real).
         """
-        payload = {"Units": units} if units is not None else None
-        for ep in (f"/api/v1/trading/{mode.lower()}/positions/{position_id}", f"/api/v1/trading/positions/{position_id}"):
-            success, code, data = self._request("DELETE", ep, json_data=payload)
-            if success:
+        is_demo = mode.lower() == "demo"
+        payload = {"UnitsToDeduct": units} if units is not None else {}
+
+        endpoints = [
+            (f"/api/v1/trading/execution/{'demo/' if is_demo else ''}market-close-orders/positions/{position_id}", "POST"),
+            (f"/trading/execution/{'demo/' if is_demo else ''}market-close-orders/positions/{position_id}", "POST"),
+            (f"/api/v1/trading/{mode.lower()}/positions/{position_id}", "DELETE"),
+            (f"/api/v1/trading/positions/{position_id}", "DELETE")
+        ]
+
+        for ep, meth in endpoints:
+            success, code, data = self._request(meth, ep, json_data=payload if meth == "POST" else None)
+            if success or code in (200, 201, 202, 204):
                 logger.info(f"⚡ [eToro Live Position Closed] Position {position_id} -> HTTP {code}")
                 return {"success": True, "status_code": code, "result": data}
 
-        return {"success": False, "status_code": 404, "result": {"position_id": position_id}}
+        return {"success": False, "status_code": 404, "position_id": position_id}
