@@ -55,6 +55,7 @@ telemetry_module = TelemetryModule()
 learner = AdaptiveLearner()
 broker = SimulatedBroker(initial_capital=config.initial_capital, db_path=config.db_path, learner=learner)
 backtester = BacktesterEngine()
+screener = MarketScreener()
 
 # Restore persisted system settings from disk
 saved_settings = broker.load_state()
@@ -567,6 +568,7 @@ def execute_manual_action(req: ManualTradeRequest):
     
     direction = "LONG" if req.action.upper() == "BUY" else "SHORT"
     alloc_usd = req.amount_usd or 150.0
+    etoro_res = None
 
     if config.execution_mode == "live" and etoro_client.is_configured():
         inst_id = etoro_client.resolve_instrument_id(req.symbol)
@@ -576,7 +578,7 @@ def execute_manual_action(req: ManualTradeRequest):
 
         logger.info(f"⚡ [MANUAL LIVE ETORO ORDER] {direction} on {req.symbol} (ID: {inst_id}) for ${alloc_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
         try:
-            etoro_client.create_order(
+            etoro_res = etoro_client.create_order(
                 instrument_id=inst_id or 1001,
                 direction=direction,
                 amount_usd=alloc_usd,
@@ -586,6 +588,7 @@ def execute_manual_action(req: ManualTradeRequest):
             )
         except Exception as e:
             logger.error(f"eToro manual live order exception: {e}")
+            etoro_res = {"success": False, "error": str(e)}
 
     pos = broker.execute_order(
         symbol=req.symbol,
@@ -596,7 +599,7 @@ def execute_manual_action(req: ManualTradeRequest):
     )
     if not pos:
         raise HTTPException(status_code=400, detail="Insufficient capital or invalid order parameters")
-    return {"status": "success", "position": pos}
+    return {"status": "success", "position": pos, "etoro_result": etoro_res}
 
 @app.post("/api/action/tick", tags=["Manual Controls"])
 def trigger_analysis_tick(symbol: Optional[str] = None):
@@ -677,7 +680,17 @@ def get_etoro_status():
 @app.post("/api/etoro/test_connection", tags=["eToro Live Integration"])
 def test_etoro_connection():
     """Validates eToro API credentials in read-only mode without placing trades."""
-    return etoro_client.test_connection()
+    res = etoro_client.test_connection()
+    if res.get("connected"):
+        config.etoro_api_key = etoro_client.api_key
+        config.etoro_user_key = etoro_client.user_key
+        broker.save_state({
+            "etoro_api_key": etoro_client.api_key,
+            "etoro_user_key": etoro_client.user_key,
+            "etoro_base_url": etoro_client.base_url
+        })
+        logger.info(f"✓ Locked in authenticated eToro API Key & User Key orientation (Persisted to disk).")
+    return res
 
 @app.post("/api/mode/switch", tags=["eToro Live Integration"])
 def switch_execution_mode(req: ModeSwitchRequest):

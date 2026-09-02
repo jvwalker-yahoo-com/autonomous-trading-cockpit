@@ -646,6 +646,14 @@ if (el.btnTestEtoroConn) {
       if (data.connected) {
         el.etoroTestStatus.textContent = "✓ Connected & Authenticated!";
         el.etoroTestStatus.style.color = "#10b981";
+        if (data.api_key) {
+          localStorage.setItem("etoro_api_key", data.api_key);
+          if (el.inputEtoroApiKey) el.inputEtoroApiKey.value = data.api_key;
+        }
+        if (data.user_key) {
+          localStorage.setItem("etoro_user_key", data.user_key);
+          if (el.inputEtoroUserKey) el.inputEtoroUserKey.value = data.user_key;
+        }
       } else {
         el.etoroTestStatus.textContent = `✗ ${data.message || 'Authentication failed'}`;
         el.etoroTestStatus.style.color = "#ef4444";
@@ -668,6 +676,14 @@ if (btnHeaderTestEtoro) {
       const res = await fetch(`${BASE_URL}/api/etoro/test_connection`, { method: "POST" });
       const data = await res.json();
       if (data.connected) {
+        if (data.api_key) {
+          localStorage.setItem("etoro_api_key", data.api_key);
+          if (el.inputEtoroApiKey) el.inputEtoroApiKey.value = data.api_key;
+        }
+        if (data.user_key) {
+          localStorage.setItem("etoro_user_key", data.user_key);
+          if (el.inputEtoroUserKey) el.inputEtoroUserKey.value = data.user_key;
+        }
         alert(`✓ SUCCESS (HTTP ${data.status_code || 200}):\n\n${data.message}\n\nGateway: ${data.base_url}\nStatus: Live Authenticated`);
       } else {
         alert(`✗ Connection Status:\n\n${data.message || 'Authentication failed'}\n\nPlease click ⚙️ CONFIG to verify your ETORO_API_KEY and ETORO_USER_KEY.`);
