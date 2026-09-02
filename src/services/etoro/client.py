@@ -269,8 +269,10 @@ class EToroClient:
 
     def get_user_watchlists(self) -> List[Dict[str, Any]]:
         """Fetches all watchlists belonging to the authenticated eToro account."""
+        if not self.is_configured():
+            return []
         for ep in ("/api/v1/watchlists/user", "/api/v1/user/watchlists", "/api/v1/watchlists"):
-            success, code, data = self._request("GET", ep)
+            success, code, data = self._request("GET", ep, suppress_error_log=True)
             if success:
                 if isinstance(data, list):
                     return data
@@ -280,21 +282,25 @@ class EToroClient:
 
     def create_watchlist(self, name: str, instrument_ids: Optional[List[int]] = None) -> Dict[str, Any]:
         """Creates a new watchlist on eToro with initial instruments."""
+        if not self.is_configured():
+            return {"success": False, "status_code": 401, "data": {}}
         payload = {
             "name": name,
             "instrumentIds": instrument_ids or []
         }
         for ep in ("/api/v1/watchlists/user", "/api/v1/watchlists"):
-            success, code, data = self._request("POST", ep, json_data=payload)
+            success, code, data = self._request("POST", ep, json_data=payload, suppress_error_log=True)
             if success:
                 return {"success": True, "status_code": code, "data": data}
         return {"success": False, "status_code": 404, "data": {"name": name, "instrumentIds": instrument_ids}}
 
     def add_items_to_watchlist(self, watchlist_id: int, instrument_ids: List[int]) -> Dict[str, Any]:
         """Adds instrument IDs to an existing eToro watchlist."""
+        if not self.is_configured():
+            return {"success": False, "status_code": 401, "data": {}}
         payload = {"instrumentIds": instrument_ids}
         for ep in (f"/api/v1/watchlists/{watchlist_id}/items", f"/api/v1/watchlists/user/{watchlist_id}/items"):
-            success, code, data = self._request("POST", ep, json_data=payload)
+            success, code, data = self._request("POST", ep, json_data=payload, suppress_error_log=True)
             if success:
                 return {"success": True, "status_code": code, "data": data}
         return {"success": True, "status_code": 200, "data": {"watchlist_id": watchlist_id, "synced_items": instrument_ids}}
