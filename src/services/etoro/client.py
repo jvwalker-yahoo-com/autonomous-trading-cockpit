@@ -190,14 +190,23 @@ class EToroClient:
                 "has_user_key": bool(self.user_key)
             }
 
+        # 1. Test authenticated user endpoints (requires both valid API Key AND valid User Key)
+        user_endpoints = [
+            "/api/v1/balances/accounts",
+            "/api/v1/trading/positions",
+            "/api/v1/trading/execution/positions",
+            "/api/v1/identity/profile"
+        ]
+
         # Orientation 1: Standard
-        for ep in ("/api/v1/balances/accounts", "/api/v1/trading/real/portfolio", "/api/v1/identity/profile", "/api/v1/market-data/instruments?search=AAPL"):
+        for ep in user_endpoints:
             success, status_code, data = self._request("GET", ep, suppress_error_log=True)
             if success:
                 return {
                     "status": "connected",
                     "connected": True,
-                    "message": "✓ Successfully authenticated with eToro Public API (HTTP 200)!",
+                    "trading_enabled": True,
+                    "message": "✓ Successfully authenticated with eToro Account & Trading API (HTTP 200)!",
                     "status_code": status_code,
                     "base_url": self.base_url,
                     "api_key": self.api_key,
@@ -206,16 +215,17 @@ class EToroClient:
                     "timestamp": time.time()
                 }
 
-        # Orientation 2: Try swapped (if user pasted User Key into API Key box and vice versa)
+        # Orientation 2: Try swapped
         self.api_key, self.user_key = self.user_key, self.api_key
-        for ep in ("/api/v1/balances/accounts", "/api/v1/trading/real/portfolio", "/api/v1/identity/profile", "/api/v1/market-data/instruments?search=AAPL"):
+        for ep in user_endpoints:
             success, status_code, data = self._request("GET", ep, suppress_error_log=True)
             if success:
                 logger.info("✓ Auto-detected and aligned swapped eToro API Key and User Key orientation!")
                 return {
                     "status": "connected",
                     "connected": True,
-                    "message": "✓ Successfully authenticated with eToro Public API (Keys auto-aligned)!",
+                    "trading_enabled": True,
+                    "message": "✓ Successfully authenticated with eToro Account & Trading API (Keys auto-aligned)!",
                     "status_code": status_code,
                     "base_url": self.base_url,
                     "api_key": self.api_key,
@@ -223,13 +233,27 @@ class EToroClient:
                     "profile": data,
                     "timestamp": time.time()
                 }
-        
-        # Revert swap if neither succeeded
+
+        # Revert swap
         self.api_key, self.user_key = self.user_key, self.api_key
+
+        # Check if Market Data (Public API Key) passes
+        m_success, m_code, m_data = self._request("GET", "/api/v1/market-data/instruments?search=AAPL", suppress_error_log=True)
+        if m_success:
+            return {
+                "status": "partial_authentication",
+                "connected": False,
+                "trading_enabled": False,
+                "message": f"⚠️ Public API Key is VALID, but eToro rejected your User Key (HTTP 401).\n\nAction Required:\n1. Log into api-portal.etoro.com\n2. Go to Settings -> API Key Management\n3. Generate a new User Key linked to your account\n4. Paste it into ETORO_USER_KEY in Settings.",
+                "status_code": 401,
+                "base_url": self.base_url,
+                "api_key": self.api_key
+            }
 
         return {
             "status": "authentication_failed",
             "connected": False,
+            "trading_enabled": False,
             "message": f"Authentication rejected by eToro API ({self.base_url}) - HTTP 401 Unauthorized.\n\nPlease verify:\n1. Your Public API Key is from api-portal.etoro.com\n2. Your User Key matches your eToro account\n3. No extra spaces or missing characters.",
             "status_code": 401,
             "error_details": {"errorCode": "Unauthorized"},

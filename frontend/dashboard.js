@@ -399,9 +399,16 @@ async function triggerManualTrade(action) {
       })
     });
     if (res.ok) {
+      const data = await res.json();
       await fetchCockpitData();
       if (currentExecutionMode === "live") {
-        alert(`⚡ LIVE ETORO ORDER SUBMITTED!\n\nAction: ${action} ${activeSymbol}\nAmount: $500.00\nStatus: Sent to eToro live account.`);
+        if (data.etoro_result && data.etoro_result.success) {
+          alert(`✓ LIVE ETORO ORDER FILLED!\n\nAction: ${action} ${activeSymbol}\nAmount: $500.00\nStatus: Successfully placed on eToro!\n\nOrder Info: ${JSON.stringify(data.etoro_result.order)}`);
+        } else if (data.etoro_result && !data.etoro_result.success) {
+          alert(`⚠️ eToro Rejected Live Order (HTTP ${data.etoro_result.status_code || 401}):\n\n${JSON.stringify(data.etoro_result.order || data.etoro_result.error)}\n\nPlease ensure your eToro User Key is generated for your active portfolio in api-portal.etoro.com.`);
+        } else {
+          alert(`⚡ Order dispatched for ${action} ${activeSymbol}.`);
+        }
       } else {
         alert(`🛡️ SIMULATION ORDER EXECUTED (DEMO MODE)\n\nAction: ${action} ${activeSymbol}\nAmount: $500.00\n\nNote: You are currently in DEMO mode. To place real orders on your eToro account, click the green '🛡️ DEMO / LEARNING' button in the top bar to switch to '⚡ LIVE ETORO'.`);
       }
