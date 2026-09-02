@@ -398,12 +398,13 @@ class EToroClient:
         if take_profit_rate is not None:
             payload["TakeProfitRate"] = round(float(take_profit_rate), 4)
 
-        # Official eToro execution endpoints
+        # Official eToro execution endpoints (try Real, then Demo fallback)
         endpoints = [
             f"/api/v1/trading/execution/{'demo/' if is_demo else ''}market-open-orders/by-amount",
-            f"/trading/execution/{'demo/' if is_demo else ''}market-open-orders/by-amount",
-            f"/api/v1/trading/{mode.lower()}/orders",
-            f"/api/v1/trading/orders"
+            "/api/v1/trading/execution/market-open-orders/by-amount",
+            "/api/v1/trading/execution/demo/market-open-orders/by-amount",
+            "/api/v1/trading/real/orders",
+            "/api/v1/trading/orders"
         ]
 
         for ep in endpoints:
@@ -414,23 +415,27 @@ class EToroClient:
             else:
                 logger.warning(f"[eToro Order Attempt] POST {ep} -> HTTP {code}: {data}")
 
-        # Fallback: Try simplified payload without strict SL/TP bounds if broker has dynamic tick constraints
+        # Fallback: Try dual casing without strict SL/TP bounds
         simple_payload = {
             "InstrumentID": int(instrument_id),
+            "instrumentId": int(instrument_id),
             "IsBuy": direction.upper() in ("BUY", "LONG"),
+            "isBuy": direction.upper() in ("BUY", "LONG"),
             "Amount": round(float(amount_usd), 2),
-            "Leverage": int(leverage)
+            "amount": round(float(amount_usd), 2),
+            "Leverage": int(leverage),
+            "leverage": int(leverage)
         }
-        for ep in endpoints[:2]:
+        for ep in endpoints[:3]:
             success, code, data = self._request("POST", ep, json_data=simple_payload)
             if success or code in (200, 201, 202):
-                logger.info(f"⚡ [eToro Live Order Submitted (Simplified)] {direction} ${amount_usd:.2f} on Instrument {instrument_id} -> HTTP {code}: {data}")
+                logger.info(f"⚡ [eToro Live Order Submitted (Dual-Casing)] {direction} ${amount_usd:.2f} on Instrument {instrument_id} -> HTTP {code}: {data}")
                 return {"success": True, "status_code": code, "order": data}
             else:
-                logger.warning(f"[eToro Simplified Order Attempt] POST {ep} -> HTTP {code}: {data}")
+                logger.warning(f"[eToro Dual-Casing Attempt] POST {ep} -> HTTP {code}: {data}")
 
         logger.warning(f"eToro order execution returned non-200 for Instrument {instrument_id}: {payload}")
-        return {"success": False, "status_code": 404, "order": payload}
+        return {"success": False, "status_code": code if 'code' in locals() else 404, "order": payload}
 
     def close_position(
         self,
