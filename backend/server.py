@@ -530,16 +530,38 @@ def execute_manual_action(req: ManualTradeRequest):
     """Executes a manual Buy, Short, or Close position order."""
     quote = data_feed.get_latest_quote(req.symbol)
     if req.action.upper() == "CLOSE":
+        if config.execution_mode == "live" and etoro_client.is_configured():
+            try:
+                etoro_client.close_position(req.symbol, mode="real")
+            except Exception as e:
+                logger.error(f"eToro manual live close exception: {e}")
         trade = broker.close_position(req.symbol, quote.price, exit_rationale="Manual user close")
         if not trade:
             raise HTTPException(status_code=400, detail="No active position found for this symbol")
         return {"status": "success", "closed_trade": trade}
     
     direction = "LONG" if req.action.upper() == "BUY" else "SHORT"
+    alloc_usd = req.amount_usd or 150.0
+
+    if config.execution_mode == "live" and etoro_client.is_configured():
+        inst_id = etoro_client.resolve_instrument_id(req.symbol)
+        logger.info(f"⚡ [MANUAL LIVE ETORO ORDER] {direction} on {req.symbol} (ID: {inst_id}) for ${alloc_usd:.2f}...")
+        try:
+            etoro_client.create_order(
+                instrument_id=inst_id or 1001,
+                direction=direction,
+                amount_usd=alloc_usd,
+                stop_loss_rate=round(quote.price * (1.0 - config.default_stop_loss_pct), 2),
+                take_profit_rate=round(quote.price * (1.0 + config.default_take_profit_pct), 2),
+                mode="real"
+            )
+        except Exception as e:
+            logger.error(f"eToro manual live order exception: {e}")
+
     pos = broker.execute_order(
         symbol=req.symbol,
         direction=direction,
-        allocated_usd=req.amount_usd or 500.0,
+        allocated_usd=alloc_usd,
         current_price=quote.price,
         rationale=f"Manual user execution of {direction} on {req.symbol}"
     )
