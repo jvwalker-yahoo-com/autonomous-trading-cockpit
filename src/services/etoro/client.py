@@ -87,7 +87,7 @@ class EToroClient:
         Builds standard required eToro HTTP headers, injecting
         x-api-key, x-user-key, and a unique UUID v4 x-request-id.
         """
-        return {
+        headers = {
             "x-api-key": self.api_key,
             "x-user-key": self.user_key,
             "x-request-id": str(uuid.uuid4()),
@@ -95,6 +95,7 @@ class EToroClient:
             "Accept": "application/json",
             "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-Client)"
         }
+        return headers
 
     def _request(
         self,
@@ -108,6 +109,9 @@ class EToroClient:
         """
         Executes HTTP request to eToro API with automatic exponential backoff for HTTP 429 rate limits.
         """
+        if not self.is_configured():
+            return False, 401, {"message": "eToro credentials not configured."}
+
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         
         for attempt in range(1, self.max_retries + 1):
@@ -148,7 +152,7 @@ class EToroClient:
                 if 200 <= response.status_code < 300:
                     return True, response.status_code, res_json
                 else:
-                    if suppress_error_log or response.status_code == 404:
+                    if suppress_error_log or response.status_code in (401, 404, 405):
                         logger.debug(
                             f"[eToro API Probe] {method} {endpoint} -> HTTP {response.status_code} (x-request-id: {req_id})"
                         )
@@ -174,51 +178,61 @@ class EToroClient:
     def test_connection(self) -> Dict[str, Any]:
         """
         Tests and verifies connection to the eToro API without placing any trades.
-        Validates API keys and queries the identity/profile and system status.
+        Validates API keys across standard and swapped header orientations.
         """
         if not self.is_configured():
             return {
                 "status": "unconfigured",
                 "connected": False,
-                "message": "eToro API credentials missing. Please configure ETORO_API_KEY and ETORO_USER_KEY in .env or Settings.",
+                "message": "eToro API credentials missing. Please configure ETORO_API_KEY and ETORO_USER_KEY in Settings.",
                 "base_url": self.base_url,
                 "has_api_key": bool(self.api_key),
                 "has_user_key": bool(self.user_key)
             }
 
-        # 1. Try balances, profile, or portfolio endpoint
-        for ep in ("/api/v1/balances/accounts", "/api/v1/trading/real/portfolio", "/api/v1/identity/profile"):
+        # Orientation 1: Standard
+        for ep in ("/api/v1/balances/accounts", "/api/v1/trading/real/portfolio", "/api/v1/identity/profile", "/api/v1/market-data/instruments?search=AAPL"):
             success, status_code, data = self._request("GET", ep, suppress_error_log=True)
             if success:
                 return {
                     "status": "connected",
                     "connected": True,
-                    "message": "✓ Successfully authenticated with eToro Public API!",
+                    "message": "✓ Successfully authenticated with eToro Public API (HTTP 200)!",
                     "status_code": status_code,
                     "base_url": self.base_url,
+                    "api_key": self.api_key,
+                    "user_key": self.user_key,
                     "profile": data,
                     "timestamp": time.time()
                 }
 
-        # 2. Check market data fallback
-        m_success, m_code, m_data = self._request("GET", "/api/v1/market-data/instruments?search=AAPL", suppress_error_log=True)
-        if m_success:
-            return {
-                "status": "connected_market_data",
-                "connected": True,
-                "message": "✓ Authenticated with eToro Market Data API!",
-                "status_code": m_code,
-                "base_url": self.base_url,
-                "details": m_data,
-                "timestamp": time.time()
-            }
+        # Orientation 2: Try swapped (if user pasted User Key into API Key box and vice versa)
+        self.api_key, self.user_key = self.user_key, self.api_key
+        for ep in ("/api/v1/balances/accounts", "/api/v1/trading/real/portfolio", "/api/v1/identity/profile", "/api/v1/market-data/instruments?search=AAPL"):
+            success, status_code, data = self._request("GET", ep, suppress_error_log=True)
+            if success:
+                logger.info("✓ Auto-detected and aligned swapped eToro API Key and User Key orientation!")
+                return {
+                    "status": "connected",
+                    "connected": True,
+                    "message": "✓ Successfully authenticated with eToro Public API (Keys auto-aligned)!",
+                    "status_code": status_code,
+                    "base_url": self.base_url,
+                    "api_key": self.api_key,
+                    "user_key": self.user_key,
+                    "profile": data,
+                    "timestamp": time.time()
+                }
+        
+        # Revert swap if neither succeeded
+        self.api_key, self.user_key = self.user_key, self.api_key
 
         return {
             "status": "authentication_failed",
             "connected": False,
-            "message": f"Authentication rejected by eToro API ({self.base_url}). Please verify your ETORO_API_KEY and ETORO_USER_KEY in Settings.",
-            "status_code": status_code if 'status_code' in locals() else 401,
-            "error_details": data if 'data' in locals() else {},
+            "message": f"Authentication rejected by eToro API ({self.base_url}) - HTTP 401 Unauthorized.\n\nPlease verify:\n1. Your Public API Key is from api-portal.etoro.com\n2. Your User Key matches your eToro account\n3. No extra spaces or missing characters.",
+            "status_code": 401,
+            "error_details": {"errorCode": "Unauthorized"},
             "base_url": self.base_url
         }
 
