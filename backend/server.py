@@ -88,14 +88,33 @@ async def start_autonomous_background_worker():
     asyncio.create_task(autonomous_background_worker_loop())
 
 async def autonomous_background_worker_loop():
-    logger.info("Autonomous Background Trading Loop initialized.")
+    logger.info("Autonomous Background Trading Loop initialized with Multi-Asset Auto-Discovery.")
+    last_universe_scan = 0.0
+
     while True:
         try:
-            for sym in config.watchlist:
+            now = time.time()
+            # Dynamic multi-asset discovery across Equities, Crypto (24/7), Commodities, Indices, and ETFs
+            if config.auto_rotate_universe and (now - last_universe_scan > config.universe_scan_interval_sec):
+                last_universe_scan = now
+                try:
+                    top_screened = screener.scan_universe(top_n=20)
+                    screened_syms = [s["symbol"] for s in top_screened if s.get("opportunity_score", 0) >= 60]
+                    if screened_syms:
+                        combined = list(dict.fromkeys(screened_syms + config.watchlist))[:25]
+                        config.watchlist = combined
+                        logger.info(f"✨ [AUTONOMOUS ASSET SELECTION] Rotated active universe to {len(screened_syms)} top opportunities: {screened_syms[:8]} (Total active: {len(config.watchlist)})")
+                except Exception as ex:
+                    logger.warning(f"Dynamic asset discovery notice: {ex}")
+
+            # Cycle analysis across all currently active dynamic watchlist assets
+            for sym in list(config.watchlist):
                 run_analysis_cycle(sym)
                 await asyncio.sleep(0.3)
+
         except Exception as e:
             logger.error(f"Autonomous background cycle exception: {e}")
+
         await asyncio.sleep(config.execution_loop_interval)
 
 # CORS enabled for static hosting / global access

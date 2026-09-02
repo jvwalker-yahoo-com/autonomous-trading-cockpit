@@ -53,6 +53,8 @@ class SystemConfig(BaseModel):
     watchlist: List[str] = [
         "MARA", "IREN", "SOXL", "TQQQ", "MSFT", "META", "APLD", "SPY", "QQQ", "BULL", "URA", "HOOD", "SOFI"
     ]
+    auto_rotate_universe: bool = os.getenv("AUTO_ROTATE_UNIVERSE", "true").lower() in ("true", "1", "yes")
+    universe_scan_interval_sec: float = float(os.getenv("UNIVERSE_SCAN_INTERVAL_SEC", "30.0"))
     
     # Email Reporting (PDF Delivery to lisawalker6898@gmail.com)
     report_recipient_email: str = os.getenv("REPORT_RECIPIENT_EMAIL", "lisawalker6898@gmail.com")
