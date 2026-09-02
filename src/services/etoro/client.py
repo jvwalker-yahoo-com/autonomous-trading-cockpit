@@ -68,7 +68,12 @@ class EToroClient:
     ):
         self.api_key = (api_key or os.getenv("ETORO_API_KEY", "")).strip()
         self.user_key = (user_key or os.getenv("ETORO_USER_KEY", "")).strip()
-        self.base_url = (base_url or os.getenv("ETORO_BASE_URL", "https://api.etoro.com")).rstrip("/")
+        
+        raw_url = (base_url or os.getenv("ETORO_BASE_URL", "https://public-api.etoro.com")).strip().rstrip("/")
+        if "api.etoro.com" in raw_url and "public-api.etoro.com" not in raw_url:
+            raw_url = raw_url.replace("api.etoro.com", "public-api.etoro.com")
+        self.base_url = raw_url or "https://public-api.etoro.com"
+        
         self.max_retries = max_retries
         self.base_backoff_sec = base_backoff_sec
         self._instrument_cache: Dict[str, int] = dict(SYMBOL_TO_ETORO_ID)
@@ -181,41 +186,41 @@ class EToroClient:
                 "has_user_key": bool(self.user_key)
             }
 
-        # 1. Ping identity profile endpoint
-        success, status_code, data = self._request("GET", "/api/v1/identity/profile")
-        
-        if success:
-            return {
-                "status": "connected",
-                "connected": True,
-                "message": "✓ Successfully authenticated with eToro API!",
-                "status_code": status_code,
-                "base_url": self.base_url,
-                "profile": data,
-                "timestamp": time.time()
-            }
-        else:
-            # Check market data fallback if identity requires OAuth scope
-            m_success, m_code, m_data = self._request("GET", "/api/v1/market-data/instruments?search=AAPL")
-            if m_success:
+        # 1. Try balances, profile, or portfolio endpoint
+        for ep in ("/api/v1/balances/accounts", "/api/v1/trading/real/portfolio", "/api/v1/identity/profile"):
+            success, status_code, data = self._request("GET", ep, suppress_error_log=True)
+            if success:
                 return {
-                    "status": "connected_market_data",
+                    "status": "connected",
                     "connected": True,
-                    "message": "✓ Authenticated with eToro Market Data API!",
-                    "status_code": m_code,
+                    "message": "✓ Successfully authenticated with eToro Public API!",
+                    "status_code": status_code,
                     "base_url": self.base_url,
-                    "details": m_data,
+                    "profile": data,
                     "timestamp": time.time()
                 }
 
+        # 2. Check market data fallback
+        m_success, m_code, m_data = self._request("GET", "/api/v1/market-data/instruments?search=AAPL", suppress_error_log=True)
+        if m_success:
             return {
-                "status": "authentication_failed",
-                "connected": False,
-                "message": f"Authentication rejected by eToro API (HTTP {status_code}). Please verify your ETORO_API_KEY and ETORO_USER_KEY.",
-                "status_code": status_code,
-                "error_details": data,
-                "base_url": self.base_url
+                "status": "connected_market_data",
+                "connected": True,
+                "message": "✓ Authenticated with eToro Market Data API!",
+                "status_code": m_code,
+                "base_url": self.base_url,
+                "details": m_data,
+                "timestamp": time.time()
             }
+
+        return {
+            "status": "authentication_failed",
+            "connected": False,
+            "message": f"Authentication rejected by eToro API ({self.base_url}). Please verify your ETORO_API_KEY and ETORO_USER_KEY in Settings.",
+            "status_code": status_code if 'status_code' in locals() else 401,
+            "error_details": data if 'data' in locals() else {},
+            "base_url": self.base_url
+        }
 
     def get_account_balances(self) -> Dict[str, Any]:
         """Fetches cash balance, total invested, and equity from eToro."""

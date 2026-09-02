@@ -22,7 +22,7 @@ class SystemConfig(BaseModel):
     # Official eToro API Credentials
     etoro_api_key: str = os.getenv("ETORO_API_KEY", "")
     etoro_user_key: str = os.getenv("ETORO_USER_KEY", "")
-    etoro_base_url: str = os.getenv("ETORO_BASE_URL", "https://api.etoro.com")
+    etoro_base_url: str = os.getenv("ETORO_BASE_URL", "https://public-api.etoro.com")
     
     # Mode & Execution ('demo' = Virtual Simulation & Self-Learning, 'live' = Real eToro API Execution)
     execution_mode: str = os.getenv("EXECUTION_MODE", "demo").lower() # 'demo' or 'live'

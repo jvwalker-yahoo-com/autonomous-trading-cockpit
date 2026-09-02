@@ -604,7 +604,7 @@ if (el.btnTestEtoroConn) {
       // First save keys if user typed them in
       const apiKey = el.inputEtoroApiKey?.value.trim() || "";
       const userKey = el.inputEtoroUserKey?.value.trim() || "";
-      const baseUrl = el.inputEtoroBaseUrl?.value.trim() || "https://api.etoro.com";
+      const baseUrl = el.inputEtoroBaseUrl?.value.trim() || "https://public-api.etoro.com";
 
       if (apiKey || userKey) {
         await fetch(`${BASE_URL}/api/config`, {
