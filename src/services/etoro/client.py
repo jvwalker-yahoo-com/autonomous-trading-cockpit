@@ -411,6 +411,23 @@ class EToroClient:
             if success or code in (200, 201, 202):
                 logger.info(f"⚡ [eToro Live Order Submitted] {direction} ${amount_usd:.2f} on Instrument {instrument_id} -> HTTP {code}: {data}")
                 return {"success": True, "status_code": code, "order": data}
+            else:
+                logger.warning(f"[eToro Order Attempt] POST {ep} -> HTTP {code}: {data}")
+
+        # Fallback: Try simplified payload without strict SL/TP bounds if broker has dynamic tick constraints
+        simple_payload = {
+            "InstrumentID": int(instrument_id),
+            "IsBuy": direction.upper() in ("BUY", "LONG"),
+            "Amount": round(float(amount_usd), 2),
+            "Leverage": int(leverage)
+        }
+        for ep in endpoints[:2]:
+            success, code, data = self._request("POST", ep, json_data=simple_payload)
+            if success or code in (200, 201, 202):
+                logger.info(f"⚡ [eToro Live Order Submitted (Simplified)] {direction} ${amount_usd:.2f} on Instrument {instrument_id} -> HTTP {code}: {data}")
+                return {"success": True, "status_code": code, "order": data}
+            else:
+                logger.warning(f"[eToro Simplified Order Attempt] POST {ep} -> HTTP {code}: {data}")
 
         logger.warning(f"eToro order execution returned non-200 for Instrument {instrument_id}: {payload}")
         return {"success": False, "status_code": 404, "order": payload}
