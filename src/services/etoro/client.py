@@ -363,14 +363,20 @@ class EToroClient:
         """
         payload = {
             "InstrumentID": instrument_id,
+            "instrumentId": instrument_id,
             "IsBuy": direction.upper() in ("BUY", "LONG"),
+            "isBuy": direction.upper() in ("BUY", "LONG"),
             "Amount": amount_usd,
-            "Leverage": leverage
+            "amount": amount_usd,
+            "Leverage": leverage,
+            "leverage": leverage
         }
         if stop_loss_rate is not None:
             payload["StopLossRate"] = stop_loss_rate
+            payload["stopLossRate"] = stop_loss_rate
         if take_profit_rate is not None:
             payload["TakeProfitRate"] = take_profit_rate
+            payload["takeProfitRate"] = take_profit_rate
 
         # Try trading endpoints
         for ep in (f"/api/v1/trading/{mode.lower()}/orders", f"/api/v1/trading/orders", f"/api/v1/trading/market-orders", f"/api/v1/orders"):
