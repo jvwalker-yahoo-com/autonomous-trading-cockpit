@@ -10,10 +10,12 @@ const BASE_URL = window.location.origin.includes("localhost") || window.location
   : window.location.origin;
 
 let activeSymbol = "AAPL";
+let currentSymbol = "AAPL";
 let isPolling = true;
 let pollTimer = null;
 
 // DOM Elements Cache
+const assetSelect = document.getElementById("symbolSelect");
 const el = {
   // Top Nav
   symbolSelect: document.getElementById("symbolSelect"),
@@ -1660,6 +1662,18 @@ if (btnAutoAddTopScreened) {
 }
 
 // Initialization & Loop
-updateWatchlistUI();
-fetchCockpitData();
-pollTimer = setInterval(fetchCockpitData, 1500);
+try {
+  updateWatchlistUI();
+} catch (e) {
+  console.error("updateWatchlistUI error on boot:", e);
+}
+
+try {
+  fetchCockpitData();
+} catch (e) {
+  console.error("fetchCockpitData error on boot:", e);
+}
+
+pollTimer = setInterval(() => {
+  fetchCockpitData().catch(e => console.warn("Poll interval error:", e));
+}, 1500);
