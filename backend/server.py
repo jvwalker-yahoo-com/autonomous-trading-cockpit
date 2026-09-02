@@ -4,6 +4,7 @@ Provides all 10 core endpoints specified in the architectural design, plus live 
 self-learning evaluation, Finnhub integration, and static UI serving.
 """
 import os
+import time
 import asyncio
 import logging
 from pathlib import Path
