@@ -476,13 +476,39 @@ function updateExecutionModeUI(mode) {
   }
 }
 
-// Check initial status on startup
+// Check initial status on startup & auto-rehydrate from localStorage
 async function fetchEtoroStatus() {
   try {
+    const localApiKey = localStorage.getItem("etoro_api_key") || "";
+    const localUserKey = localStorage.getItem("etoro_user_key") || "";
+    const localBaseUrl = localStorage.getItem("etoro_base_url") || "https://api.etoro.com";
+    const localMode = localStorage.getItem("execution_mode") || "demo";
+
     const res = await fetch(`${BASE_URL}/api/etoro/status`);
     if (res.ok) {
       const data = await res.json();
-      updateExecutionModeUI(data.execution_mode || "demo");
+      
+      // Auto-rehydrate backend credentials from localStorage if server restarted
+      if (!data.is_configured && (localApiKey || localUserKey)) {
+        await fetch(`${BASE_URL}/api/config`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            etoro_api_key: localApiKey || null,
+            etoro_user_key: localUserKey || null,
+            etoro_base_url: localBaseUrl
+          })
+        });
+        if (localMode === "live") {
+          await fetch(`${BASE_URL}/api/mode/switch`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: "live" })
+          });
+        }
+      }
+
+      updateExecutionModeUI(data.execution_mode || localMode || "demo");
     }
   } catch (e) {
     console.error("Error fetching eToro status:", e);
@@ -501,6 +527,7 @@ if (el.btnModeToggle) {
           body: JSON.stringify({ mode: "demo" })
         });
         if (res.ok) {
+          localStorage.setItem("execution_mode", "demo");
           updateExecutionModeUI("demo");
           alert("Switched back to 🛡️ DEMO & LEARNING SIMULATION mode.");
         }
@@ -553,6 +580,7 @@ if (el.btnConfirmLiveMode) {
         if (el.settingsModal) el.settingsModal.classList.remove("hidden");
         return;
       }
+      localStorage.setItem("execution_mode", "live");
       updateExecutionModeUI("live");
       if (el.modeSwitchModal) el.modeSwitchModal.classList.add("hidden");
       alert("⚡ LIVE eToro Trading Engaged! Orders will be transmitted to your connected eToro account.");
@@ -701,9 +729,14 @@ el.btnSaveConfig.addEventListener("click", async () => {
     })
   });
 
+  if (etoroApiKey) localStorage.setItem("etoro_api_key", etoroApiKey);
+  if (etoroUserKey) localStorage.setItem("etoro_user_key", etoroUserKey);
+  if (etoroBaseUrl) localStorage.setItem("etoro_base_url", etoroBaseUrl);
+  if (execMode) localStorage.setItem("execution_mode", execMode);
+
   updateExecutionModeUI(execMode);
   el.settingsModal.classList.add("hidden");
-  alert("✓ Configuration and eToro API settings saved successfully!");
+  alert("✓ Configuration and eToro API settings saved successfully (Persisted to disk & browser)!");
   fetchCockpitData();
 });
 

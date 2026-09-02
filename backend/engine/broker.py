@@ -230,11 +230,23 @@ class SimulatedBroker:
         self.save_state()
         return trade_record
 
-    def save_state(self):
-        """Persists portfolio ledger and learned weights to disk."""
+    def save_state(self, settings: Optional[Dict[str, Any]] = None):
+        """Persists portfolio ledger, learned weights, and system settings to disk."""
         if not self.db_path:
             return
         try:
+            # Preserve existing settings if not provided
+            existing_settings = {}
+            if os.path.exists(self.db_path):
+                try:
+                    with open(self.db_path, "r", encoding="utf-8") as f:
+                        existing_state = json.load(f)
+                        existing_settings = existing_state.get("settings", {})
+                except Exception:
+                    pass
+
+            merged_settings = existing_settings if settings is None else {**existing_settings, **settings}
+
             state = {
                 "initial_capital": self.initial_capital,
                 "cash": self.cash,
@@ -247,22 +259,23 @@ class SimulatedBroker:
                 "winning_trades_count": self.learner.winning_trades_count,
                 "losing_trades_count": self.learner.losing_trades_count,
                 "total_win_usd": self.learner.total_win_usd,
-                "total_loss_usd": self.learner.total_loss_usd
+                "total_loss_usd": self.learner.total_loss_usd,
+                "settings": merged_settings
             }
             with open(self.db_path, "w", encoding="utf-8") as f:
                 json.dump(state, f, indent=2)
         except Exception:
             pass
 
-    def load_state(self):
-        """Loads persistent portfolio ledger and learner parameters."""
+    def load_state(self) -> Dict[str, Any]:
+        """Loads persistent portfolio ledger, learner parameters, and saved settings."""
         if not self.db_path or not os.path.exists(self.db_path):
-            return
+            return {}
         try:
             with open(self.db_path, "r", encoding="utf-8") as f:
                 state = json.load(f)
-            self.initial_capital = state.get("initial_capital", 10000.0)
-            self.cash = state.get("cash", 10000.0)
+            self.initial_capital = state.get("initial_capital", self.initial_capital)
+            self.cash = state.get("cash", self.initial_capital)
             self.peak_equity = state.get("peak_equity", self.cash)
             
             raw_pos = state.get("positions", {})
@@ -279,8 +292,10 @@ class SimulatedBroker:
                 self.learner.losing_trades_count = state.get("losing_trades_count", 0)
                 self.learner.total_win_usd = state.get("total_win_usd", 0.0)
                 self.learner.total_loss_usd = state.get("total_loss_usd", 0.0)
+            
+            return state.get("settings", {})
         except Exception:
-            pass
+            return {}
 
     def close_all_positions(self, current_prices: Optional[Dict[str, float]] = None, exit_rationale: str = "End-of-day market close") -> List[TradeRecord]:
         """Closes all currently open positions at their latest prices and logs them to the trade ledger."""

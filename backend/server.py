@@ -55,6 +55,24 @@ learner = AdaptiveLearner()
 broker = SimulatedBroker(initial_capital=config.initial_capital, db_path=config.db_path, learner=learner)
 backtester = BacktesterEngine()
 
+# Restore persisted system settings from disk
+saved_settings = broker.load_state()
+if saved_settings:
+    if "execution_mode" in saved_settings and saved_settings["execution_mode"]:
+        config.execution_mode = saved_settings["execution_mode"]
+    if "etoro_api_key" in saved_settings and saved_settings["etoro_api_key"]:
+        config.etoro_api_key = saved_settings["etoro_api_key"]
+        etoro_client.api_key = config.etoro_api_key
+    if "etoro_user_key" in saved_settings and saved_settings["etoro_user_key"]:
+        config.etoro_user_key = saved_settings["etoro_user_key"]
+        etoro_client.user_key = config.etoro_user_key
+    if "etoro_base_url" in saved_settings and saved_settings["etoro_base_url"]:
+        config.etoro_base_url = saved_settings["etoro_base_url"]
+        etoro_client.base_url = config.etoro_base_url
+    if "finnhub_api_key" in saved_settings and saved_settings["finnhub_api_key"]:
+        config.finnhub_api_key = saved_settings["finnhub_api_key"]
+        data_feed.set_api_key(config.finnhub_api_key)
+
 active_symbol = "AAPL"
 is_autonomous_loop_running = True
 
@@ -576,6 +594,15 @@ def update_system_config(req: ConfigUpdateRequest):
         config.simulation_mode = req.simulation_mode
     if req.risk_per_trade_pct is not None:
         config.risk_per_trade_pct = req.risk_per_trade_pct
+
+    # Persist updated settings to disk
+    broker.save_state({
+        "execution_mode": config.execution_mode,
+        "etoro_api_key": config.etoro_api_key,
+        "etoro_user_key": config.etoro_user_key,
+        "etoro_base_url": config.etoro_base_url,
+        "finnhub_api_key": config.finnhub_api_key
+    })
     return {"status": "updated", "config": get_system_config()}
 
 # ==========================================
@@ -612,6 +639,8 @@ def switch_execution_mode(req: ModeSwitchRequest):
         )
 
     config.execution_mode = target_mode
+    # Persist execution mode to disk
+    broker.save_state({"execution_mode": config.execution_mode})
     logger.info(f"Execution mode switched to: {config.execution_mode.upper()}")
 
     sync_info = None

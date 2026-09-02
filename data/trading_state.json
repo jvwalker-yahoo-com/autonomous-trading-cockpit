@@ -15,5 +15,8 @@
   "winning_trades_count": 0,
   "losing_trades_count": 0,
   "total_win_usd": 0.0,
-  "total_loss_usd": 0.0
+  "total_loss_usd": 0.0,
+  "settings": {
+    "execution_mode": "demo"
+  }
 }
