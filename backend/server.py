@@ -29,6 +29,7 @@ from .engine.broker import SimulatedBroker
 from .engine.backtester import BacktesterEngine, BacktestResult, OptimizationResult
 from .engine.reporter import ReportPDFGenerator, EmailReportDispatcher
 from .engine.screener import MarketScreener, MASTER_STOCK_UNIVERSE, PRESET_WATCHLISTS
+from .engine.etoro_client import EToroClient
 from .engine.data_feed import BASE_PRICES
 from .engine.models import (
     RegimeState, FederationOutput, ArbitrationOutput,
@@ -42,6 +43,7 @@ logger = logging.getLogger("auton-cockpit")
 
 # Instantiate Core Engine Components
 data_feed = DataFeedManager(api_key=config.finnhub_api_key)
+etoro_client = EToroClient(api_key=config.etoro_api_key, user_key=config.etoro_user_key, base_url=config.etoro_base_url)
 metrics_module = MetricsModule()
 regime_module = RegimeModule()
 federation_module = FederationModule()
@@ -92,6 +94,13 @@ class ConfigUpdateRequest(BaseModel):
     active_symbol: Optional[str] = None
     simulation_mode: Optional[bool] = None
     risk_per_trade_pct: Optional[float] = None
+    etoro_api_key: Optional[str] = None
+    etoro_user_key: Optional[str] = None
+    etoro_base_url: Optional[str] = None
+    execution_mode: Optional[str] = None
+
+class ModeSwitchRequest(BaseModel):
+    mode: str # "demo" or "live"
 
 class ManualTradeRequest(BaseModel):
     symbol: str
@@ -506,6 +515,10 @@ def get_system_config():
     """Returns current system configuration and API status."""
     return {
         "finnhub_api_key_configured": bool(config.finnhub_api_key and len(config.finnhub_api_key) > 5),
+        "etoro_api_key_configured": bool(config.etoro_api_key and len(config.etoro_api_key) > 5),
+        "etoro_user_key_configured": bool(config.etoro_user_key and len(config.etoro_user_key) > 5),
+        "etoro_base_url": config.etoro_base_url,
+        "execution_mode": config.execution_mode,
         "active_symbol": active_symbol,
         "simulation_mode": config.simulation_mode,
         "watchlist": config.watchlist,
@@ -521,6 +534,17 @@ def update_system_config(req: ConfigUpdateRequest):
     if req.finnhub_api_key is not None:
         config.finnhub_api_key = req.finnhub_api_key.strip()
         data_feed.set_api_key(config.finnhub_api_key)
+    if req.etoro_api_key is not None:
+        config.etoro_api_key = req.etoro_api_key.strip()
+        etoro_client.api_key = config.etoro_api_key
+    if req.etoro_user_key is not None:
+        config.etoro_user_key = req.etoro_user_key.strip()
+        etoro_client.user_key = config.etoro_user_key
+    if req.etoro_base_url is not None:
+        config.etoro_base_url = req.etoro_base_url.strip()
+        etoro_client.base_url = config.etoro_base_url
+    if req.execution_mode is not None:
+        config.execution_mode = req.execution_mode.strip().lower()
     if req.active_symbol:
         active_symbol = req.active_symbol.upper()
     if req.simulation_mode is not None:
@@ -528,6 +552,47 @@ def update_system_config(req: ConfigUpdateRequest):
     if req.risk_per_trade_pct is not None:
         config.risk_per_trade_pct = req.risk_per_trade_pct
     return {"status": "updated", "config": get_system_config()}
+
+# ==========================================
+# ETORO LIVE INTEGRATION & MODE SWITCH APIS
+# ==========================================
+
+@app.get("/api/etoro/status", tags=["eToro Live Integration"])
+def get_etoro_status():
+    """Returns eToro API configuration, credentials presence, and active execution mode."""
+    return {
+        "execution_mode": config.execution_mode,
+        "is_configured": etoro_client.is_configured(),
+        "base_url": etoro_client.base_url,
+        "has_api_key": bool(etoro_client.api_key),
+        "has_user_key": bool(etoro_client.user_key)
+    }
+
+@app.post("/api/etoro/test_connection", tags=["eToro Live Integration"])
+def test_etoro_connection():
+    """Validates eToro API credentials in read-only mode without placing trades."""
+    return etoro_client.test_connection()
+
+@app.post("/api/mode/switch", tags=["eToro Live Integration"])
+def switch_execution_mode(req: ModeSwitchRequest):
+    """Switches execution mode between demo (learning/simulation) and live (eToro real orders)."""
+    target_mode = req.mode.strip().lower()
+    if target_mode not in ("demo", "live"):
+        raise HTTPException(status_code=400, detail="Invalid mode. Must be 'demo' or 'live'.")
+
+    if target_mode == "live" and not etoro_client.is_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot switch to LIVE mode: eToro API Key and User Key are not configured. Please enter them in Settings."
+        )
+
+    config.execution_mode = target_mode
+    logger.info(f"Execution mode switched to: {config.execution_mode.upper()}")
+    return {
+        "status": "success",
+        "execution_mode": config.execution_mode,
+        "message": f"Switched to {'⚡ LIVE eToro Trading' if target_mode == 'live' else '🛡️ Demo & Learning Simulation'}"
+    }
 
 # ==========================================
 # UNIVERSAL MARKET SCREENER & WATCHLIST APIS

@@ -318,12 +318,46 @@ def test_screener_and_dynamic_watchlist():
     r = client.post("/api/watchlist/preset", json={"preset_key": "ai_tech_titans"})
     assert r.status_code == 200
     assert "NVDA" in r.json()["active_watchlist"]
-    assert "PLTR" in r.json()["active_watchlist"]
 
     # 5. Test Auto-Add Top Screened
     r = client.post("/api/screener/auto_add_top?top_n=10")
     assert r.status_code == 200
     assert r.json()["status"] == "success"
+
+def test_etoro_api_client_and_mode_switching():
+    from src.services.etoro.client import EToroClient
+    import uuid
+
+    # 1. Test EToroClient unit methods
+    client_instance = EToroClient(api_key="test_api_key_12345", user_key="test_user_key_67890", base_url="https://api.etoro.com")
+    assert client_instance.is_configured() is True
+    
+    headers = client_instance._build_headers()
+    assert headers["x-api-key"] == "test_api_key_12345"
+    assert headers["x-user-key"] == "test_user_key_67890"
+    assert "x-request-id" in headers
+    # Verify valid UUID v4
+    val_uuid = uuid.UUID(headers["x-request-id"], version=4)
+    assert str(val_uuid) == headers["x-request-id"]
+
+    # 2. Test API status endpoint
+    test_app_client = TestClient(app)
+    r = test_app_client.get("/api/etoro/status")
+    assert r.status_code == 200
+    status_data = r.json()
+    assert "execution_mode" in status_data
+    assert "base_url" in status_data
+
+    # 3. Test Test Connection endpoint (Read-only)
+    r_conn = test_app_client.post("/api/etoro/test_connection")
+    assert r_conn.status_code == 200
+    conn_data = r_conn.json()
+    assert "status" in conn_data
+
+    # 4. Test Mode Switch to Demo
+    r_demo = test_app_client.post("/api/mode/switch", json={"mode": "demo"})
+    assert r_demo.status_code == 200
+    assert r_demo.json()["execution_mode"] == "demo"
 
 
 

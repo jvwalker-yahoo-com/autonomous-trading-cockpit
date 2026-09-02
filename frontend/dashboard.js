@@ -111,7 +111,22 @@ const el = {
   btnSaveConfig: document.getElementById("btnSaveConfig"),
   inputFinnhubKey: document.getElementById("inputFinnhubKey"),
   selectSimMode: document.getElementById("selectSimMode"),
-  inputRiskPct: document.getElementById("inputRiskPct")
+  inputRiskPct: document.getElementById("inputRiskPct"),
+  
+  // eToro Live Switch & Credentials
+  btnModeToggle: document.getElementById("btnModeToggle"),
+  modeStatusDot: document.getElementById("modeStatusDot"),
+  modeStatusLabel: document.getElementById("modeStatusLabel"),
+  modeSwitchModal: document.getElementById("modeSwitchModal"),
+  btnCloseModeModal: document.getElementById("btnCloseModeModal"),
+  btnCancelModeSwitch: document.getElementById("btnCancelModeSwitch"),
+  btnConfirmLiveMode: document.getElementById("btnConfirmLiveMode"),
+  modeSwitchKeyStatus: document.getElementById("modeSwitchKeyStatus"),
+  inputEtoroApiKey: document.getElementById("inputEtoroApiKey"),
+  inputEtoroUserKey: document.getElementById("inputEtoroUserKey"),
+  inputEtoroBaseUrl: document.getElementById("inputEtoroBaseUrl"),
+  btnTestEtoroConn: document.getElementById("btnTestEtoroConn"),
+  etoroTestStatus: document.getElementById("etoroTestStatus")
 };
 
 // ==========================================
@@ -423,8 +438,195 @@ el.btnResetPortfolio.addEventListener("click", async () => {
   }
 });
 
+// ==========================================
+// ETORO LIVE / DEMO SWITCH & SETTINGS LOGIC
+// ==========================================
+let currentExecutionMode = "demo";
+
+function updateExecutionModeUI(mode) {
+  currentExecutionMode = mode;
+  if (mode === "live") {
+    if (el.modeStatusDot) {
+      el.modeStatusDot.style.background = "#ef4444";
+      el.modeStatusDot.style.boxShadow = "0 0 10px #ef4444";
+    }
+    if (el.modeStatusLabel) el.modeStatusLabel.textContent = "⚡ LIVE ETORO (REAL ORDERS)";
+    if (el.btnModeToggle) {
+      el.btnModeToggle.style.borderColor = "#ef4444";
+      el.btnModeToggle.style.color = "#ef4444";
+    }
+    if (el.statModeBadge) {
+      el.statModeBadge.textContent = "⚡ LIVE eToro ACCOUNT";
+      el.statModeBadge.className = "stat-badge badge-critical";
+    }
+  } else {
+    if (el.modeStatusDot) {
+      el.modeStatusDot.style.background = "#10b981";
+      el.modeStatusDot.style.boxShadow = "0 0 8px #10b981";
+    }
+    if (el.modeStatusLabel) el.modeStatusLabel.textContent = "🛡️ DEMO / LEARNING";
+    if (el.btnModeToggle) {
+      el.btnModeToggle.style.borderColor = "#10b981";
+      el.btnModeToggle.style.color = "#10b981";
+    }
+    if (el.statModeBadge) {
+      el.statModeBadge.textContent = "SIMULATION (FRACTIONAL)";
+      el.statModeBadge.className = "stat-badge sim-badge";
+    }
+  }
+}
+
+// Check initial status on startup
+async function fetchEtoroStatus() {
+  try {
+    const res = await fetch(`${BASE_URL}/api/etoro/status`);
+    if (res.ok) {
+      const data = await res.json();
+      updateExecutionModeUI(data.execution_mode || "demo");
+    }
+  } catch (e) {
+    console.error("Error fetching eToro status:", e);
+  }
+}
+fetchEtoroStatus();
+
+if (el.btnModeToggle) {
+  el.btnModeToggle.addEventListener("click", async () => {
+    if (currentExecutionMode === "live") {
+      // Switch back to Demo immediately
+      try {
+        const res = await fetch(`${BASE_URL}/api/mode/switch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "demo" })
+        });
+        if (res.ok) {
+          updateExecutionModeUI("demo");
+          alert("Switched back to 🛡️ DEMO & LEARNING SIMULATION mode.");
+        }
+      } catch (e) {
+        alert("Error switching mode: " + e.message);
+      }
+    } else {
+      // Switching to LIVE: verify keys & show safety modal
+      if (el.modeSwitchModal) {
+        if (el.modeSwitchKeyStatus) el.modeSwitchKeyStatus.textContent = "Checking eToro credentials...";
+        el.modeSwitchModal.classList.remove("hidden");
+        try {
+          const res = await fetch(`${BASE_URL}/api/etoro/status`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.is_configured) {
+              el.modeSwitchKeyStatus.innerHTML = `<span style="color: #10b981; font-weight: bold;">✓ eToro API Key & User Key detected.</span><br><span style="color: var(--text-muted);">Base URL: ${data.base_url}</span>`;
+            } else {
+              el.modeSwitchKeyStatus.innerHTML = `<span style="color: #ef4444; font-weight: bold;">✗ eToro credentials NOT found.</span><br><span style="color: var(--text-muted);">Please click ⚙️ CONFIG to enter your ETORO_API_KEY and ETORO_USER_KEY before engaging live trading.</span>`;
+            }
+          }
+        } catch (e) {
+          if (el.modeSwitchKeyStatus) el.modeSwitchKeyStatus.textContent = "Error checking credentials.";
+        }
+      }
+    }
+  });
+}
+
+[el.btnCloseModeModal, el.btnCancelModeSwitch].forEach(btn => {
+  if (btn) {
+    btn.addEventListener("click", () => {
+      if (el.modeSwitchModal) el.modeSwitchModal.classList.add("hidden");
+    });
+  }
+});
+
+if (el.btnConfirmLiveMode) {
+  el.btnConfirmLiveMode.addEventListener("click", async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/mode/switch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "live" })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.detail || "Cannot switch to LIVE mode without configured eToro keys.");
+        if (el.modeSwitchModal) el.modeSwitchModal.classList.add("hidden");
+        if (el.settingsModal) el.settingsModal.classList.remove("hidden");
+        return;
+      }
+      updateExecutionModeUI("live");
+      if (el.modeSwitchModal) el.modeSwitchModal.classList.add("hidden");
+      alert("⚡ LIVE eToro Trading Engaged! Orders will be transmitted to your connected eToro account.");
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  });
+}
+
+// Test eToro connection button in settings
+if (el.btnTestEtoroConn) {
+  el.btnTestEtoroConn.addEventListener("click", async () => {
+    el.btnTestEtoroConn.textContent = "⌛ TESTING HANDSHAKE...";
+    el.etoroTestStatus.textContent = "Connecting to eToro API...";
+    el.etoroTestStatus.style.color = "var(--text-muted)";
+    try {
+      // First save keys if user typed them in
+      const apiKey = el.inputEtoroApiKey?.value.trim() || "";
+      const userKey = el.inputEtoroUserKey?.value.trim() || "";
+      const baseUrl = el.inputEtoroBaseUrl?.value.trim() || "https://api.etoro.com";
+
+      if (apiKey || userKey) {
+        await fetch(`${BASE_URL}/api/config`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            etoro_api_key: apiKey || null,
+            etoro_user_key: userKey || null,
+            etoro_base_url: baseUrl
+          })
+        });
+      }
+
+      const res = await fetch(`${BASE_URL}/api/etoro/test_connection`, { method: "POST" });
+      const data = await res.json();
+      if (data.connected) {
+        el.etoroTestStatus.textContent = "✓ Connected & Authenticated!";
+        el.etoroTestStatus.style.color = "#10b981";
+      } else {
+        el.etoroTestStatus.textContent = `✗ ${data.message || 'Authentication failed'}`;
+        el.etoroTestStatus.style.color = "#ef4444";
+      }
+    } catch (e) {
+      el.etoroTestStatus.textContent = "Error: " + e.message;
+      el.etoroTestStatus.style.color = "#ef4444";
+    } finally {
+      el.btnTestEtoroConn.textContent = "🧪 TEST CONNECTION (READ-ONLY)";
+    }
+  });
+}
+
 // Settings Modal
-el.btnSettings.addEventListener("click", () => {
+el.btnSettings.addEventListener("click", async () => {
+  try {
+    const [cfgRes, etoroRes] = await Promise.all([
+      fetch(`${BASE_URL}/api/config`),
+      fetch(`${BASE_URL}/api/etoro/status`)
+    ]);
+    if (cfgRes.ok) {
+      const cfg = await cfgRes.json();
+      if (el.selectSimMode) el.selectSimMode.value = cfg.execution_mode || "demo";
+      if (el.inputRiskPct) el.inputRiskPct.value = ((cfg.risk_per_trade_pct || 0.02) * 100).toFixed(1);
+      if (el.inputEtoroBaseUrl) el.inputEtoroBaseUrl.value = cfg.etoro_base_url || "https://api.etoro.com";
+    }
+    if (etoroRes.ok) {
+      const et = await etoroRes.json();
+      if (el.etoroTestStatus) {
+        el.etoroTestStatus.textContent = et.is_configured ? "✓ Keys configured in server" : "Keys not set";
+        el.etoroTestStatus.style.color = et.is_configured ? "#10b981" : "var(--text-muted)";
+      }
+    }
+  } catch (e) {
+    console.error("Error loading config:", e);
+  }
   el.settingsModal.classList.remove("hidden");
 });
 
@@ -434,21 +636,28 @@ el.btnCloseModal.addEventListener("click", () => {
 
 el.btnSaveConfig.addEventListener("click", async () => {
   const finnhubKey = el.inputFinnhubKey.value.trim();
-  const simMode = el.selectSimMode.value === "true";
+  const execMode = el.selectSimMode.value;
   const riskPct = parseFloat(el.inputRiskPct.value) / 100.0;
+  const etoroApiKey = el.inputEtoroApiKey.value.trim();
+  const etoroUserKey = el.inputEtoroUserKey.value.trim();
+  const etoroBaseUrl = el.inputEtoroBaseUrl.value.trim() || "https://api.etoro.com";
 
   await fetch(`${BASE_URL}/api/config`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       finnhub_api_key: finnhubKey || null,
-      simulation_mode: simMode,
-      risk_per_trade_pct: riskPct
+      execution_mode: execMode,
+      risk_per_trade_pct: riskPct,
+      etoro_api_key: etoroApiKey || null,
+      etoro_user_key: etoroUserKey || null,
+      etoro_base_url: etoroBaseUrl
     })
   });
 
+  updateExecutionModeUI(execMode);
   el.settingsModal.classList.add("hidden");
-  alert("Configuration saved successfully!");
+  alert("✓ Configuration and eToro API settings saved successfully!");
   fetchCockpitData();
 });
 

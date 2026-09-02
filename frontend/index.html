@@ -68,11 +68,15 @@
       </div>
 
       <div class="action-btn-group">
+        <button id="btnModeToggle" class="btn btn-outline" style="border-color: #10b981; color: #10b981; font-weight: bold; font-size: 11px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px;" title="Click to switch between Demo / Learning and Live eToro Trading">
+          <span id="modeStatusDot" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #10b981; box-shadow: 0 0 8px #10b981;"></span>
+          <span id="modeStatusLabel">🛡️ DEMO / LEARNING</span>
+        </button>
         <button id="btnScreenerModal" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981, #059669);" title="Market Screener & Universal Stock Universe">🔍 SCREENER / STOCKS</button>
         <button id="btnDailyReport" class="btn btn-primary" title="View Full Day Performance & Learning Audit">📊 DAILY REPORT</button>
         <button id="btnBacktestModal" class="btn btn-secondary" title="Quantitative Backtester & Parameter Optimizer">🧪 BACKTEST</button>
         <button id="btnTickStep" class="btn btn-secondary" title="Trigger Instant Analysis Step">⚡ STEP</button>
-        <button id="btnSettings" class="btn btn-outline" title="Settings & Finnhub Key">⚙️ CONFIG</button>
+        <button id="btnSettings" class="btn btn-outline" title="Settings & eToro API Keys">⚙️ CONFIG</button>
         <button id="btnResetPortfolio" class="btn btn-danger" title="Reset Simulation Portfolio">🔄 RESET</button>
       </div>
     </div>
@@ -538,24 +542,53 @@
 
   <!-- CONFIGURATION MODAL -->
   <div id="settingsModal" class="modal-overlay hidden">
-    <div class="modal-card">
+    <div class="modal-card" style="max-width: 580px;">
       <div class="modal-header">
-        <h3>SYSTEM SETTINGS & API CONFIGURATION</h3>
+        <h3>⚙️ SYSTEM SETTINGS & ETORO API KEYS</h3>
         <button id="btnCloseModal" class="btn-close">&times;</button>
       </div>
-      <div class="modal-body">
+      <div class="modal-body" style="gap: 16px;">
+        
+        <!-- eToro Live Integration Section -->
+        <div style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 14px;">
+          <h4 style="color: #10b981; margin: 0 0 10px 0; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+            <span>🟢 OFFICIAL ETORO API CREDENTIALS</span>
+          </h4>
+          <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.4;">
+            To connect to your live or demo eToro account, provide your credentials below. (Headers <code>x-api-key</code>, <code>x-user-key</code>, and dynamic <code>x-request-id</code> UUID v4 are injected automatically on every request).
+          </p>
+          <div class="form-group" style="margin-bottom: 10px;">
+            <label for="inputEtoroApiKey" style="font-size: 11px; color: var(--text-color);">ETORO_API_KEY (Public Key):</label>
+            <input type="text" id="inputEtoroApiKey" class="cyber-input" placeholder="e.g. pub_live_xxxxxxxxxxxx">
+          </div>
+          <div class="form-group" style="margin-bottom: 10px;">
+            <label for="inputEtoroUserKey" style="font-size: 11px; color: var(--text-color);">ETORO_USER_KEY (Private Key):</label>
+            <input type="password" id="inputEtoroUserKey" class="cyber-input" placeholder="e.g. usr_priv_xxxxxxxxxxxx">
+          </div>
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label for="inputEtoroBaseUrl" style="font-size: 11px; color: var(--text-color);">ETORO_BASE_URL:</label>
+            <input type="text" id="inputEtoroBaseUrl" class="cyber-input" value="https://api.etoro.com" placeholder="https://api.etoro.com">
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <button id="btnTestEtoroConn" class="btn btn-outline" style="border-color: #10b981; color: #10b981; font-size: 11px;" type="button">
+              🧪 TEST CONNECTION (READ-ONLY)
+            </button>
+            <span id="etoroTestStatus" style="font-size: 11px; color: var(--text-muted);">Not tested</span>
+          </div>
+        </div>
+
+        <!-- Trading & Finnhub Config -->
         <div class="form-group">
-          <label for="inputFinnhubKey">Finnhub API Key:</label>
-          <input type="password" id="inputFinnhubKey" class="cyber-input" placeholder="Enter your Finnhub API Key">
-          <small class="form-hint">Leave blank to run on internal high-fidelity simulation engine.</small>
+          <label for="selectSimMode">Default Execution Mode:</label>
+          <select id="selectSimMode" class="cyber-select">
+            <option value="demo">🛡️ Demo / Simulation Mode (Virtual & Learning)</option>
+            <option value="live">⚡ Live eToro Account (Real Orders)</option>
+          </select>
         </div>
 
         <div class="form-group">
-          <label for="selectSimMode">Operating Mode:</label>
-          <select id="selectSimMode" class="cyber-select">
-            <option value="true">Simulation / Paper Trading (Recommended)</option>
-            <option value="false">Live Execution (eToro Bridge)</option>
-          </select>
+          <label for="inputFinnhubKey">Finnhub Market Data Key (Optional):</label>
+          <input type="password" id="inputFinnhubKey" class="cyber-input" placeholder="Enter Finnhub API Key for real-time fallback">
         </div>
 
         <div class="form-group">
@@ -564,7 +597,33 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button id="btnSaveConfig" class="btn btn-primary">SAVE CONFIG</button>
+        <button id="btnSaveConfig" class="btn btn-primary">💾 SAVE CONFIG</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LIVE TRADING MODE SWITCH CONFIRMATION MODAL -->
+  <div id="modeSwitchModal" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width: 500px;">
+      <div class="modal-header" style="border-bottom-color: #ef4444;">
+        <h3 style="color: #ef4444;">⚠️ ENGAGE LIVE ETORO REAL TRADING</h3>
+        <button id="btnCloseModeModal" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body" style="gap: 14px;">
+        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; border-radius: 6px; padding: 12px; font-size: 13px;">
+          <strong style="color: #ef4444; display: block; margin-bottom: 6px;">SAFETY CONFIRMATION REQUIRED:</strong>
+          You are about to switch the autonomous trading engine from <strong>Demo/Learning Simulation</strong> to <strong>LIVE REAL-MONEY TRADING</strong> on your connected eToro account.
+        </div>
+        <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin: 0;">
+          When Live Mode is active, automated buy/short orders generated by the multi-strategy ensemble will be transmitted directly to the official eToro REST API using your configured API & User keys.
+        </p>
+        <div id="modeSwitchKeyStatus" style="font-size: 12px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; border: 1px solid var(--border-color);">
+          Checking eToro credentials...
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: flex-end; gap: 10px;">
+        <button id="btnCancelModeSwitch" class="btn btn-secondary">CANCEL (STAY IN DEMO)</button>
+        <button id="btnConfirmLiveMode" class="btn btn-danger" style="background: linear-gradient(135deg, #ef4444, #b91c1c); font-weight: bold;">⚡ CONFIRM & ENGAGE LIVE</button>
       </div>
     </div>
   </div>
