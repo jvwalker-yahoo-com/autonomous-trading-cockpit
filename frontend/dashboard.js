@@ -492,7 +492,11 @@ async function fetchEtoroStatus() {
   try {
     const localApiKey = localStorage.getItem("etoro_api_key") || "";
     const localUserKey = localStorage.getItem("etoro_user_key") || "";
-    const localBaseUrl = localStorage.getItem("etoro_base_url") || "https://api.etoro.com";
+    let localBaseUrl = localStorage.getItem("etoro_base_url") || "https://public-api.etoro.com";
+    if (localBaseUrl.includes("api.etoro.com") && !localBaseUrl.includes("public-api.etoro.com")) {
+      localBaseUrl = "https://public-api.etoro.com";
+      localStorage.setItem("etoro_base_url", localBaseUrl);
+    }
     const localMode = localStorage.getItem("execution_mode") || "demo";
 
     const res = await fetch(`${BASE_URL}/api/etoro/status`);

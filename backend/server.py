@@ -608,7 +608,10 @@ def update_system_config(req: ConfigUpdateRequest):
         config.etoro_user_key = req.etoro_user_key.strip()
         etoro_client.user_key = config.etoro_user_key
     if req.etoro_base_url is not None:
-        config.etoro_base_url = req.etoro_base_url.strip()
+        raw_b = req.etoro_base_url.strip().rstrip("/")
+        if "api.etoro.com" in raw_b and "public-api.etoro.com" not in raw_b:
+            raw_b = raw_b.replace("api.etoro.com", "public-api.etoro.com")
+        config.etoro_base_url = raw_b or "https://public-api.etoro.com"
         etoro_client.base_url = config.etoro_base_url
     if req.execution_mode is not None:
         config.execution_mode = req.execution_mode.strip().lower()
