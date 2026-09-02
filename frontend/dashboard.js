@@ -148,19 +148,21 @@ async function fetchCockpitData() {
 }
 
 function renderCockpit(data) {
-  const { quote, state, decision, federation, arbitration, anomaly, quadrant, portfolio, learning, heartbeat, sync_drift, node_events, execution_mode } = data;
+  if (!data) return;
+  try {
+    const { quote, state, decision, federation, arbitration, anomaly, quadrant, portfolio, learning, heartbeat, sync_drift, node_events, execution_mode } = data;
 
-  if (execution_mode) {
-    updateExecutionModeUI(execution_mode);
-  }
+    if (execution_mode) {
+      updateExecutionModeUI(execution_mode);
+    }
 
-  // 1. Header & Quick Telemetry
-  if (quote) {
-    el.headerPrice.textContent = `$${quote.price.toFixed(2)}`;
-    const isUp = quote.change >= 0;
-    el.headerChange.textContent = `${isUp ? "+" : ""}${quote.change.toFixed(2)} (${isUp ? "+" : ""}${quote.change_pct.toFixed(2)}%)`;
-    el.headerChange.className = `price-delta badge ${isUp ? "badge-ok" : "badge-critical"}`;
-  }
+    // 1. Header & Quick Telemetry
+    if (quote && el.headerPrice && el.headerChange) {
+      el.headerPrice.textContent = `$${quote.price.toFixed(2)}`;
+      const isUp = quote.change >= 0;
+      el.headerChange.textContent = `${isUp ? "+" : ""}${quote.change.toFixed(2)} (${isUp ? "+" : ""}${quote.change_pct.toFixed(2)}%)`;
+      el.headerChange.className = `price-delta badge ${isUp ? "badge-ok" : "badge-critical"}`;
+    }
 
   el.pillSyncDrift.textContent = `${sync_drift.drift_ms}ms (${sync_drift.status})`;
   el.pillSyncDrift.className = `pill-val ${sync_drift.status === "OK" ? "status-ok color-success" : "color-warn"}`;
@@ -362,6 +364,9 @@ function renderCockpit(data) {
         </div>
       `;
     }).join("");
+  }
+  } catch (err) {
+    console.error("renderCockpit error caught:", err);
   }
 }
 
