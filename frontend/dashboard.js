@@ -423,31 +423,38 @@ window.closePositionSymbol = async function(symbol) {
 };
 
 // Event Listeners
-el.symbolSelect.addEventListener("change", (e) => {
-  activeSymbol = e.target.value;
-  fetchCockpitData();
-});
+if (el.symbolSelect) {
+  el.symbolSelect.addEventListener("change", (e) => {
+    activeSymbol = e.target.value;
+    currentSymbol = e.target.value;
+    fetchCockpitData();
+  });
+}
 
-el.btnTickStep.addEventListener("click", async () => {
-  el.btnTickStep.textContent = "⌛ STEPPING...";
-  try {
-    await fetch(`${BASE_URL}/api/action/tick?symbol=${activeSymbol}`, { method: "POST" });
-    await fetchCockpitData();
-  } finally {
-    el.btnTickStep.textContent = "⚡ STEP";
-  }
-});
+if (el.btnTickStep) {
+  el.btnTickStep.addEventListener("click", async () => {
+    el.btnTickStep.textContent = "⌛ STEPPING...";
+    try {
+      await fetch(`${BASE_URL}/api/action/tick?symbol=${activeSymbol}`, { method: "POST" });
+      await fetchCockpitData();
+    } finally {
+      el.btnTickStep.textContent = "⚡ STEP";
+    }
+  });
+}
 
-el.btnManualBuy.addEventListener("click", () => triggerManualTrade("BUY"));
-el.btnManualShort.addEventListener("click", () => triggerManualTrade("SHORT"));
-el.btnManualClose.addEventListener("click", () => triggerManualTrade("CLOSE"));
+if (el.btnManualBuy) el.btnManualBuy.addEventListener("click", () => triggerManualTrade("BUY"));
+if (el.btnManualShort) el.btnManualShort.addEventListener("click", () => triggerManualTrade("SHORT"));
+if (el.btnManualClose) el.btnManualClose.addEventListener("click", () => triggerManualTrade("CLOSE"));
 
-el.btnResetPortfolio.addEventListener("click", async () => {
-  if (confirm("Reset simulation portfolio back to initial $10,000 capital and reset learning history?")) {
-    await fetch(`${BASE_URL}/api/portfolio/reset`, { method: "POST" });
-    await fetchCockpitData();
-  }
-});
+if (el.btnResetPortfolio) {
+  el.btnResetPortfolio.addEventListener("click", async () => {
+    if (confirm("Reset simulation portfolio back to initial capital and clear open positions?")) {
+      await fetch(`${BASE_URL}/api/portfolio/reset`, { method: "POST" });
+      await fetchCockpitData();
+    }
+  });
+}
 
 // ==========================================
 // ETORO LIVE / DEMO SWITCH & SETTINGS LOGIC
@@ -716,46 +723,51 @@ if (btnSyncWlToEtoro) {
 }
 
 // Settings Modal
-el.btnSettings.addEventListener("click", async () => {
-  try {
-    const [cfgRes, etoroRes] = await Promise.all([
-      fetch(`${BASE_URL}/api/config`),
-      fetch(`${BASE_URL}/api/etoro/status`)
-    ]);
-    if (cfgRes.ok) {
-      const cfg = await cfgRes.json();
-      if (el.selectSimMode) el.selectSimMode.value = cfg.execution_mode || "demo";
-      if (el.inputRiskPct) el.inputRiskPct.value = ((cfg.risk_per_trade_pct || 0.02) * 100).toFixed(1);
-      if (el.inputEtoroBaseUrl) el.inputEtoroBaseUrl.value = cfg.etoro_base_url || "https://api.etoro.com";
-    }
-    if (etoroRes.ok) {
-      const et = await etoroRes.json();
-      if (el.etoroTestStatus) {
-        el.etoroTestStatus.textContent = et.is_configured ? "✓ Keys configured in server" : "Keys not set";
-        el.etoroTestStatus.style.color = et.is_configured ? "#10b981" : "var(--text-muted)";
+if (el.btnSettings) {
+  el.btnSettings.addEventListener("click", async () => {
+    try {
+      const [cfgRes, etoroRes] = await Promise.all([
+        fetch(`${BASE_URL}/api/config`),
+        fetch(`${BASE_URL}/api/etoro/status`)
+      ]);
+      if (cfgRes.ok) {
+        const cfg = await cfgRes.json();
+        if (el.selectSimMode) el.selectSimMode.value = cfg.execution_mode || "demo";
+        if (el.inputRiskPct) el.inputRiskPct.value = ((cfg.risk_per_trade_pct || 0.02) * 100).toFixed(1);
+        if (el.inputEtoroBaseUrl) el.inputEtoroBaseUrl.value = cfg.etoro_base_url || "https://public-api.etoro.com";
       }
+      if (etoroRes.ok) {
+        const et = await etoroRes.json();
+        if (el.etoroTestStatus) {
+          el.etoroTestStatus.textContent = et.is_configured ? "✓ Keys configured in server" : "Keys not set";
+          el.etoroTestStatus.style.color = et.is_configured ? "#10b981" : "var(--text-muted)";
+        }
+      }
+    } catch (e) {
+      console.error("Error loading config:", e);
     }
-  } catch (e) {
-    console.error("Error loading config:", e);
-  }
-  el.settingsModal.classList.remove("hidden");
-});
+    if (el.settingsModal) el.settingsModal.classList.remove("hidden");
+  });
+}
 
-el.btnCloseModal.addEventListener("click", () => {
-  el.settingsModal.classList.add("hidden");
-});
+if (el.btnCloseModal) {
+  el.btnCloseModal.addEventListener("click", () => {
+    if (el.settingsModal) el.settingsModal.classList.add("hidden");
+  });
+}
 
-el.btnSaveConfig.addEventListener("click", async () => {
-  const finnhubKey = el.inputFinnhubKey.value.trim();
-  const execMode = el.selectSimMode.value;
-  const riskPct = parseFloat(el.inputRiskPct.value) / 100.0;
-  const etoroApiKey = el.inputEtoroApiKey.value.trim();
-  const etoroUserKey = el.inputEtoroUserKey.value.trim();
-  const etoroBaseUrl = el.inputEtoroBaseUrl.value.trim() || "https://api.etoro.com";
+if (el.btnSaveConfig) {
+  el.btnSaveConfig.addEventListener("click", async () => {
+    const finnhubKey = el.inputFinnhubKey ? el.inputFinnhubKey.value.trim() : "";
+    const execMode = el.selectSimMode ? el.selectSimMode.value : "demo";
+    const riskPct = el.inputRiskPct ? parseFloat(el.inputRiskPct.value) / 100.0 : 0.02;
+    const etoroApiKey = el.inputEtoroApiKey ? el.inputEtoroApiKey.value.trim() : "";
+    const etoroUserKey = el.inputEtoroUserKey ? el.inputEtoroUserKey.value.trim() : "";
+    const etoroBaseUrl = el.inputEtoroBaseUrl ? el.inputEtoroBaseUrl.value.trim() || "https://public-api.etoro.com" : "https://public-api.etoro.com";
 
-  await fetch(`${BASE_URL}/api/config`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    await fetch(`${BASE_URL}/api/config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       finnhub_api_key: finnhubKey || null,
       execution_mode: execMode,
@@ -772,10 +784,11 @@ el.btnSaveConfig.addEventListener("click", async () => {
   if (execMode) localStorage.setItem("execution_mode", execMode);
 
   updateExecutionModeUI(execMode);
-  el.settingsModal.classList.add("hidden");
+  if (el.settingsModal) el.settingsModal.classList.add("hidden");
   alert("✓ Configuration and eToro API settings saved successfully (Persisted to disk & browser)!");
   fetchCockpitData();
-});
+  });
+}
 
 // Daily & 5-Day Report Modal
 const btnDailyReport = document.getElementById("btnDailyReport");
