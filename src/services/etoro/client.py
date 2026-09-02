@@ -97,7 +97,8 @@ class EToroClient:
         endpoint: str,
         params: Optional[Dict[str, Any]] = None,
         json_data: Optional[Dict[str, Any]] = None,
-        timeout: float = 15.0
+        timeout: float = 15.0,
+        suppress_error_log: bool = False
     ) -> Tuple[bool, int, Dict[str, Any]]:
         """
         Executes HTTP request to eToro API with automatic exponential backoff for HTTP 429 rate limits.
@@ -142,13 +143,19 @@ class EToroClient:
                 if 200 <= response.status_code < 300:
                     return True, response.status_code, res_json
                 else:
-                    logger.error(
-                        f"[eToro API Error] {method} {endpoint} -> HTTP {response.status_code}: {res_json} (x-request-id: {req_id})"
-                    )
+                    if suppress_error_log or response.status_code == 404:
+                        logger.debug(
+                            f"[eToro API Probe] {method} {endpoint} -> HTTP {response.status_code} (x-request-id: {req_id})"
+                        )
+                    else:
+                        logger.error(
+                            f"[eToro API Error] {method} {endpoint} -> HTTP {response.status_code}: {res_json} (x-request-id: {req_id})"
+                        )
                     return False, response.status_code, res_json
 
             except requests.exceptions.RequestException as e:
-                logger.error(f"[eToro Network Exception] Attempt {attempt}/{self.max_retries}: {e}")
+                if not suppress_error_log:
+                    logger.error(f"[eToro Network Exception] Attempt {attempt}/{self.max_retries}: {e}")
                 if attempt == self.max_retries:
                     return False, 500, {"error": str(e), "message": "Network connectivity failure to eToro API"}
                 time.sleep(self.base_backoff_sec * attempt)

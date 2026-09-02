@@ -267,7 +267,7 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
 # 10 CORE BLUEPRINT ENDPOINTS (From PDF)
 # ==========================================
 
-@app.get("/", tags=["Cockpit Core"])
+@app.api_route("/", methods=["GET", "HEAD"], tags=["Cockpit Core"])
 def root_health(request: Request):
     """Health check endpoint: {status: 'ok'} or serve Cockpit HTML if accessed via browser."""
     accept = request.headers.get("accept", "")
