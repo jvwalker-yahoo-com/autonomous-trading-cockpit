@@ -400,6 +400,11 @@ async function triggerManualTrade(action) {
     });
     if (res.ok) {
       await fetchCockpitData();
+      if (currentExecutionMode === "live") {
+        alert(`⚡ LIVE ETORO ORDER SUBMITTED!\n\nAction: ${action} ${activeSymbol}\nAmount: $500.00\nStatus: Sent to eToro live account.`);
+      } else {
+        alert(`🛡️ SIMULATION ORDER EXECUTED (DEMO MODE)\n\nAction: ${action} ${activeSymbol}\nAmount: $500.00\n\nNote: You are currently in DEMO mode. To place real orders on your eToro account, click the green '🛡️ DEMO / LEARNING' button in the top bar to switch to '⚡ LIVE ETORO'.`);
+      }
     } else {
       const err = await res.json();
       alert(`Trade failed: ${err.detail || "Unknown error"}`);
