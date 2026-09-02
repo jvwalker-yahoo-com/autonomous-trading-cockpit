@@ -636,6 +636,28 @@ if (el.btnTestEtoroConn) {
   });
 }
 
+// Direct Top Header TEST ETORO Button
+const btnHeaderTestEtoro = document.getElementById("btnHeaderTestEtoro");
+if (btnHeaderTestEtoro) {
+  btnHeaderTestEtoro.addEventListener("click", async () => {
+    btnHeaderTestEtoro.textContent = "⌛ TESTING...";
+    try {
+      const res = await fetch(`${BASE_URL}/api/etoro/test_connection`, { method: "POST" });
+      const data = await res.json();
+      if (data.connected) {
+        alert(`✓ SUCCESS (HTTP ${data.status_code || 200}):\n\n${data.message}\n\nGateway: ${data.base_url}\nStatus: Live Authenticated`);
+      } else {
+        alert(`✗ Connection Status:\n\n${data.message || 'Authentication failed'}\n\nPlease click ⚙️ CONFIG to verify your ETORO_API_KEY and ETORO_USER_KEY.`);
+        if (el.settingsModal) el.settingsModal.classList.remove("hidden");
+      }
+    } catch (e) {
+      alert("Connection test error: " + e.message);
+    } finally {
+      btnHeaderTestEtoro.textContent = "🧪 TEST ETORO";
+    }
+  });
+}
+
 // Sync 5-Day Traded Stocks to eToro Watchlist
 const btnSync5DayToEtoro = document.getElementById("btnSync5DayToEtoro");
 if (btnSync5DayToEtoro) {
