@@ -376,7 +376,9 @@ def get_cockpit_full_snapshot(symbol: Optional[str] = None):
             "low": analysis["quote"].low,
             "volume": int(analysis["quote"].volume)
         },
-        "watchlist": config.watchlist
+        "watchlist": config.watchlist,
+        "execution_mode": config.execution_mode,
+        "is_configured": etoro_client.is_configured()
     }
 
 @app.get("/api/portfolio", response_model=PortfolioSummary, tags=["Portfolio"])

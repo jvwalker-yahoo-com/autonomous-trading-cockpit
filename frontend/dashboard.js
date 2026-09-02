@@ -148,7 +148,11 @@ async function fetchCockpitData() {
 }
 
 function renderCockpit(data) {
-  const { quote, state, decision, federation, arbitration, anomaly, quadrant, portfolio, learning, heartbeat, sync_drift, node_events } = data;
+  const { quote, state, decision, federation, arbitration, anomaly, quadrant, portfolio, learning, heartbeat, sync_drift, node_events, execution_mode } = data;
+
+  if (execution_mode) {
+    updateExecutionModeUI(execution_mode);
+  }
 
   // 1. Header & Quick Telemetry
   if (quote) {
