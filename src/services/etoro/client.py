@@ -28,6 +28,7 @@ SYMBOL_TO_ETORO_ID: Dict[str, int] = {
     # Cryptocurrencies (24/7)
     "BTC": 1, "ETH": 2, "SOL": 3, "XRP": 4, "BNB": 5, "DOGE": 6, "ADA": 7,
     "AVAX": 8, "LINK": 9, "DOT": 10, "NEAR": 11, "RENDER": 12, "SUI": 13, "PEPE": 14,
+    "LTC": 15, "UNI": 35, "MATIC": 46, "SHIB": 61, "FET": 1034,
     
     # Commodities
     "GOLD": 101, "SILVER": 102, "OIL": 103, "NATGAS": 104, "COPPER": 105,
@@ -37,6 +38,7 @@ SYMBOL_TO_ETORO_ID: Dict[str, int] = {
     # Benchmark Indices
     "SPX500": 301, "NSDQ100": 302, "DJ30": 303, "RUSSELL2000": 304, "USDOLLAR": 305,
     "VIX": 306, "UK100": 307, "GER40": 308, "FRA40": 309, "JPN225": 310, "HKG50": 311, "AUS200": 312,
+    "ESP35": 313, "CHINA50": 314,
     
     # ETFs (Leveraged & Benchmark)
     "SPY": 2001, "QQQ": 2002, "IWM": 2003, "DIA": 2004, "VOO": 2005, "VTI": 2006,
@@ -330,16 +332,18 @@ class EToroClient:
         return {"success": False, "status_code": code if 'code' in locals() else 404, "data": {}}
 
     def search_instruments(self, query: str) -> List[Dict[str, Any]]:
-        """Searches for tradable instruments by ticker symbol or company name."""
-        success, _, data = self._request("GET", "/api/v1/market-data/instruments", params={"search": query})
-        if success and isinstance(data, list):
-            return data
-        elif success and isinstance(data, dict):
-            return data.get("items", [data])
+        """Searches for tradable instruments by ticker symbol or company name using OpenAPI search endpoint."""
+        params = {"fields": "instrumentId,symbolFull,displayName", "pageSize": 20}
+        success, _, data = self._request("GET", "/api/v1/market-data/search", params={**params, "symbolFull": query})
+        if not success or not (isinstance(data, dict) and data.get("items")):
+            success, _, data = self._request("GET", "/api/v1/market-data/search", params={**params, "displayName": query})
+
+        if success and isinstance(data, dict):
+            return data.get("items", [])
         return []
 
     def resolve_instrument_id(self, symbol: str) -> Optional[int]:
-        """Resolves a ticker symbol (e.g. 'TQQQ', 'BTC', 'NVDA') to its eToro internal Instrument ID."""
+        """Resolves a ticker symbol to its eToro internal Instrument ID."""
         sym_upper = symbol.strip().upper()
         if sym_upper in self._instrument_cache:
             return self._instrument_cache[sym_upper]
@@ -348,16 +352,18 @@ class EToroClient:
         results = self.search_instruments(sym_upper)
         for item in results:
             if isinstance(item, dict):
-                cand_sym = str(item.get("Symbol") or item.get("symbol") or "").upper()
-                cand_id = item.get("InstrumentID") or item.get("instrumentId") or item.get("id")
+                cand_sym = str(item.get("symbolFull") or item.get("Symbol") or item.get("symbol") or "").upper()
+                cand_id = item.get("instrumentId") or item.get("InstrumentID") or item.get("id")
                 if cand_sym == sym_upper and cand_id:
                     self._instrument_cache[sym_upper] = int(cand_id)
                     return int(cand_id)
 
-        # Fallback hash-derived ID if running in mock/demo environment
-        mock_id = 10000 + (abs(hash(sym_upper)) % 80000)
-        self._instrument_cache[sym_upper] = mock_id
-        return mock_id
+        # Fallback only if mock mode
+        if not self.is_configured():
+            mock_id = 10000 + (abs(hash(sym_upper)) % 80000)
+            self._instrument_cache[sym_upper] = mock_id
+            return mock_id
+        return None
 
     # =========================================================================
     # ETORO WATCHLIST MANAGEMENT & SYNC
