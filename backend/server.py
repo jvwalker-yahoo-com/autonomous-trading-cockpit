@@ -100,7 +100,7 @@ async def autonomous_background_worker_loop():
             if config.auto_rotate_universe and (now - last_universe_scan > config.universe_scan_interval_sec):
                 last_universe_scan = now
                 try:
-                    top_screened = screener.scan_universe(top_n=20)
+                    top_screened = screener.scan_universe(data_feed_manager=data_feed, top_n=20)
                     screened_syms = [s["symbol"] for s in top_screened if s.get("opportunity_score", 0) >= 60]
                     if screened_syms:
                         combined = list(dict.fromkeys(screened_syms + config.watchlist))[:25]

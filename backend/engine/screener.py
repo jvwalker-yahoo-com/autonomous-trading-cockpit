@@ -169,7 +169,7 @@ class MarketScreener:
     """Scans all multi-asset instruments across Crypto, Commodities, Indices, ETFs, and Equities."""
 
     @staticmethod
-    def scan_universe(data_feed_manager, category_filter: Optional[str] = None, top_n: int = 35) -> List[Dict[str, Any]]:
+    def scan_universe(data_feed_manager=None, category_filter: Optional[str] = None, top_n: int = 35) -> List[Dict[str, Any]]:
         """
         Scans multi-asset instruments and ranks by quantitative opportunity score.
         Evaluates:
@@ -178,6 +178,10 @@ class MarketScreener:
         - RSI Momentum & Breakout confirmation
         - 24h Absolute Price Change %
         """
+        if data_feed_manager is None:
+            from .data_feed import DataFeedManager
+            data_feed_manager = DataFeedManager()
+
         results = []
 
         for symbol, info in MASTER_STOCK_UNIVERSE.items():
