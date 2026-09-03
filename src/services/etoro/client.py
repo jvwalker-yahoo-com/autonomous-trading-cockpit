@@ -82,20 +82,42 @@ class EToroClient:
         """Checks if both public API key and private User key are present."""
         return bool(self.api_key and len(self.api_key) > 5 and self.user_key and len(self.user_key) > 5)
 
-    def _build_headers(self) -> Dict[str, str]:
+    def _get_auth_header_variants(self) -> List[Dict[str, str]]:
         """
-        Builds standard required eToro HTTP headers, injecting
-        x-api-key, x-user-key, and a unique UUID v4 x-request-id.
+        Generates header variants supporting both OpenAPI authentication models:
+        1. Non-interactive credential pair (x-api-key + x-user-key)
+        2. Swapped orientation (x-api-key + x-user-key)
+        3. OAuth 2.0 access token (Authorization: Bearer <token>)
         """
-        headers = {
-            "x-api-key": self.api_key,
-            "x-user-key": self.user_key,
-            "x-request-id": str(uuid.uuid4()),
+        req_id = str(uuid.uuid4())
+        common = {
+            "x-request-id": req_id,
             "Content-Type": "application/json",
             "Accept": "application/json",
             "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-Client)"
         }
-        return headers
+        variants = []
+        # Variant 1: Standard Credential Pair
+        if self.api_key and self.user_key:
+            variants.append({**common, "x-api-key": self.api_key, "x-user-key": self.user_key})
+            variants.append({**common, "x-api-key": self.user_key, "x-user-key": self.api_key})
+        # Variant 2: OAuth 2.0 Bearer Token (if user key is an OAuth/JWT token)
+        if self.user_key:
+            tok = self.user_key.replace("Bearer ", "").strip()
+            variants.append({**common, "Authorization": f"Bearer {tok}"})
+        if self.api_key:
+            tok = self.api_key.replace("Bearer ", "").strip()
+            variants.append({**common, "Authorization": f"Bearer {tok}"})
+        return variants
+
+    def _build_headers(self) -> Dict[str, str]:
+        """Builds standard required eToro HTTP headers."""
+        variants = self._get_auth_header_variants()
+        return variants[0] if variants else {
+            "x-request-id": str(uuid.uuid4()),
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
 
     def _request(
         self,
@@ -107,69 +129,78 @@ class EToroClient:
         suppress_error_log: bool = False
     ) -> Tuple[bool, int, Dict[str, Any]]:
         """
-        Executes HTTP request to eToro API with automatic exponential backoff for HTTP 429 rate limits.
+        Executes HTTP request to eToro API with automatic exponential backoff for HTTP 429 rate limits,
+        and automatic failover across OpenAPI authentication formats (x-api-key/x-user-key vs Bearer token).
         """
         if not self.is_configured():
             return False, 401, {"message": "eToro credentials not configured."}
 
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        variants = self._get_auth_header_variants()
         
-        for attempt in range(1, self.max_retries + 1):
-            headers = self._build_headers()
+        last_code = 401
+        last_json = {}
+
+        for h_idx, headers in enumerate(variants):
             req_id = headers["x-request-id"]
-
-            try:
-                response = requests.request(
-                    method=method.upper(),
-                    url=url,
-                    headers=headers,
-                    params=params,
-                    json=json_data,
-                    timeout=timeout
-                )
-
-                # HTTP 429 Rate Limit - Apply exponential backoff with jitter
-                if response.status_code == 429:
-                    retry_after = response.headers.get("Retry-After")
-                    if retry_after and retry_after.isdigit():
-                        sleep_time = float(retry_after) + random.uniform(0.1, 0.5)
-                    else:
-                        sleep_time = (self.base_backoff_sec * (2 ** (attempt - 1))) + random.uniform(0.1, 0.5)
-
-                    logger.warning(
-                        f"[eToro 429 Rate Limit] Attempt {attempt}/{self.max_retries} on {endpoint}. "
-                        f"Backing off for {sleep_time:.2f}s... (x-request-id: {req_id})"
-                    )
-                    time.sleep(sleep_time)
-                    continue
-
-                # Parse JSON body
+            for attempt in range(1, self.max_retries + 1):
                 try:
-                    res_json = response.json()
-                except Exception:
-                    res_json = {"raw_text": response.text}
+                    response = requests.request(
+                        method=method.upper(),
+                        url=url,
+                        headers=headers,
+                        params=params,
+                        json=json_data,
+                        timeout=timeout
+                    )
 
-                if 200 <= response.status_code < 300:
-                    return True, response.status_code, res_json
-                else:
-                    if suppress_error_log or response.status_code in (401, 404, 405):
-                        logger.debug(
-                            f"[eToro API Probe] {method} {endpoint} -> HTTP {response.status_code} (x-request-id: {req_id})"
+                    # HTTP 429 Rate Limit - Apply exponential backoff with jitter
+                    if response.status_code == 429:
+                        retry_after = response.headers.get("Retry-After")
+                        if retry_after and retry_after.isdigit():
+                            sleep_time = float(retry_after) + random.uniform(0.1, 0.5)
+                        else:
+                            sleep_time = (self.base_backoff_sec * (2 ** (attempt - 1))) + random.uniform(0.1, 0.5)
+
+                        logger.warning(
+                            f"[eToro 429 Rate Limit] Attempt {attempt}/{self.max_retries} on {endpoint}. "
+                            f"Backing off for {sleep_time:.2f}s... (x-request-id: {req_id})"
                         )
+                        time.sleep(sleep_time)
+                        continue
+
+                    # Parse JSON body
+                    try:
+                        res_json = response.json()
+                    except Exception:
+                        res_json = {"raw_text": response.text}
+
+                    last_code = response.status_code
+                    last_json = res_json
+
+                    if 200 <= response.status_code < 300:
+                        return True, response.status_code, res_json
+                    elif response.status_code == 401 and h_idx < len(variants) - 1:
+                        # Try next authentication header format (e.g. Bearer token fallback)
+                        break
                     else:
-                        logger.error(
-                            f"[eToro API Error] {method} {endpoint} -> HTTP {response.status_code}: {res_json} (x-request-id: {req_id})"
-                        )
-                    return False, response.status_code, res_json
+                        if suppress_error_log or response.status_code in (401, 404, 405):
+                            logger.debug(
+                                f"[eToro API Probe] {method} {endpoint} -> HTTP {response.status_code} (x-request-id: {req_id})"
+                            )
+                        else:
+                            logger.error(
+                                f"[eToro API Error] {method} {endpoint} -> HTTP {response.status_code}: {res_json} (x-request-id: {req_id})"
+                            )
+                        return False, response.status_code, res_json
 
-            except requests.exceptions.RequestException as e:
-                if not suppress_error_log:
-                    logger.error(f"[eToro Network Exception] Attempt {attempt}/{self.max_retries}: {e}")
-                if attempt == self.max_retries:
-                    return False, 500, {"error": str(e), "message": "Network connectivity failure to eToro API"}
-                time.sleep(self.base_backoff_sec * attempt)
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"[eToro Connection Exception] {method} {endpoint}: {e}")
+                    if attempt == self.max_retries and h_idx == len(variants) - 1:
+                        return False, 503, {"error": str(e)}
+                    time.sleep(0.5)
 
-        return False, 429, {"error": "Rate limit exceeded after maximum retries"}
+        return False, last_code, last_json
 
     # =========================================================================
     # VERIFICATION & READ-ONLY METHODS (Zero Risk)
