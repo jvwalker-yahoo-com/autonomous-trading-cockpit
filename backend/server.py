@@ -715,6 +715,10 @@ def switch_execution_mode(req: ModeSwitchRequest):
 
     sync_info = None
     if target_mode == "live":
+        # Clear previous simulated paper positions so live execution slots are immediately open
+        broker.positions.clear()
+        broker.save_state()
+
         # Build 5-day historical traded stocks + active watchlist
         five_day_rep = broker.get_multi_day_report(5)
         traded_symbols = [s.symbol for s in five_day_rep.stock_summaries if s.symbol]
