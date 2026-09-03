@@ -709,21 +709,23 @@ def test_etoro_connection():
 @app.get("/api/etoro/instrument_search", tags=["eToro Live Integration"])
 def etoro_instrument_search(symbol: str = "BTC"):
     """
-    Diagnostic: Searches eToro API for a symbol and returns raw results showing real instrument IDs.
-    Use this to discover the correct eToro instrumentId for any ticker before trading it.
+    Fast diagnostic: searches eToro API for a symbol using 4s timeouts.
+    Returns raw HTTP responses to identify the working search parameter format.
     Example: GET /api/etoro/instrument_search?symbol=BTC
     """
-    etoro_client.bootstrap_instrument_ids()
-    results = etoro_client.search_instruments(symbol.upper())
-    debug = etoro_client.raw_search_debug(symbol.upper())
-    cached_id = etoro_client._instrument_cache.get(symbol.upper())
+    sym = symbol.upper().strip()
+    # Run fast search (4s timeout per attempt)
+    results = etoro_client.search_instruments(sym)
+    # Run debug probe (stops at first working variant)
+    debug = etoro_client.raw_search_debug(sym)
+    cached_id = etoro_client._instrument_cache.get(sym)
     return {
-        "symbol_queried": symbol.upper(),
+        "symbol_queried": sym,
         "cached_instrument_id": cached_id,
-        "search_results": results[:5],  # Top 5 matches
+        "search_results": results[:5],
         "debug_responses": debug,
         "cache_size": len(etoro_client._instrument_cache),
-        "bootstrap_complete": etoro_client._ids_bootstrapped
+        "is_configured": etoro_client.is_configured()
     }
 
 @app.post("/api/mode/switch", tags=["eToro Live Integration"])

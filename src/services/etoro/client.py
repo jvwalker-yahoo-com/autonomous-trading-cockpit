@@ -70,7 +70,10 @@ class EToroClient:
                 "pageSize": page_size,
                 "pageNumber": page_num
             }
-            success, _, data = self._request("GET", "/api/v1/market-data/instruments", params=params, suppress_error_log=True)
+            success, _, data = self._request(
+                "GET", "/api/v1/market-data/instruments",
+                params=params, suppress_error_log=True, timeout=5.0
+            )
             if not success or not isinstance(data, dict):
                 break
             
@@ -392,7 +395,10 @@ class EToroClient:
 
         for variant in search_variants:
             params = {**base_params, **variant}
-            success, code, data = self._request("GET", "/api/v1/market-data/search", params=params, suppress_error_log=True)
+            success, code, data = self._request(
+                "GET", "/api/v1/market-data/search",
+                params=params, suppress_error_log=True, timeout=4.0
+            )
             if success:
                 items = []
                 if isinstance(data, list):
@@ -403,10 +409,13 @@ class EToroClient:
                     logger.debug(f"[eToro Search] Found {len(items)} results for '{query}' using params={variant}")
                     return items
 
-        # Fallback: try the instruments list endpoint with symbol filter
+        # Fallback: try the instruments list endpoint
         for sym_param in ["symbolFull", "symbol", "query"]:
             params = {sym_param: query, "pageSize": 5}
-            success, code, data = self._request("GET", "/api/v1/market-data/instruments", params=params, suppress_error_log=True)
+            success, code, data = self._request(
+                "GET", "/api/v1/market-data/instruments",
+                params=params, suppress_error_log=True, timeout=4.0
+            )
             if success:
                 items = []
                 if isinstance(data, list):
@@ -422,27 +431,30 @@ class EToroClient:
 
     def raw_search_debug(self, query: str) -> Dict[str, Any]:
         """
-        Diagnostic endpoint — tries ALL search endpoints and returns full raw responses.
-        Used to identify the correct search parameter format for this API key.
+        Fast diagnostic — tries the most likely search param variants with short 4s timeout.
+        Returns raw HTTP status + sample response to identify the correct search format.
         """
         results = {}
-        endpoints = [
-            "/api/v1/market-data/search",
-            "/api/v1/market-data/instruments",
-            f"/api/v1/market-data/instruments?symbolFull={query}",
+        endpoints_params = [
+            ("/api/v1/market-data/search",       {"query": query, "pageSize": 3}),
+            ("/api/v1/market-data/search",       {"symbolFull": query, "pageSize": 3}),
+            ("/api/v1/market-data/search",       {"q": query, "pageSize": 3}),
+            ("/api/v1/market-data/instruments",  {"symbolFull": query, "pageSize": 3}),
+            ("/api/v1/market-data/instruments",  {"query": query, "pageSize": 3}),
         ]
-        params_variants = [
-            {"query": query, "pageSize": 5},
-            {"symbolFull": query, "pageSize": 5},
-            {"q": query, "pageSize": 5},
-            {"displayName": query, "pageSize": 5},
-            {"symbol": query, "pageSize": 5},
-        ]
-        for ep in endpoints[:2]:
-            for p in params_variants:
-                key = f"{ep}?{list(p.keys())[0]}={query}"
-                success, code, data = self._request("GET", ep, params=p, suppress_error_log=True)
-                results[key] = {"status": code, "success": success, "sample": str(data)[:200]}
+        for ep, p in endpoints_params:
+            key = f"GET {ep}?{list(p.keys())[0]}={query}"
+            success, code, data = self._request(
+                "GET", ep, params=p,
+                suppress_error_log=True, timeout=4.0
+            )
+            results[key] = {
+                "http_status": code,
+                "success": success,
+                "response_sample": str(data)[:300]
+            }
+            if success:  # Stop at first working variant
+                break
         return results
 
     def resolve_instrument_id(self, symbol: str) -> Optional[int]:
