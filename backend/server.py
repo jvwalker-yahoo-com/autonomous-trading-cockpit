@@ -227,6 +227,7 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
             
             # When in Live mode, dispatch real order to official eToro REST API
             if config.execution_mode == "live" and etoro_client.is_configured():
+                inst_id = etoro_client.resolve_instrument_id(symbol)
                 is_short = (trade_dir == "SHORT")
                 sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
                 sl_rate = round(quote.price * (1.0 + config.default_stop_loss_pct if is_short else 1.0 - config.default_stop_loss_pct), sl_prec)
@@ -574,8 +575,9 @@ def execute_manual_action(req: ManualTradeRequest):
     if config.execution_mode == "live" and etoro_client.is_configured():
         inst_id = etoro_client.resolve_instrument_id(req.symbol)
         is_short = (direction == "SHORT")
-        sl_rate = round(quote.price * (1.0 + config.default_stop_loss_pct if is_short else 1.0 - config.default_stop_loss_pct), 2)
-        tp_rate = round(quote.price * (1.0 - config.default_take_profit_pct if is_short else 1.0 + config.default_take_profit_pct), 2)
+        sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
+        sl_rate = round(quote.price * (1.0 + config.default_stop_loss_pct if is_short else 1.0 - config.default_stop_loss_pct), sl_prec)
+        tp_rate = round(quote.price * (1.0 - config.default_take_profit_pct if is_short else 1.0 + config.default_take_profit_pct), sl_prec)
 
         logger.info(f"⚡ [MANUAL LIVE ETORO ORDER] {direction} on {req.symbol} (ID: {inst_id}) for ${alloc_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
         try:
