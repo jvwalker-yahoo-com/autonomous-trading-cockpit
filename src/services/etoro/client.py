@@ -147,38 +147,45 @@ class EToroClient:
         """Checks if both public API key and private User key are present."""
         return bool(self.api_key and len(self.api_key) > 5 and self.user_key and len(self.user_key) > 5)
 
-    def _get_auth_header_variants(self) -> List[Dict[str, str]]:
-        """
-        Generates header variants supporting both OpenAPI authentication models:
-        1. Non-interactive credential pair (x-api-key + x-user-key)
-        2. Swapped orientation (x-api-key + x-user-key)
-        3. OAuth 2.0 access token (Authorization: Bearer <token>)
-        """
-        req_id = str(uuid.uuid4())
-        common = {
-            "x-request-id": req_id,
+    def _make_headers(self, api_key: str, user_key: str, orientation: str = "standard") -> Dict[str, str]:
+        """Builds a single eToro HTTP header set with a fresh unique x-request-id."""
+        base = {
+            "x-request-id": str(uuid.uuid4()),  # Fresh UUID per request — eToro requires uniqueness
             "Content-Type": "application/json",
             "Accept": "application/json",
             "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-Client)"
         }
+        if orientation == "bearer_user":
+            tok = user_key.replace("Bearer ", "").strip()
+            return {**base, "Authorization": f"Bearer {tok}"}
+        elif orientation == "bearer_api":
+            tok = api_key.replace("Bearer ", "").strip()
+            return {**base, "Authorization": f"Bearer {tok}"}
+        elif orientation == "swapped":
+            return {**base, "x-api-key": user_key, "x-user-key": api_key}
+        else:  # standard
+            return {**base, "x-api-key": api_key, "x-user-key": user_key}
+
+    def _get_auth_header_variants(self) -> List[Dict[str, str]]:
+        """
+        Generates header variants supporting both OpenAPI authentication models.
+        Each variant has its own unique x-request-id UUID (eToro enforces uniqueness).
+        """
         variants = []
-        # Variant 1: Standard Credential Pair
         if self.api_key and self.user_key:
-            variants.append({**common, "x-api-key": self.api_key, "x-user-key": self.user_key})
-            variants.append({**common, "x-api-key": self.user_key, "x-user-key": self.api_key})
-        # Variant 2: OAuth 2.0 Bearer Token (if user key is an OAuth/JWT token)
+            variants.append(self._make_headers(self.api_key, self.user_key, "standard"))
+            variants.append(self._make_headers(self.api_key, self.user_key, "swapped"))
         if self.user_key:
-            tok = self.user_key.replace("Bearer ", "").strip()
-            variants.append({**common, "Authorization": f"Bearer {tok}"})
+            variants.append(self._make_headers(self.api_key, self.user_key, "bearer_user"))
         if self.api_key:
-            tok = self.api_key.replace("Bearer ", "").strip()
-            variants.append({**common, "Authorization": f"Bearer {tok}"})
+            variants.append(self._make_headers(self.api_key, self.user_key, "bearer_api"))
         return variants
 
     def _build_headers(self) -> Dict[str, str]:
         """Builds standard required eToro HTTP headers."""
-        variants = self._get_auth_header_variants()
-        return variants[0] if variants else {
+        if self.api_key and self.user_key:
+            return self._make_headers(self.api_key, self.user_key, "standard")
+        return {
             "x-request-id": str(uuid.uuid4()),
             "Content-Type": "application/json",
             "Accept": "application/json"
@@ -196,19 +203,22 @@ class EToroClient:
         """
         Executes HTTP request to eToro API with automatic exponential backoff for HTTP 429 rate limits,
         and automatic failover across OpenAPI authentication formats (x-api-key/x-user-key vs Bearer token).
+        Each attempt uses a fresh unique x-request-id as required by the eToro API.
         """
         if not self.is_configured():
             return False, 401, {"message": "eToro credentials not configured."}
 
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        variants = self._get_auth_header_variants()
-        
-        last_code = 401
-        last_json = {}
+        orientations = ["standard", "swapped", "bearer_user", "bearer_api"]
 
-        for h_idx, headers in enumerate(variants):
-            req_id = headers["x-request-id"]
+        last_code = 401
+        last_json: Dict[str, Any] = {}
+
+        for o_idx, orientation in enumerate(orientations):
             for attempt in range(1, self.max_retries + 1):
+                # Fresh unique UUID per attempt — critical for eToro API compliance
+                headers = self._make_headers(self.api_key, self.user_key, orientation)
+                req_id = headers["x-request-id"]
                 try:
                     response = requests.request(
                         method=method.upper(),
@@ -229,7 +239,7 @@ class EToroClient:
 
                         logger.warning(
                             f"[eToro 429 Rate Limit] Attempt {attempt}/{self.max_retries} on {endpoint}. "
-                            f"Backing off for {sleep_time:.2f}s... (x-request-id: {req_id})"
+                            f"Backing off {sleep_time:.2f}s... (x-request-id: {req_id})"
                         )
                         time.sleep(sleep_time)
                         continue
@@ -245,8 +255,8 @@ class EToroClient:
 
                     if 200 <= response.status_code < 300:
                         return True, response.status_code, res_json
-                    elif response.status_code == 401 and h_idx < len(variants) - 1:
-                        # Try next authentication header format (e.g. Bearer token fallback)
+                    elif response.status_code == 401 and o_idx < len(orientations) - 1:
+                        # Try next authentication orientation
                         break
                     else:
                         if suppress_error_log or response.status_code in (401, 404, 405):
@@ -261,7 +271,7 @@ class EToroClient:
 
                 except requests.exceptions.RequestException as e:
                     logger.error(f"[eToro Connection Exception] {method} {endpoint}: {e}")
-                    if attempt == self.max_retries and h_idx == len(variants) - 1:
+                    if attempt == self.max_retries and o_idx == len(orientations) - 1:
                         return False, 503, {"error": str(e)}
                     time.sleep(0.5)
 
