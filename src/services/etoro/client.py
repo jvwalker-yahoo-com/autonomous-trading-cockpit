@@ -192,21 +192,31 @@ class EToroClient:
 
         # 1. Test authenticated user endpoints (requires both valid API Key AND valid User Key)
         user_endpoints = [
-            "/api/v1/balances/accounts",
-            "/api/v1/trading/positions",
-            "/api/v1/trading/execution/positions",
-            "/api/v1/identity/profile"
+            "/api/v1/balances?expand=equityDetails",
+            "/api/v1/me",
+            "/api/v1/trading/info/portfolio",
+            "/api/v1/trading/info/demo/portfolio",
+            "/api/v1/trading/info/real/pnl",
+            "/api/v1/balances",
+            "/api/v1/balances/accounts"
         ]
 
         # Orientation 1: Standard
         for ep in user_endpoints:
             success, status_code, data = self._request("GET", ep, suppress_error_log=True)
             if success:
+                user_desc = ""
+                if isinstance(data, dict):
+                    if "username" in data:
+                        user_desc = f" (User: @{data['username']})"
+                    elif "totalBalance" in data:
+                        user_desc = f" (Balance: ${data.get('totalBalance', 0):,.2f})"
+
                 return {
                     "status": "connected",
                     "connected": True,
                     "trading_enabled": True,
-                    "message": "✓ Successfully authenticated with eToro Account & Trading API (HTTP 200)!",
+                    "message": f"✓ Successfully authenticated with eToro Account & Trading API (HTTP {status_code}){user_desc}!",
                     "status_code": status_code,
                     "base_url": self.base_url,
                     "api_key": self.api_key,
@@ -221,11 +231,18 @@ class EToroClient:
             success, status_code, data = self._request("GET", ep, suppress_error_log=True)
             if success:
                 logger.info("✓ Auto-detected and aligned swapped eToro API Key and User Key orientation!")
+                user_desc = ""
+                if isinstance(data, dict):
+                    if "username" in data:
+                        user_desc = f" (User: @{data['username']})"
+                    elif "totalBalance" in data:
+                        user_desc = f" (Balance: ${data.get('totalBalance', 0):,.2f})"
+
                 return {
                     "status": "connected",
                     "connected": True,
                     "trading_enabled": True,
-                    "message": "✓ Successfully authenticated with eToro Account & Trading API (Keys auto-aligned)!",
+                    "message": f"✓ Successfully authenticated with eToro Account & Trading API (Keys auto-aligned){user_desc}!",
                     "status_code": status_code,
                     "base_url": self.base_url,
                     "api_key": self.api_key,
@@ -244,7 +261,7 @@ class EToroClient:
                 "status": "partial_authentication",
                 "connected": False,
                 "trading_enabled": False,
-                "message": f"⚠️ Public API Key is VALID, but eToro rejected your User Key (HTTP 401).\n\nAction Required:\n1. Log into api-portal.etoro.com\n2. Go to Settings -> API Key Management\n3. Generate a new User Key linked to your account\n4. Paste it into ETORO_USER_KEY in Settings.",
+                "message": f"⚠️ Public API Key is VALID, but eToro rejected your User Key (HTTP 401).\n\nAction Required:\n1. Open eToro Settings -> Trading -> API Key Management\n2. Click 'Create Your API Key' (or Edit existing key)\n3. Set Environment to 'Real' and Permissions to 'Write'\n4. Copy the key and paste into ETORO_USER_KEY in Settings.",
                 "status_code": 401,
                 "base_url": self.base_url,
                 "api_key": self.api_key
@@ -254,7 +271,7 @@ class EToroClient:
             "status": "authentication_failed",
             "connected": False,
             "trading_enabled": False,
-            "message": f"Authentication rejected by eToro API ({self.base_url}) - HTTP 401 Unauthorized.\n\nPlease verify:\n1. Your Public API Key is from api-portal.etoro.com\n2. Your User Key matches your eToro account\n3. No extra spaces or missing characters.",
+            "message": f"Authentication rejected by eToro API ({self.base_url}) - HTTP 401 Unauthorized.\n\nPlease verify:\n1. Your Public API Key is from the 'Public Key' box\n2. Your User Key is from the 'Generated Keys' list\n3. No extra spaces or missing characters.",
             "status_code": 401,
             "error_details": {"errorCode": "Unauthorized"},
             "base_url": self.base_url
