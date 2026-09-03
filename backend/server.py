@@ -218,7 +218,7 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
         max_alloc = min(config.max_position_size_usd, max(50.0, equity * 0.15))
         alloc_base = max_alloc * confidence
         allocated_usd = max(25.0, min(max_alloc, alloc_base))
-        target_shares = round(allocated_usd / max(0.01, quote.price), 4)
+        target_shares = round(allocated_usd / max(0.00000001, quote.price), 4)
 
         # Autonomous trade entry (if not already holding this direction)
         existing = broker.positions.get(symbol)
@@ -228,8 +228,9 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
             # When in Live mode, dispatch real order to official eToro REST API
             if config.execution_mode == "live" and etoro_client.is_configured():
                 is_short = (trade_dir == "SHORT")
-                sl_rate = round(quote.price * (1.0 + config.default_stop_loss_pct if is_short else 1.0 - config.default_stop_loss_pct), 2)
-                tp_rate = round(quote.price * (1.0 - config.default_take_profit_pct if is_short else 1.0 + config.default_take_profit_pct), 2)
+                sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
+                sl_rate = round(quote.price * (1.0 + config.default_stop_loss_pct if is_short else 1.0 - config.default_stop_loss_pct), sl_prec)
+                tp_rate = round(quote.price * (1.0 - config.default_take_profit_pct if is_short else 1.0 + config.default_take_profit_pct), sl_prec)
 
                 logger.info(f"⚡ [LIVE ETORO ORDER] Dispatching {trade_dir} on {symbol} (ID: {inst_id}) for ${allocated_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
                 try:

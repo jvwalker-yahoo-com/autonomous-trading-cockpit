@@ -99,18 +99,19 @@ class SimulatedBroker:
 
         # Apply spread / execution cost (eToro model: ~0.05%)
         effective_price = current_price * 1.0005 if direction == "LONG" else current_price * 0.9995
-        fractional_shares = round(allocated_usd / effective_price, 4)
+        fractional_shares = round(allocated_usd / max(0.00000001, effective_price), 4)
         cost_basis = round(fractional_shares * effective_price, 2)
 
         self.cash = round(self.cash - cost_basis, 2)
 
         # Compute SL & TP levels
+        sl_prec = 8 if effective_price < 0.01 else (4 if effective_price < 1.0 else 2)
         if direction == "LONG":
-            sl_price = round(effective_price * (1.0 - stop_loss_pct), 2)
-            tp_price = round(effective_price * (1.0 + take_profit_pct), 2)
+            sl_price = round(effective_price * (1.0 - stop_loss_pct), sl_prec)
+            tp_price = round(effective_price * (1.0 + take_profit_pct), sl_prec)
         else: # SHORT
-            sl_price = round(effective_price * (1.0 + stop_loss_pct), 2)
-            tp_price = round(effective_price * (1.0 - take_profit_pct), 2)
+            sl_price = round(effective_price * (1.0 + stop_loss_pct), sl_prec)
+            tp_price = round(effective_price * (1.0 - take_profit_pct), sl_prec)
 
         pos_id = f"pos_{uuid.uuid4().hex[:8]}"
         position = Position(
@@ -118,8 +119,8 @@ class SimulatedBroker:
             symbol=symbol,
             direction=direction,
             shares=fractional_shares,
-            entry_price=round(effective_price, 2),
-            current_price=round(current_price, 2),
+            entry_price=round(effective_price, sl_prec),
+            current_price=round(current_price, sl_prec),
             cost_basis_usd=cost_basis,
             market_value_usd=cost_basis,
             unrealized_pnl_usd=0.0,
@@ -149,7 +150,7 @@ class SimulatedBroker:
         if pos.direction == "LONG":
             pos.market_value_usd = round(pos.shares * current_price, 2)
             pos.unrealized_pnl_usd = round(pos.market_value_usd - pos.cost_basis_usd, 2)
-            pos.unrealized_pnl_pct = round((pos.unrealized_pnl_usd / pos.cost_basis_usd) * 100.0, 2)
+            pos.unrealized_pnl_pct = round((pos.unrealized_pnl_usd / max(0.0001, pos.cost_basis_usd)) * 100.0, 2)
 
             # Check SL / TP
             if current_price <= pos.stop_loss:
@@ -163,7 +164,7 @@ class SimulatedBroker:
             pnl = (pos.entry_price - current_price) * pos.shares
             pos.market_value_usd = round(pos.cost_basis_usd + pnl, 2)
             pos.unrealized_pnl_usd = round(pnl, 2)
-            pos.unrealized_pnl_pct = round((pos.unrealized_pnl_usd / pos.cost_basis_usd) * 100.0, 2)
+            pos.unrealized_pnl_pct = round((pos.unrealized_pnl_usd / max(0.0001, pos.cost_basis_usd)) * 100.0, 2)
 
             # Check SL / TP for Short
             if current_price >= pos.stop_loss:
@@ -194,7 +195,7 @@ class SimulatedBroker:
             realized_pnl = round(pnl, 2)
 
         self.cash = round(self.cash + exit_value, 2)
-        realized_pct = round((realized_pnl / pos.cost_basis_usd) * 100.0, 2)
+        realized_pct = round((realized_pnl / max(0.0001, pos.cost_basis_usd)) * 100.0, 2)
         is_win = realized_pnl > 0.0
 
         resolved_models = contributing_models if contributing_models is not None else pos.contributing_models

@@ -55,10 +55,11 @@ class DataFeedManager:
         """Generates initial 60 periods of price history for indicator readiness."""
         prices = []
         volumes = []
-        p = base_price * (1.0 - random.uniform(0.01, 0.03))
+        p = max(0.00000001, base_price * (1.0 - random.uniform(0.01, 0.03)))
+        precision = 8 if base_price < 0.01 else (4 if base_price < 1.0 else 2)
         for _ in range(60):
-            p += p * random.gauss(0.0001, 0.003)
-            prices.append(round(p, 2))
+            p = max(0.00000001, p + p * random.gauss(0.0001, 0.003))
+            prices.append(round(p, precision))
             volumes.append(round(random.uniform(50000, 250000), 0))
         self.history_windows[symbol] = prices
         self.volume_windows[symbol] = volumes
@@ -144,7 +145,9 @@ class DataFeedManager:
         
         current_p = state["price"]
         step = current_p * (state["drift"] + random.gauss(0, state["volatility"]))
-        new_p = max(1.0, round(current_p + step, 2))
+        precision = 8 if current_p < 0.01 else (4 if current_p < 1.0 else 2)
+        min_p = 10 ** (-precision)
+        new_p = max(min_p, round(current_p + step, precision))
         state["price"] = new_p
         
         hist = self.history_windows.get(symbol, [new_p])
@@ -288,7 +291,11 @@ class DataFeedManager:
         # Synthetic news sentiment based on price momentum with noise
         hist = self.history_windows.get(symbol, [100.0])
         if len(hist) > 10:
-            ret = (hist[-1] - hist[-10]) / hist[-10]
+            denom = hist[-10]
+            if abs(denom) > 1e-12:
+                ret = (hist[-1] - denom) / denom
+            else:
+                ret = 0.0
             sentiment = math.tanh(ret * 20.0) + random.uniform(-0.1, 0.1)
             return round(max(-1.0, min(1.0, sentiment)), 2)
         return 0.05
