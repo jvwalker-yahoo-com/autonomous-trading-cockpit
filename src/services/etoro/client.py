@@ -346,29 +346,49 @@ class EToroClient:
         return []
 
     def create_watchlist(self, name: str, instrument_ids: Optional[List[int]] = None) -> Dict[str, Any]:
-        """Creates a new watchlist on eToro with initial instruments."""
+        """Creates a new watchlist on eToro according to OpenAPI Swagger spec."""
         if not self.is_configured():
             return {"success": False, "status_code": 401, "data": {}}
-        payload = {
-            "name": name,
-            "instrumentIds": instrument_ids or []
-        }
-        for ep in ("/api/v1/watchlists/user", "/api/v1/watchlists"):
-            success, code, data = self._request("POST", ep, json_data=payload, suppress_error_log=True)
-            if success:
-                return {"success": True, "status_code": code, "data": data}
-        return {"success": False, "status_code": 404, "data": {"name": name, "instrumentIds": instrument_ids}}
+        
+        # In official OpenAPI Swagger: POST /api/v1/watchlists?name=...&type=Static
+        success, code, data = self._request("POST", "/api/v1/watchlists", params={"name": name, "type": "Static"})
+        if not success:
+            # Fallback attempts
+            payload = {"name": name, "instrumentIds": instrument_ids or []}
+            success, code, data = self._request("POST", "/api/v1/watchlists/user", json_data=payload, suppress_error_log=True)
+
+        if success:
+            wl_id = None
+            if isinstance(data, dict):
+                wl_id = data.get("WatchlistID") or data.get("watchlistId") or data.get("id")
+            elif isinstance(data, (int, str)):
+                wl_id = data
+
+            if wl_id and instrument_ids:
+                self.add_items_to_watchlist(int(wl_id), instrument_ids)
+
+            return {"success": True, "status_code": code, "data": data, "watchlist_id": wl_id}
+
+        return {"success": False, "status_code": code, "data": data}
 
     def add_items_to_watchlist(self, watchlist_id: int, instrument_ids: List[int]) -> Dict[str, Any]:
-        """Adds instrument IDs to an existing eToro watchlist."""
+        """Adds instrument IDs to an existing eToro watchlist using WatchlistItemDto array."""
         if not self.is_configured():
             return {"success": False, "status_code": 401, "data": {}}
-        payload = {"instrumentIds": instrument_ids}
-        for ep in (f"/api/v1/watchlists/{watchlist_id}/items", f"/api/v1/watchlists/user/{watchlist_id}/items"):
-            success, code, data = self._request("POST", ep, json_data=payload, suppress_error_log=True)
-            if success:
-                return {"success": True, "status_code": code, "data": data}
-        return {"success": True, "status_code": 200, "data": {"watchlist_id": watchlist_id, "synced_items": instrument_ids}}
+
+        # Official OpenAPI Swagger Schema: array of WatchlistItemDto
+        items_payload = [
+            {"itemId": int(iid), "itemType": "Instrument", "itemRank": idx + 1}
+            for idx, iid in enumerate(instrument_ids)
+        ]
+        
+        success, code, data = self._request("POST", f"/api/v1/watchlists/{watchlist_id}/items", json_data=items_payload)
+        if not success:
+            # Fallback legacy body
+            payload = {"instrumentIds": instrument_ids}
+            success, code, data = self._request("POST", f"/api/v1/watchlists/{watchlist_id}/items", json_data=payload, suppress_error_log=True)
+
+        return {"success": success, "status_code": code, "data": data}
 
     def get_or_create_cockpit_watchlist(self, name: str = "Autonomous Cockpit") -> Tuple[Optional[int], Dict[str, Any]]:
         """Retrieves or creates the primary Autonomous Cockpit watchlist on eToro."""
