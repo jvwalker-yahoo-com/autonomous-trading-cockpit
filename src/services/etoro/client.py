@@ -79,6 +79,69 @@ class EToroClient:
         self.max_retries = max_retries
         self.base_backoff_sec = base_backoff_sec
         self._instrument_cache: Dict[str, int] = dict(SYMBOL_TO_ETORO_ID)
+        self._ids_bootstrapped: bool = False
+
+    def bootstrap_instrument_ids(self) -> Dict[str, int]:
+        """
+        Self-discovers real eToro instrument IDs from the authenticated API using GET /api/v1/market-data/instruments.
+        Fetches all instruments in pages and maps symbolFull -> instrumentId into the local cache.
+        This is called once at startup or on first live trade to replace guessed static IDs.
+        """
+        if self._ids_bootstrapped or not self.is_configured():
+            return self._instrument_cache
+
+        logger.info("[eToro] Bootstrapping real instrument IDs from API...")
+        discovered: Dict[str, int] = {}
+        page_size = 200
+        
+        for page_num in range(1, 6):  # Max 5 pages = 1000 instruments
+            params = {
+                "fields": "instrumentId,symbolFull,displayName",
+                "pageSize": page_size,
+                "pageNumber": page_num
+            }
+            success, _, data = self._request("GET", "/api/v1/market-data/instruments", params=params, suppress_error_log=True)
+            if not success or not isinstance(data, dict):
+                break
+            
+            items = data.get("items") or data.get("instruments") or []
+            if not items and isinstance(data, list):
+                items = data
+            if not items:
+                break
+                
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                sym = str(item.get("symbolFull") or item.get("Symbol") or item.get("symbol") or "").upper().strip()
+                iid = item.get("instrumentId") or item.get("InstrumentID") or item.get("id")
+                if sym and iid:
+                    discovered[sym] = int(iid)
+            
+            if len(items) < page_size:
+                break  # Last page
+
+        if discovered:
+            self._instrument_cache.update(discovered)
+            self._ids_bootstrapped = True
+            logger.info(f"[eToro] Bootstrapped {len(discovered)} real instrument IDs from API.")
+        else:
+            # If instruments endpoint failed, try search for key symbols individually
+            logger.warning("[eToro] Instruments page fetch returned empty, falling back to symbol search.")
+            priority_symbols = ["BTC", "ETH", "AAPL", "NVDA", "TSLA", "MSFT", "GOOGL", "META", "SOL", "XRP", "FET", "DOGE", "LINK", "GOLD", "OIL"]
+            for sym in priority_symbols:
+                if sym in self._instrument_cache:
+                    continue
+                results = self.search_instruments(sym)
+                for item in results:
+                    cand_sym = str(item.get("symbolFull") or item.get("symbol") or "").upper()
+                    cand_id = item.get("instrumentId") or item.get("InstrumentID")
+                    if cand_sym == sym and cand_id:
+                        self._instrument_cache[sym] = int(cand_id)
+                        break
+            self._ids_bootstrapped = True
+
+        return self._instrument_cache
 
     def is_configured(self) -> bool:
         """Checks if both public API key and private User key are present."""

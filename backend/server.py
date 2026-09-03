@@ -227,24 +227,29 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
             
             # When in Live mode, dispatch real order to official eToro REST API
             if config.execution_mode == "live" and etoro_client.is_configured():
+                # Ensure real instrument IDs are loaded from the eToro API (once only)
+                etoro_client.bootstrap_instrument_ids()
                 inst_id = etoro_client.resolve_instrument_id(symbol)
-                is_short = (trade_dir == "SHORT")
-                sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
-                sl_rate = round(quote.price * (1.0 + config.default_stop_loss_pct if is_short else 1.0 - config.default_stop_loss_pct), sl_prec)
-                tp_rate = round(quote.price * (1.0 - config.default_take_profit_pct if is_short else 1.0 + config.default_take_profit_pct), sl_prec)
+                if not inst_id:
+                    logger.warning(f"[LIVE SKIP] Cannot resolve eToro instrument ID for '{symbol}' — skipping live order.")
+                else:
+                    is_short = (trade_dir == "SHORT")
+                    sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
+                    sl_rate = round(quote.price * (1.0 + config.default_stop_loss_pct if is_short else 1.0 - config.default_stop_loss_pct), sl_prec)
+                    tp_rate = round(quote.price * (1.0 - config.default_take_profit_pct if is_short else 1.0 + config.default_take_profit_pct), sl_prec)
 
-                logger.info(f"⚡ [LIVE ETORO ORDER] Dispatching {trade_dir} on {symbol} (ID: {inst_id}) for ${allocated_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
-                try:
-                    etoro_client.create_order(
-                        instrument_id=inst_id or 1001,
-                        direction=trade_dir,
-                        amount_usd=allocated_usd,
-                        stop_loss_rate=sl_rate,
-                        take_profit_rate=tp_rate,
-                        mode="real"
-                    )
-                except Exception as e:
-                    logger.error(f"eToro live order execution exception: {e}")
+                    logger.info(f"⚡ [LIVE ETORO ORDER] Dispatching {trade_dir} on {symbol} (ID: {inst_id}) for ${allocated_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
+                    try:
+                        etoro_client.create_order(
+                            instrument_id=inst_id,
+                            direction=trade_dir,
+                            amount_usd=allocated_usd,
+                            stop_loss_rate=sl_rate,
+                            take_profit_rate=tp_rate,
+                            mode="real"
+                        )
+                    except Exception as e:
+                        logger.error(f"eToro live order execution exception: {e}")
 
             # Execute in local broker ledger & self-learning memory
             broker.execute_order(
@@ -573,25 +578,31 @@ def execute_manual_action(req: ManualTradeRequest):
     etoro_res = None
 
     if config.execution_mode == "live" and etoro_client.is_configured():
+        # Ensure real instrument IDs are loaded from the eToro API (once only)
+        etoro_client.bootstrap_instrument_ids()
         inst_id = etoro_client.resolve_instrument_id(req.symbol)
-        is_short = (direction == "SHORT")
-        sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
-        sl_rate = round(quote.price * (1.0 + config.default_stop_loss_pct if is_short else 1.0 - config.default_stop_loss_pct), sl_prec)
-        tp_rate = round(quote.price * (1.0 - config.default_take_profit_pct if is_short else 1.0 + config.default_take_profit_pct), sl_prec)
+        if not inst_id:
+            logger.warning(f"[MANUAL LIVE SKIP] Cannot resolve eToro instrument ID for '{req.symbol}'")
+            etoro_res = {"success": False, "error": f"Unknown instrument '{req.symbol}' on eToro — check symbol name"}
+        else:
+            is_short = (direction == "SHORT")
+            sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
+            sl_rate = round(quote.price * (1.0 + config.default_stop_loss_pct if is_short else 1.0 - config.default_stop_loss_pct), sl_prec)
+            tp_rate = round(quote.price * (1.0 - config.default_take_profit_pct if is_short else 1.0 + config.default_take_profit_pct), sl_prec)
 
-        logger.info(f"⚡ [MANUAL LIVE ETORO ORDER] {direction} on {req.symbol} (ID: {inst_id}) for ${alloc_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
-        try:
-            etoro_res = etoro_client.create_order(
-                instrument_id=inst_id or 1001,
-                direction=direction,
-                amount_usd=alloc_usd,
-                stop_loss_rate=sl_rate,
-                take_profit_rate=tp_rate,
-                mode="real"
-            )
-        except Exception as e:
-            logger.error(f"eToro manual live order exception: {e}")
-            etoro_res = {"success": False, "error": str(e)}
+            logger.info(f"⚡ [MANUAL LIVE ETORO ORDER] {direction} on {req.symbol} (ID: {inst_id}) for ${alloc_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
+            try:
+                etoro_res = etoro_client.create_order(
+                    instrument_id=inst_id,
+                    direction=direction,
+                    amount_usd=alloc_usd,
+                    stop_loss_rate=sl_rate,
+                    take_profit_rate=tp_rate,
+                    mode="real"
+                )
+            except Exception as e:
+                logger.error(f"eToro manual live order exception: {e}")
+                etoro_res = {"success": False, "error": str(e)}
 
     pos = broker.execute_order(
         symbol=req.symbol,
