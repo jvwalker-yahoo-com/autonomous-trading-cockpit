@@ -22,40 +22,10 @@ load_dotenv()
 
 logger = logging.getLogger("etoro.client")
 
-# Static instrument ID lookup mapping for instant high-speed resolution
-# Resolves ticker symbols to standard eToro internal instrument IDs
-SYMBOL_TO_ETORO_ID: Dict[str, int] = {
-    # Cryptocurrencies (24/7)
-    "BTC": 1, "ETH": 2, "SOL": 3, "XRP": 4, "BNB": 5, "DOGE": 6, "ADA": 7,
-    "AVAX": 8, "LINK": 9, "DOT": 10, "NEAR": 11, "RENDER": 12, "SUI": 13, "PEPE": 14,
-    "LTC": 15, "UNI": 35, "MATIC": 46, "SHIB": 61, "FET": 1034,
-    
-    # Commodities
-    "GOLD": 101, "SILVER": 102, "OIL": 103, "NATGAS": 104, "COPPER": 105,
-    "PLATINUM": 106, "PALLADIUM": 107, "GASOLINE": 108, "SUGAR.FUT": 109,
-    "COTTON.FUT": 110, "COCOA.FUT": 111, "COFFEE.FUT": 112, "WHEAT.FUT": 113, "CORN.FUT": 114,
-    
-    # Benchmark Indices
-    "SPX500": 301, "NSDQ100": 302, "DJ30": 303, "RUSSELL2000": 304, "USDOLLAR": 305,
-    "VIX": 306, "UK100": 307, "GER40": 308, "FRA40": 309, "JPN225": 310, "HKG50": 311, "AUS200": 312,
-    "ESP35": 313, "CHINA50": 314,
-    
-    # ETFs (Leveraged & Benchmark)
-    "SPY": 2001, "QQQ": 2002, "IWM": 2003, "DIA": 2004, "VOO": 2005, "VTI": 2006,
-    "SOXL": 2007, "SOXS": 2008, "TQQQ": 2009, "SQQQ": 2010, "BULL": 2011, "UPRO": 2012,
-    "NVDL": 2013, "TSLL": 2014, "LABU": 2015, "FNGU": 2016, "SMH": 2017, "XLK": 2018,
-    "XLF": 2019, "XLE": 2020, "XLV": 2021, "XLI": 2022, "XBI": 2023, "URA": 2024,
-    "ARKK": 2025, "GDX": 2026, "TAN": 2027, "TLT": 2028,
-    
-    # Equities (Tech, AI, Growth, Blue Chips)
-    "NVDA": 1001, "AAPL": 1002, "MSFT": 1003, "AMZN": 1004, "GOOGL": 1005,
-    "META": 1006, "TSLA": 1007, "AMD": 1008, "PLTR": 1009, "ARM": 1010,
-    "SMCI": 1011, "AVGO": 1012, "INTC": 1013, "MARA": 1014, "IREN": 1015,
-    "COIN": 1016, "MSTR": 1017, "APLD": 1018, "CLSK": 1019, "HOOD": 1020,
-    "SOFI": 1021, "RIVN": 1022, "ASTS": 1023, "RKLB": 1024, "BABA": 1025,
-    "TSM": 1026, "LLY": 1027, "BRK.B": 1028, "JPM": 1029, "V": 1030,
-    "XOM": 1031, "NFLX": 1032, "CRWD": 1033
-}
+# ⚠️ WARNING: ALL previously hardcoded IDs were fabricated and caused wrong trades (e.g. FET→EURSEK).
+# The real eToro instrument IDs are fetched dynamically from the live API via bootstrap_instrument_ids()
+# and raw_search_debug() at first use. Do NOT add IDs here without verifying against the real API.
+SYMBOL_TO_ETORO_ID: Dict[str, int] = {}
 
 class EToroClient:
     """Official eToro API Client Connector."""
@@ -405,15 +375,75 @@ class EToroClient:
         return {"success": False, "status_code": code if 'code' in locals() else 404, "data": {}}
 
     def search_instruments(self, query: str) -> List[Dict[str, Any]]:
-        """Searches for tradable instruments by ticker symbol or company name using OpenAPI search endpoint."""
-        params = {"fields": "instrumentId,symbolFull,displayName", "pageSize": 20}
-        success, _, data = self._request("GET", "/api/v1/market-data/search", params={**params, "symbolFull": query})
-        if not success or not (isinstance(data, dict) and data.get("items")):
-            success, _, data = self._request("GET", "/api/v1/market-data/search", params={**params, "displayName": query})
+        """
+        Searches for tradable instruments using multiple eToro search parameter formats.
+        Tries query, symbolFull, displayName, and symbol variations.
+        """
+        base_params = {"pageSize": 20}
+        
+        # Try all known eToro search parameter variants
+        search_variants = [
+            {"query": query},
+            {"symbolFull": query},
+            {"q": query},
+            {"displayName": query},
+            {"symbol": query},
+        ]
 
-        if success and isinstance(data, dict):
-            return data.get("items", [])
+        for variant in search_variants:
+            params = {**base_params, **variant}
+            success, code, data = self._request("GET", "/api/v1/market-data/search", params=params, suppress_error_log=True)
+            if success:
+                items = []
+                if isinstance(data, list):
+                    items = data
+                elif isinstance(data, dict):
+                    items = data.get("items") or data.get("instruments") or data.get("results") or data.get("data") or []
+                if items:
+                    logger.debug(f"[eToro Search] Found {len(items)} results for '{query}' using params={variant}")
+                    return items
+
+        # Fallback: try the instruments list endpoint with symbol filter
+        for sym_param in ["symbolFull", "symbol", "query"]:
+            params = {sym_param: query, "pageSize": 5}
+            success, code, data = self._request("GET", "/api/v1/market-data/instruments", params=params, suppress_error_log=True)
+            if success:
+                items = []
+                if isinstance(data, list):
+                    items = data
+                elif isinstance(data, dict):
+                    items = data.get("items") or data.get("instruments") or []
+                if items:
+                    logger.debug(f"[eToro Instruments] Found {len(items)} results for '{query}'")
+                    return items
+
+        logger.warning(f"[eToro Search] No results found for '{query}' — all search variants exhausted")
         return []
+
+    def raw_search_debug(self, query: str) -> Dict[str, Any]:
+        """
+        Diagnostic endpoint — tries ALL search endpoints and returns full raw responses.
+        Used to identify the correct search parameter format for this API key.
+        """
+        results = {}
+        endpoints = [
+            "/api/v1/market-data/search",
+            "/api/v1/market-data/instruments",
+            f"/api/v1/market-data/instruments?symbolFull={query}",
+        ]
+        params_variants = [
+            {"query": query, "pageSize": 5},
+            {"symbolFull": query, "pageSize": 5},
+            {"q": query, "pageSize": 5},
+            {"displayName": query, "pageSize": 5},
+            {"symbol": query, "pageSize": 5},
+        ]
+        for ep in endpoints[:2]:
+            for p in params_variants:
+                key = f"{ep}?{list(p.keys())[0]}={query}"
+                success, code, data = self._request("GET", ep, params=p, suppress_error_log=True)
+                results[key] = {"status": code, "success": success, "sample": str(data)[:200]}
+        return results
 
     def resolve_instrument_id(self, symbol: str) -> Optional[int]:
         """Resolves a ticker symbol to its eToro internal Instrument ID."""

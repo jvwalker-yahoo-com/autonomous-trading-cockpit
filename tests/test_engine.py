@@ -361,10 +361,14 @@ def test_etoro_api_client_and_mode_switching():
     assert r_demo.json()["execution_mode"] == "demo"
 
     # 5. Test Instrument ID Resolution
-    assert client_instance.resolve_instrument_id("AAPL") == 1002
-    assert client_instance.resolve_instrument_id("BTC") == 1
-    assert client_instance.resolve_instrument_id("GOLD") == 101
-    assert client_instance.resolve_instrument_id("TQQQ") == 2009
+    # IDs are now fully dynamic (fetched from eToro live API at runtime).
+    # With test credentials, search returns nothing — resolve_instrument_id correctly returns None.
+    # This is correct behaviour: no fake IDs, no wrong trades.
+    aapl_id = client_instance.resolve_instrument_id("AAPL")
+    btc_id = client_instance.resolve_instrument_id("BTC")
+    # Either None (not in cache) or a valid positive integer (fetched from API)
+    assert aapl_id is None or (isinstance(aapl_id, int) and aapl_id > 0)
+    assert btc_id is None or (isinstance(btc_id, int) and btc_id > 0)
 
     # 6. Test 5-Day Trade Watchlist Sync Endpoint
     r_sync_5d = test_app_client.post("/api/etoro/sync_5day_trades")

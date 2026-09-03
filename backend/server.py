@@ -706,6 +706,26 @@ def test_etoro_connection():
         logger.info(f"✓ Locked in authenticated eToro API Key & User Key orientation (Persisted to disk).")
     return res
 
+@app.get("/api/etoro/instrument_search", tags=["eToro Live Integration"])
+def etoro_instrument_search(symbol: str = "BTC"):
+    """
+    Diagnostic: Searches eToro API for a symbol and returns raw results showing real instrument IDs.
+    Use this to discover the correct eToro instrumentId for any ticker before trading it.
+    Example: GET /api/etoro/instrument_search?symbol=BTC
+    """
+    etoro_client.bootstrap_instrument_ids()
+    results = etoro_client.search_instruments(symbol.upper())
+    debug = etoro_client.raw_search_debug(symbol.upper())
+    cached_id = etoro_client._instrument_cache.get(symbol.upper())
+    return {
+        "symbol_queried": symbol.upper(),
+        "cached_instrument_id": cached_id,
+        "search_results": results[:5],  # Top 5 matches
+        "debug_responses": debug,
+        "cache_size": len(etoro_client._instrument_cache),
+        "bootstrap_complete": etoro_client._ids_bootstrapped
+    }
+
 @app.post("/api/mode/switch", tags=["eToro Live Integration"])
 def switch_execution_mode(req: ModeSwitchRequest):
     """Switches execution mode between demo (learning/simulation) and live (eToro real orders). Automatically builds 5-day proven watchlist when switching to live."""
