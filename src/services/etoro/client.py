@@ -262,14 +262,24 @@ class EToroClient:
 
     def get_account_balances(self) -> Dict[str, Any]:
         """Fetches cash balance, total invested, and equity from eToro."""
-        success, code, data = self._request("GET", "/api/v1/balances/accounts")
+        success, code, data = self._request("GET", "/api/v1/balances?expand=equityDetails")
+        if not success:
+            success, code, data = self._request("GET", "/api/v1/balances/accounts")
         return {"success": success, "status_code": code, "data": data}
 
-    def get_portfolio(self, mode: str = "demo") -> Dict[str, Any]:
+    def get_portfolio(self, mode: str = "real") -> Dict[str, Any]:
         """Fetches active open positions and portfolio details (demo or real)."""
-        ep = f"/api/v1/trading/{mode.lower()}/portfolio"
-        success, code, data = self._request("GET", ep)
-        return {"success": success, "status_code": code, "data": data}
+        is_demo = mode.lower() == "demo"
+        endpoints = [
+            f"/api/v1/trading/info/{'demo/' if is_demo else ''}portfolio",
+            f"/api/v1/trading/{mode.lower()}/portfolio",
+            "/api/v1/trading/info/portfolio"
+        ]
+        for ep in endpoints:
+            success, code, data = self._request("GET", ep)
+            if success:
+                return {"success": True, "status_code": code, "data": data}
+        return {"success": False, "status_code": code if 'code' in locals() else 404, "data": {}}
 
     def search_instruments(self, query: str) -> List[Dict[str, Any]]:
         """Searches for tradable instruments by ticker symbol or company name."""
@@ -447,7 +457,10 @@ class EToroClient:
             "InstrumentID": int(instrument_id),
             "IsBuy": is_buy,
             "Amount": round(float(amount_usd), 2),
-            "Leverage": int(leverage)
+            "Leverage": int(leverage),
+            "IsNoStopLoss": stop_loss_rate is None,
+            "IsNoTakeProfit": take_profit_rate is None,
+            "IsTslEnabled": False
         }
         if stop_loss_rate is not None:
             v1_payload["StopLossRate"] = round(float(stop_loss_rate), 4)
