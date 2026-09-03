@@ -144,7 +144,7 @@ class ModeSwitchRequest(BaseModel):
 class ManualTradeRequest(BaseModel):
     symbol: str
     action: str # "BUY", "SHORT", "CLOSE"
-    amount_usd: Optional[float] = 500.0
+    amount_usd: Optional[float] = 100.0
 
 def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     """
@@ -214,10 +214,10 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
 
     # Execution if arbitration approved
     if arbitration.approved and signal in ("BUY", "SHORT"):
-        # Position sizing based on confidence & risk budget (scaled to account equity)
-        max_alloc = min(config.max_position_size_usd, max(50.0, equity * 0.15))
+        # Position sizing based on confidence & risk budget (capped at $100 to protect small account)
+        max_alloc = min(config.max_position_size_usd, min(100.0, max(20.0, equity * 0.10)))
         alloc_base = max_alloc * confidence
-        allocated_usd = max(25.0, min(max_alloc, alloc_base))
+        allocated_usd = max(20.0, min(max_alloc, alloc_base))
         target_shares = round(allocated_usd / max(0.00000001, quote.price), 4)
 
         # Autonomous trade entry (if not already holding this direction)
@@ -574,7 +574,7 @@ def execute_manual_action(req: ManualTradeRequest):
         return {"status": "success", "closed_trade": trade}
     
     direction = "LONG" if req.action.upper() == "BUY" else "SHORT"
-    alloc_usd = req.amount_usd or 150.0
+    alloc_usd = req.amount_usd or 100.0
     etoro_res = None
 
     if config.execution_mode == "live" and etoro_client.is_configured():
