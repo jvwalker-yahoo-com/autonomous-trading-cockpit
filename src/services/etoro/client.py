@@ -459,8 +459,10 @@ class EToroClient:
         is_demo = mode.lower() == "demo"
         endpoints = [
             f"/api/v1/trading/info/{'demo/' if is_demo else ''}portfolio",
+            f"/api/v1/trading/info/{'demo/' if is_demo else 'real/'}pnl",
             f"/api/v1/trading/{mode.lower()}/portfolio",
-            "/api/v1/trading/info/portfolio"
+            "/api/v1/trading/info/portfolio",
+            "/api/v1/trading/info/real/pnl"
         ]
         for ep in endpoints:
             success, code, data = self._request("GET", ep)
@@ -471,18 +473,19 @@ class EToroClient:
     def search_instruments(self, query: str) -> List[Dict[str, Any]]:
         """
         Searches eToro market data for an instrument by symbol.
-        Per official eToro API docs, the 'fields' parameter is REQUIRED for GET /api/v1/market-data/search.
-        Filter syntax: fields=instrumentId,internalSymbolFull&internalSymbolFull=AAPL
-        See: https://api-portal.etoro.com/api-reference/market-data/search-for-instruments.md
+        Supports both 'searchText' (used by etoro-mcp-server and hAI.FinOro)
+        and 'internalSymbolFull' with required fields parameter.
         """
-        # Correct call per official docs: fields= (required projection) + filter as separate param
         search_variants = [
+            # Standard searchText query as used by gabrielcerutti/etoro-mcp-server & hAI.FinOro
+            {"fields": "instrumentId,internalSymbolFull,displayName", "searchText": query, "pageSize": 10},
+            {"searchText": query, "pageSize": 10},
             # Official documented approach: filter by internalSymbolFull with required fields param
-            {"fields": "instrumentId,internalSymbolFull,displayname", "internalSymbolFull": query, "pageSize": 10},
+            {"fields": "instrumentId,internalSymbolFull,displayName", "internalSymbolFull": query, "pageSize": 10},
             # Broader search with displayname filter
-            {"fields": "instrumentId,internalSymbolFull,displayname", "displayname": query, "pageSize": 10},
+            {"fields": "instrumentId,internalSymbolFull,displayName", "displayname": query, "pageSize": 10},
             # No filter — return all, pick matching
-            {"fields": "instrumentId,internalSymbolFull,displayname", "pageSize": 50},
+            {"fields": "instrumentId,internalSymbolFull,displayName", "pageSize": 50},
         ]
 
         for params in search_variants:
@@ -569,9 +572,11 @@ class EToroClient:
         Returns number of new IDs discovered.
         """
         position_endpoints = [
+            "/api/v1/trading/info/real/pnl",
+            "/api/v1/trading/info/demo/pnl",
+            "/api/v1/trading/info/portfolio",
             "/api/v1/trading/positions",
             "/api/v1/trading/real/positions",
-            "/api/v1/trading/info/portfolio",
             "/api/v1/trading/real/portfolio",
             "/api/v1/positions",
         ]
@@ -584,7 +589,8 @@ class EToroClient:
             if isinstance(data, list):
                 items = data
             elif isinstance(data, dict):
-                items = (data.get("positions") or data.get("items") or
+                cp = data.get("clientPortfolio") or {}
+                items = (cp.get("positions") or data.get("positions") or data.get("items") or
                          data.get("data") or data.get("portfolio") or [])
             for item in items:
                 if not isinstance(item, dict):
