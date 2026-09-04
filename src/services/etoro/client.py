@@ -850,6 +850,7 @@ class EToroClient:
     ) -> Dict[str, Any]:
         """
         Submits a market order by amount to eToro using the official execution endpoints.
+        Target: POST /api/v2/trading/execution/orders (real) or /api/v2/trading/execution/demo/orders (demo)
         """
         is_demo = mode.lower() == "demo"
         is_buy = direction.upper() in ("BUY", "LONG")
@@ -869,21 +870,16 @@ class EToroClient:
         if take_profit_rate is not None:
             v2_payload["takeProfitRate"] = round(float(take_profit_rate), 4)
 
-        v2_endpoints = [
-            f"/api/v2/trading/execution/{'demo/' if is_demo else ''}orders",
-            "/api/v2/trading/execution/orders",
-            "/api/v2/trading/execution/demo/orders"
-        ]
+        endpoint = "/api/v2/trading/execution/demo/orders" if is_demo else "/api/v2/trading/execution/orders"
+        success, code, data = self._request("POST", endpoint, json_data=v2_payload)
+        if success or code in (200, 201, 202):
+            logger.info(f"⚡ [eToro Live v2 Order Submitted] {direction} ${amount_usd:.2f} on Instrument {instrument_id} -> HTTP {code}: {data}")
+            return {"success": True, "status_code": code, "order": data}
+        else:
+            logger.warning(f"[eToro v2 Order Attempt] POST {endpoint} -> HTTP {code}: {data}")
 
-        for ep in v2_endpoints:
-            success, code, data = self._request("POST", ep, json_data=v2_payload)
-            if success or code in (200, 201, 202):
-                logger.info(f"⚡ [eToro Live v2 Order Submitted] {direction} ${amount_usd:.2f} on Instrument {instrument_id} -> HTTP {code}: {data}")
-                return {"success": True, "status_code": code, "order": data}
-            else:
-                logger.warning(f"[eToro v2 Order Attempt] POST {ep} -> HTTP {code}: {data}")
-
-        # 2. Official eToro v1 Execution Request Fallback
+        # 2. Fast v1 Fallback if v2 rejected
+        v1_endpoint = f"/api/v1/trading/execution/{'demo/' if is_demo else ''}market-open-orders/by-amount"
         v1_payload = {
             "InstrumentID": int(instrument_id),
             "IsBuy": is_buy,
@@ -898,24 +894,12 @@ class EToroClient:
         if take_profit_rate is not None:
             v1_payload["TakeProfitRate"] = round(float(take_profit_rate), 4)
 
-        v1_endpoints = [
-            f"/api/v1/trading/execution/{'demo/' if is_demo else ''}market-open-orders/by-amount",
-            "/api/v1/trading/execution/market-open-orders/by-amount",
-            "/api/v1/trading/execution/demo/market-open-orders/by-amount",
-            "/api/v1/trading/real/orders",
-            "/api/v1/trading/orders"
-        ]
+        success, code, data = self._request("POST", v1_endpoint, json_data=v1_payload)
+        if success or code in (200, 201, 202):
+            logger.info(f"⚡ [eToro Live v1 Order Submitted] {direction} ${amount_usd:.2f} on Instrument {instrument_id} -> HTTP {code}: {data}")
+            return {"success": True, "status_code": code, "order": data}
 
-        for ep in v1_endpoints:
-            success, code, data = self._request("POST", ep, json_data=v1_payload)
-            if success or code in (200, 201, 202):
-                logger.info(f"⚡ [eToro Live v1 Order Submitted] {direction} ${amount_usd:.2f} on Instrument {instrument_id} -> HTTP {code}: {data}")
-                return {"success": True, "status_code": code, "order": data}
-            else:
-                logger.warning(f"[eToro v1 Order Attempt] POST {ep} -> HTTP {code}: {data}")
-
-        logger.warning(f"eToro order execution returned non-200 for Instrument {instrument_id}: {v2_payload}")
-        return {"success": False, "status_code": code if 'code' in locals() else 404, "order": v2_payload, "error": data if 'data' in locals() else "Order rejected"}
+        return {"success": False, "status_code": code, "order": v2_payload, "error": data}
 
     def close_position(
         self,
