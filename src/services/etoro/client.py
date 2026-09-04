@@ -586,31 +586,98 @@ class EToroClient:
 
     def raw_search_debug(self, query: str) -> Dict[str, Any]:
         """
-        Fast diagnostic — tries the most likely search param variants with short 4s timeout.
-        Returns raw HTTP status + sample response to identify the correct search format.
+        Fast diagnostic — tests each authentication header orientation individually
+        against eToro market-data and identity endpoints with 4s timeouts.
+        Returns exact HTTP status + sample response per orientation to pinpoint auth issues.
         """
         results = {}
-        endpoints_params = [
-            # ✅ Correct per official docs: fields= is REQUIRED, internalSymbolFull= is the filter
-            ("/api/v1/market-data/search", {"fields": "instrumentId,internalSymbolFull,displayname", "internalSymbolFull": query, "pageSize": 3}),
-            # Without filter — return top results, fields still required
-            ("/api/v1/market-data/search", {"fields": "instrumentId,internalSymbolFull,displayname", "pageSize": 5}),
-            # Old-style without fields (should fail with 400 not 401, helps distinguish auth vs param errors)
-            ("/api/v1/market-data/search", {"internalSymbolFull": query, "pageSize": 3}),
-        ]
-        for ep, p in endpoints_params:
-            key = f"GET {ep}?{list(p.keys())[0]}={query}"
-            success, code, data = self._request(
-                "GET", ep, params=p,
-                suppress_error_log=True, timeout=4.0
-            )
-            results[key] = {
-                "http_status": code,
-                "success": success,
-                "response_sample": str(data)[:300]
+        target_endpoint = f"{self.base_url}/api/v1/market-data/search"
+        params = {
+            "fields": "instrumentId,internalSymbolFull,displayname",
+            "internalSymbolFull": query.strip().upper(),
+            "pageSize": 3
+        }
+
+        # Build distinct auth header sets
+        auth_sets = {
+            "standard (api_key + user_key)": {
+                "x-api-key": self.api_key,
+                "x-user-key": self.user_key,
+                "x-request-id": str(uuid.uuid4()),
+                "Accept": "application/json"
+            },
+            "swapped (user_key + api_key)": {
+                "x-api-key": self.user_key,
+                "x-user-key": self.api_key,
+                "x-request-id": str(uuid.uuid4()),
+                "Accept": "application/json"
+            },
+            "api_key_only": {
+                "x-api-key": self.api_key,
+                "x-request-id": str(uuid.uuid4()),
+                "Accept": "application/json"
+            },
+            "user_key_only": {
+                "x-user-key": self.user_key,
+                "x-request-id": str(uuid.uuid4()),
+                "Accept": "application/json"
+            },
+            "bearer_user": {
+                "Authorization": f"Bearer {self.user_key.replace('Bearer ', '').strip()}",
+                "x-request-id": str(uuid.uuid4()),
+                "Accept": "application/json"
             }
-            if success:  # Stop at first working variant
-                break
+        }
+
+        for label, headers in auth_sets.items():
+            try:
+                resp = requests.get(target_endpoint, headers=headers, params=params, timeout=4.0)
+                try:
+                    body = resp.json()
+                except Exception:
+                    body = resp.text[:200]
+
+                results[label] = {
+                    "http_status": resp.status_code,
+                    "success": 200 <= resp.status_code < 300,
+                    "response": body
+                }
+                if 200 <= resp.status_code < 300:
+                    logger.info(f"✓ Found working eToro Market Data auth configuration: {label}!")
+                    # Extract instrument IDs if present
+                    items = []
+                    if isinstance(body, dict):
+                        items = body.get("items") or body.get("instruments") or []
+                    elif isinstance(body, list):
+                        items = body
+                    for it in items:
+                        if isinstance(it, dict):
+                            sym = str(it.get("internalSymbolFull") or it.get("symbol") or "").upper()
+                            iid = it.get("instrumentId")
+                            if sym and iid:
+                                self._instrument_cache[sym] = int(iid)
+            except Exception as e:
+                results[label] = {
+                    "http_status": 0,
+                    "success": False,
+                    "error": str(e)
+                }
+
+        # Also test identity endpoint with standard headers
+        try:
+            id_resp = requests.get(
+                f"{self.base_url}/api/v1/data/instruments/1001/identity",
+                headers=auth_sets["standard (api_key + user_key)"],
+                timeout=4.0
+            )
+            results["identity_catalog_1001"] = {
+                "http_status": id_resp.status_code,
+                "success": id_resp.status_code == 200,
+                "sample": id_resp.text[:200]
+            }
+        except Exception as e:
+            results["identity_catalog_1001"] = {"error": str(e)}
+
         return results
 
     def resolve_instrument_id(self, symbol: str) -> Optional[int]:
