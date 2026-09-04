@@ -397,27 +397,25 @@ class EToroClient:
 
     def search_instruments(self, query: str) -> List[Dict[str, Any]]:
         """
-        Searches for tradable instruments using multiple eToro search parameter formats.
-        Tries query, symbolFull, displayName, and symbol variations.
+        Searches eToro market data for an instrument by symbol.
+        Per official eToro API docs, the 'fields' parameter is REQUIRED for GET /api/v1/market-data/search.
+        Filter syntax: fields=instrumentId,internalSymbolFull&internalSymbolFull=AAPL
+        See: https://api-portal.etoro.com/api-reference/market-data/search-for-instruments.md
         """
-        base_params = {"pageSize": 20}
-
-        # Per official eToro docs: the CORRECT search param is 'internalSymbolFull'
-        # See: https://api-portal.etoro.com/core/guides/get-instrument-id.md
+        # Correct call per official docs: fields= (required projection) + filter as separate param
         search_variants = [
-            {"internalSymbolFull": query},  # ✅ Official documented param
-            {"query": query},
-            {"symbolFull": query},
-            {"q": query},
-            {"displayName": query},
-            {"symbol": query},
+            # Official documented approach: filter by internalSymbolFull with required fields param
+            {"fields": "instrumentId,internalSymbolFull,displayname", "internalSymbolFull": query, "pageSize": 10},
+            # Broader search with displayname filter
+            {"fields": "instrumentId,internalSymbolFull,displayname", "displayname": query, "pageSize": 10},
+            # No filter — return all, pick matching
+            {"fields": "instrumentId,internalSymbolFull,displayname", "pageSize": 50},
         ]
 
-        for variant in search_variants:
-            params = {**base_params, **variant}
+        for params in search_variants:
             success, code, data = self._request(
                 "GET", "/api/v1/market-data/search",
-                params=params, suppress_error_log=True, timeout=4.0
+                params=params, suppress_error_log=True, timeout=5.0
             )
             if success:
                 items = []
@@ -426,24 +424,7 @@ class EToroClient:
                 elif isinstance(data, dict):
                     items = data.get("items") or data.get("instruments") or data.get("results") or data.get("data") or []
                 if items:
-                    logger.debug(f"[eToro Search] Found {len(items)} results for '{query}' using params={variant}")
-                    return items
-
-        # Fallback: try the instruments list endpoint
-        for sym_param in ["symbolFull", "symbol", "query"]:
-            params = {sym_param: query, "pageSize": 5}
-            success, code, data = self._request(
-                "GET", "/api/v1/market-data/instruments",
-                params=params, suppress_error_log=True, timeout=4.0
-            )
-            if success:
-                items = []
-                if isinstance(data, list):
-                    items = data
-                elif isinstance(data, dict):
-                    items = data.get("items") or data.get("instruments") or []
-                if items:
-                    logger.debug(f"[eToro Instruments] Found {len(items)} results for '{query}'")
+                    logger.debug(f"[eToro Search] Got {len(items)} results with params={list(params.keys())}")
                     return items
 
         logger.warning(f"[eToro Search] No results found for '{query}' — all search variants exhausted")
@@ -470,10 +451,12 @@ class EToroClient:
         """
         results = {}
         endpoints_params = [
-            ("/api/v1/market-data/search", {"internalSymbolFull": query, "pageSize": 3}),  # ✅ Official param
-            ("/api/v1/market-data/search", {"query": query, "pageSize": 3}),
-            ("/api/v1/market-data/search", {"symbolFull": query, "pageSize": 3}),
-            ("/api/v1/market-data/instruments", {"symbolFull": query, "pageSize": 3}),
+            # ✅ Correct per official docs: fields= is REQUIRED, internalSymbolFull= is the filter
+            ("/api/v1/market-data/search", {"fields": "instrumentId,internalSymbolFull,displayname", "internalSymbolFull": query, "pageSize": 3}),
+            # Without filter — return top results, fields still required
+            ("/api/v1/market-data/search", {"fields": "instrumentId,internalSymbolFull,displayname", "pageSize": 5}),
+            # Old-style without fields (should fail with 400 not 401, helps distinguish auth vs param errors)
+            ("/api/v1/market-data/search", {"internalSymbolFull": query, "pageSize": 3}),
         ]
         for ep, p in endpoints_params:
             key = f"GET {ep}?{list(p.keys())[0]}={query}"
