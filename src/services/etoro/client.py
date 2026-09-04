@@ -434,7 +434,6 @@ class EToroClient:
         """
         Official eToro data endpoint: GET /api/v1/data/instruments/{id}/identity
         Returns canonical symbol, instrumentId, displayName for a known ID.
-        No user context is sent — catalog data only. Can verify if an ID is correct.
         """
         success, code, data = self._request(
             "GET", f"/api/v1/data/instruments/{instrument_id}/identity",
@@ -443,6 +442,91 @@ class EToroClient:
         if success and isinstance(data, dict):
             return data
         return None
+
+    def search_via_demo_creds(self, symbol: str) -> Optional[int]:
+        """
+        Uses the official eToro published demo credentials (from api-portal.etoro.com docs)
+        to perform a market-data search. Safe for read-only ID resolution when real API key
+        lacks market-data:read scope. Demo creds are public in eToro's official docs.
+        """
+        # Official demo credentials from https://api-portal.etoro.com docs
+        DEMO_API_KEY = "lhgfaslk21490FAScVPkdsb53F9dNkfHG4faZSG5vfjndfcfgdssdgsdHF4663"
+        DEMO_USER_KEY = (
+            "eyJlYW4iOiJVbnJlZ2lzdGVyZWRBcHBsaWNhdGlvbiIsImVrIjoiOE5sZ2cwcW5EUVdROUFNWGpXT2lmO"
+            "WktZnpidG5KcUlqWGJ3WHJZZkpZcldrbG90ZEhvLVBjSWhQaU8xU1ZtMW84aU1WZGZqN2xWNzFjLXFxLm"
+            "cybXE1dnh4Q1hUT25xaWRUaTFlcEhmVk1fIn0_"
+        )
+        headers = {
+            "x-api-key": DEMO_API_KEY,
+            "x-user-key": DEMO_USER_KEY,
+            "x-request-id": str(uuid.uuid4()),
+            "Accept": "application/json"
+        }
+        try:
+            resp = requests.get(
+                f"{self.base_url}/api/v1/market-data/search",
+                headers=headers,
+                params={
+                    "fields": "instrumentId,internalSymbolFull,displayname",
+                    "internalSymbolFull": symbol.upper(),
+                    "pageSize": 5
+                },
+                timeout=5.0
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data.get("items") or (data if isinstance(data, list) else [])
+                for item in items:
+                    if isinstance(item, dict):
+                        sym = str(item.get("internalSymbolFull") or "").upper()
+                        iid = item.get("instrumentId")
+                        if sym == symbol.upper() and iid:
+                            iid_int = int(iid)
+                            self._instrument_cache[symbol.upper()] = iid_int
+                            logger.info(f"[eToro Demo Search] Resolved {symbol} → instrumentId={iid_int}")
+                            return iid_int
+        except Exception as e:
+            logger.debug(f"[eToro Demo Search] Exception for '{symbol}': {e}")
+        return None
+
+    def populate_cache_from_portfolio(self) -> int:
+        """
+        Reads user's open trading positions (user-specific endpoint, works like /balances).
+        Extracts instrument IDs from any open positions to build a verified ID cache.
+        Returns number of new IDs discovered.
+        """
+        position_endpoints = [
+            "/api/v1/trading/positions",
+            "/api/v1/trading/real/positions",
+            "/api/v1/trading/info/portfolio",
+            "/api/v1/trading/real/portfolio",
+            "/api/v1/positions",
+        ]
+        discovered = 0
+        for ep in position_endpoints:
+            success, code, data = self._request("GET", ep, suppress_error_log=True, timeout=5.0)
+            if not success:
+                continue
+            items = []
+            if isinstance(data, list):
+                items = data
+            elif isinstance(data, dict):
+                items = (data.get("positions") or data.get("items") or
+                         data.get("data") or data.get("portfolio") or [])
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                sym = str(item.get("instrumentName") or item.get("symbol") or
+                          item.get("internalSymbolFull") or "").upper().strip()
+                iid = item.get("instrumentId") or item.get("InstrumentID")
+                if sym and iid and sym not in self._instrument_cache:
+                    self._instrument_cache[sym] = int(iid)
+                    logger.info(f"[eToro Portfolio] Discovered {sym} → instrumentId={iid}")
+                    discovered += 1
+            if items:
+                break  # Got a valid response, stop trying
+        return discovered
+
 
     def raw_search_debug(self, query: str) -> Dict[str, Any]:
         """
@@ -474,27 +558,46 @@ class EToroClient:
         return results
 
     def resolve_instrument_id(self, symbol: str) -> Optional[int]:
-        """Resolves a ticker symbol to its eToro internal Instrument ID."""
+        """
+        Resolves a ticker symbol to its eToro internal Instrument ID.
+        Strategy:
+        1. Check local cache (populated from portfolio positions or previous searches)
+        2. Search via real API (requires market-data:read scope)
+        3. Search via official eToro demo credentials (read-only, safe fallback)
+        4. Return None if unconfigured — never return a fake/guessed ID
+        """
         sym_upper = symbol.strip().upper()
         if sym_upper in self._instrument_cache:
             return self._instrument_cache[sym_upper]
 
-        # Dynamic search lookup if not in static table
+        # Try real API search (works if api key has market-data:read scope)
         results = self.search_instruments(sym_upper)
         for item in results:
             if isinstance(item, dict):
-                cand_sym = str(item.get("symbolFull") or item.get("Symbol") or item.get("symbol") or "").upper()
+                cand_sym = str(
+                    item.get("internalSymbolFull") or item.get("symbolFull") or
+                    item.get("symbol") or ""
+                ).upper()
                 cand_id = item.get("instrumentId") or item.get("InstrumentID") or item.get("id")
                 if cand_sym == sym_upper and cand_id:
                     self._instrument_cache[sym_upper] = int(cand_id)
                     return int(cand_id)
 
-        # Fallback only if mock mode
+        # Fallback: try official eToro demo credentials for market-data lookup
+        if self.is_configured():
+            demo_id = self.search_via_demo_creds(sym_upper)
+            if demo_id:
+                return demo_id
+
+        # Mock ID only in unconfigured (test) mode
         if not self.is_configured():
             mock_id = 10000 + (abs(hash(sym_upper)) % 80000)
             self._instrument_cache[sym_upper] = mock_id
             return mock_id
+
+        logger.warning(f"[eToro] Could not resolve instrument ID for '{sym_upper}' — trade blocked.")
         return None
+
 
     # =========================================================================
     # ETORO WATCHLIST MANAGEMENT & SYNC

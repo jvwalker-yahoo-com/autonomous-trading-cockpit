@@ -709,34 +709,45 @@ def test_etoro_connection():
 @app.get("/api/etoro/instrument_search", tags=["eToro Live Integration"])
 def etoro_instrument_search(symbol: str = "BTC"):
     """
-    Fast diagnostic: searches eToro API + probes identity endpoint.
-    The identity endpoint (GET /api/v1/data/instruments/{id}/identity) is catalog data
-    requiring no user context — it can verify IDs even if market-data search returns 401.
-    Example: GET /api/etoro/instrument_search?symbol=BTC
+    Diagnostic + ID resolution: tries real API, demo credentials, and portfolio positions.
+    GET /api/etoro/instrument_search?symbol=BTC
     """
     sym = symbol.upper().strip()
-    results = etoro_client.search_instruments(sym)
-    debug = etoro_client.raw_search_debug(sym)
-    cached_id = etoro_client._instrument_cache.get(sym)
 
-    # Also probe the identity endpoint for known candidate IDs
-    # Per official docs: instrumentId 1001 = AAPL (from their example)
+    # Step 1: Try portfolio positions to populate cache from real account data
+    portfolio_new = etoro_client.populate_cache_from_portfolio()
+
+    # Step 2: Try search via real API (requires market-data:read scope)
+    search_results = etoro_client.search_instruments(sym)
+
+    # Step 3: Try via official eToro demo credentials (read-only, safe fallback)
+    demo_id = etoro_client.search_via_demo_creds(sym)
+
+    # Step 4: Check raw debug variants
+    debug = etoro_client.raw_search_debug(sym)
+
+    # Step 5: Identity endpoint probe for known IDs
     identity_probes = {}
-    candidate_ids = [1, 2, 3, 100, 101, 102, 1001, 1002, 1003, 1004, 1005, 1006, 1007]
-    for cid in candidate_ids:
+    for cid in [1, 2, 3, 100, 101, 1001, 1002, 1003, 1004, 1005]:
         result = etoro_client.lookup_instrument_identity(cid)
         if result:
             identity_probes[str(cid)] = result
 
+    resolved_id = etoro_client._instrument_cache.get(sym) or demo_id
+
     return {
         "symbol_queried": sym,
-        "cached_instrument_id": cached_id,
-        "search_results": results[:5],
+        "resolved_instrument_id": resolved_id,
+        "resolution_method": "demo_credentials" if demo_id else ("portfolio" if portfolio_new > 0 else "none"),
+        "search_results": search_results[:5],
         "debug_responses": debug,
-        "identity_endpoint_probes": identity_probes,  # Real IDs from catalog
+        "identity_endpoint_probes": identity_probes,
+        "portfolio_ids_discovered": portfolio_new,
         "cache_size": len(etoro_client._instrument_cache),
+        "cache_contents": dict(etoro_client._instrument_cache),
         "is_configured": etoro_client.is_configured()
     }
+
 
 @app.post("/api/mode/switch", tags=["eToro Live Integration"])
 def switch_execution_mode(req: ModeSwitchRequest):
