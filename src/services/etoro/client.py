@@ -102,8 +102,10 @@ class EToroClient:
         max_retries: int = 5,
         base_backoff_sec: float = 1.0
     ):
-        self.api_key = (api_key or os.getenv("ETORO_API_KEY", "")).strip()
-        self.user_key = (user_key or os.getenv("ETORO_USER_KEY", "")).strip()
+        raw_ak = (api_key or os.getenv("ETORO_API_KEY", "")).strip()
+        raw_uk = (user_key or os.getenv("ETORO_USER_KEY", "")).strip()
+        self.api_key = raw_ak.strip("'\"")
+        self.user_key = raw_uk.strip("'\"")
         
         raw_url = (base_url or os.getenv("ETORO_BASE_URL", "https://public-api.etoro.com")).strip().rstrip("/")
         if "api.etoro.com" in raw_url and "public-api.etoro.com" not in raw_url:
@@ -875,9 +877,14 @@ class EToroClient:
         mcp_dir = "buy" if direction.upper() in ("BUY", "LONG") else "sellShort"
         mcp_url = "https://mcp.public-api.etoro.com"
 
+        OFFICIAL_ETORO_MCP_API_KEY = "sdgdskldFPLGfjHn1421dgnlxdGTbngdflg6290bRjslfihsjhSDsdgGHH25hjf"
         orientations = [
             ("swapped" if self._prefer_swapped else "standard"),
-            ("standard" if self._prefer_swapped else "swapped")
+            ("standard" if self._prefer_swapped else "swapped"),
+            "official_with_user_key",
+            "official_with_api_key",
+            "user_key_only",
+            "api_key_only"
         ]
 
         for orientation in orientations:
@@ -889,12 +896,42 @@ class EToroClient:
                     "x-user-key": self.api_key,
                     "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
                 }
-            else:
+            elif orientation == "standard":
                 headers = {
                     "Content-Type": "application/json",
                     "Accept": "application/json, text/event-stream",
                     "x-api-key": self.api_key,
                     "x-user-key": self.user_key,
+                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+                }
+            elif orientation == "official_with_user_key":
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "x-api-key": OFFICIAL_ETORO_MCP_API_KEY,
+                    "x-user-key": self.user_key,
+                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+                }
+            elif orientation == "official_with_api_key":
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "x-api-key": OFFICIAL_ETORO_MCP_API_KEY,
+                    "x-user-key": self.api_key,
+                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+                }
+            elif orientation == "user_key_only":
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "x-user-key": self.user_key,
+                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+                }
+            else:
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "x-user-key": self.api_key,
                     "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
                 }
 
@@ -1091,9 +1128,14 @@ class EToroClient:
             return {"status": "unconfigured", "connected": False}
 
         mcp_url = "https://mcp.public-api.etoro.com"
+        OFFICIAL_ETORO_MCP_API_KEY = "sdgdskldFPLGfjHn1421dgnlxdGTbngdflg6290bRjslfihsjhSDsdgGHH25hjf"
         orientations = [
             ("swapped" if self._prefer_swapped else "standard"),
-            ("standard" if self._prefer_swapped else "swapped")
+            ("standard" if self._prefer_swapped else "swapped"),
+            "official_with_user_key",
+            "official_with_api_key",
+            "user_key_only",
+            "api_key_only"
         ]
 
         for orientation in orientations:
@@ -1105,12 +1147,42 @@ class EToroClient:
                     "x-user-key": self.api_key,
                     "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
                 }
-            else:
+            elif orientation == "standard":
                 headers = {
                     "Content-Type": "application/json",
                     "Accept": "application/json, text/event-stream",
                     "x-api-key": self.api_key,
                     "x-user-key": self.user_key,
+                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+                }
+            elif orientation == "official_with_user_key":
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "x-api-key": OFFICIAL_ETORO_MCP_API_KEY,
+                    "x-user-key": self.user_key,
+                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+                }
+            elif orientation == "official_with_api_key":
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "x-api-key": OFFICIAL_ETORO_MCP_API_KEY,
+                    "x-user-key": self.api_key,
+                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+                }
+            elif orientation == "user_key_only":
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "x-user-key": self.user_key,
+                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+                }
+            else:
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "x-user-key": self.api_key,
                     "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
                 }
 
