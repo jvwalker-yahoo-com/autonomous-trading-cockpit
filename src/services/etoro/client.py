@@ -50,6 +50,7 @@ class EToroClient:
         self.base_backoff_sec = base_backoff_sec
         self._instrument_cache: Dict[str, int] = dict(SYMBOL_TO_ETORO_ID)
         self._ids_bootstrapped: bool = False
+        self._prefer_swapped: bool = False  # Set by test_connection if swapped orientation works
 
     def bootstrap_instrument_ids(self) -> Dict[str, int]:
         """
@@ -143,11 +144,17 @@ class EToroClient:
         """
         Generates header variants supporting both OpenAPI authentication models.
         Each variant has its own unique x-request-id UUID (eToro enforces uniqueness).
+        The variant that worked in test_connection() is tried first.
         """
         variants = []
         if self.api_key and self.user_key:
-            variants.append(self._make_headers(self.api_key, self.user_key, "standard"))
-            variants.append(self._make_headers(self.api_key, self.user_key, "swapped"))
+            if self._prefer_swapped:
+                # Swapped orientation was verified by test_connection — try it first
+                variants.append(self._make_headers(self.api_key, self.user_key, "swapped"))
+                variants.append(self._make_headers(self.api_key, self.user_key, "standard"))
+            else:
+                variants.append(self._make_headers(self.api_key, self.user_key, "standard"))
+                variants.append(self._make_headers(self.api_key, self.user_key, "swapped"))
         if self.user_key:
             variants.append(self._make_headers(self.api_key, self.user_key, "bearer_user"))
         if self.api_key:
@@ -304,34 +311,45 @@ class EToroClient:
                     "timestamp": time.time()
                 }
 
-        # Orientation 2: Try swapped
-        self.api_key, self.user_key = self.user_key, self.api_key
+        # Orientation 2: Try swapped (DON'T permanently corrupt key variables — use a flag instead)
         for ep in user_endpoints:
-            success, status_code, data = self._request("GET", ep, suppress_error_log=True)
-            if success:
-                logger.info("✓ Auto-detected and aligned swapped eToro API Key and User Key orientation!")
-                user_desc = ""
-                if isinstance(data, dict):
-                    if "username" in data:
-                        user_desc = f" (User: @{data['username']})"
-                    elif "totalBalance" in data:
-                        user_desc = f" (Balance: ${data.get('totalBalance', 0):,.2f})"
+            # Build swapped headers manually without touching self.api_key / self.user_key
+            swapped_headers = self._make_headers(self.api_key, self.user_key, "swapped")
+            try:
+                resp = requests.get(
+                    f"{self.base_url}/{ep.lstrip('/')}",
+                    headers=swapped_headers,
+                    timeout=10.0
+                )
+                if 200 <= resp.status_code < 300:
+                    self._prefer_swapped = True  # Remember working orientation without swapping vars
+                    logger.info("✓ Auto-detected swapped eToro key orientation — stored as preference (keys NOT swapped).")
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = {}
+                    user_desc = ""
+                    if isinstance(data, dict):
+                        if "username" in data:
+                            user_desc = f" (User: @{data['username']})"
+                        elif "totalBalance" in data:
+                            user_desc = f" (Balance: ${data.get('totalBalance', 0):,.2f})"
+                    return {
+                        "status": "connected",
+                        "connected": True,
+                        "trading_enabled": True,
+                        "message": f"✓ Successfully authenticated with eToro Account & Trading API (Keys auto-aligned){user_desc}!",
+                        "status_code": resp.status_code,
+                        "base_url": self.base_url,
+                        "api_key": self.api_key,
+                        "user_key": self.user_key,
+                        "profile": data,
+                        "timestamp": time.time()
+                    }
+            except requests.exceptions.RequestException:
+                pass
 
-                return {
-                    "status": "connected",
-                    "connected": True,
-                    "trading_enabled": True,
-                    "message": f"✓ Successfully authenticated with eToro Account & Trading API (Keys auto-aligned){user_desc}!",
-                    "status_code": status_code,
-                    "base_url": self.base_url,
-                    "api_key": self.api_key,
-                    "user_key": self.user_key,
-                    "profile": data,
-                    "timestamp": time.time()
-                }
-
-        # Revert swap
-        self.api_key, self.user_key = self.user_key, self.api_key
+        # No swap needed — revert nothing (we never touched the vars)
 
         # Check if Market Data (Public API Key) passes
         m_success, m_code, m_data = self._request("GET", "/api/v1/market-data/instruments?search=AAPL", suppress_error_log=True)
