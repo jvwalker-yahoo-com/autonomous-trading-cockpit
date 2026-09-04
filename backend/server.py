@@ -75,8 +75,9 @@ if saved_settings:
         config.finnhub_api_key = saved_settings["finnhub_api_key"]
         data_feed.set_api_key(config.finnhub_api_key)
 
-# Ensure live mode does not inherit a stale simulation paper drawdown lockout
+# Ensure live mode does not inherit a stale simulation paper drawdown lockout or phantom paper positions
 if config.execution_mode == "live":
+    broker.positions.clear()
     broker.reset_drawdown()
 
 active_symbol = "AAPL"
@@ -247,14 +248,18 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
         existing = broker.positions.get(symbol)
         if not existing or (existing.direction != ("LONG" if signal == "BUY" else "SHORT")):
             trade_dir = "LONG" if signal == "BUY" else "SHORT"
+            can_execute_broker = True
+
             # When in Live mode, dispatch real order to official eToro REST API
             if config.execution_mode == "live" and etoro_client.is_configured():
                 if trade_dir == "SHORT" and symbol in CRYPTO_SYMBOLS:
                     logger.info(f"ℹ️ [CRYPTO LONG-ONLY] Skipping autonomous SHORT on {symbol}: Crypto is spot long-only on eToro.")
+                    can_execute_broker = False
                 else:
                     inst_id = etoro_client.resolve_instrument_id(symbol)
                     if not inst_id:
                         logger.warning(f"[LIVE SKIP] Cannot resolve eToro instrument ID for '{symbol}' — skipping live order.")
+                        can_execute_broker = False
                     else:
                         is_short = (trade_dir == "SHORT")
                         sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
@@ -263,7 +268,7 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
 
                         logger.info(f"⚡ [LIVE ETORO ORDER] Dispatching {trade_dir} on {symbol} (ID: {inst_id}) for ${allocated_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
                         try:
-                            etoro_client.create_order(
+                            order_res = etoro_client.create_order(
                                 instrument_id=inst_id,
                                 direction=trade_dir,
                                 amount_usd=allocated_usd,
@@ -272,20 +277,28 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
                                 mode="real",
                                 symbol=symbol
                             )
+                            if order_res.get("success"):
+                                logger.info(f"✅ [LIVE ETORO SUCCESS] Order filled for {symbol}: {order_res}")
+                                can_execute_broker = True
+                            else:
+                                logger.warning(f"❌ [LIVE ETORO REJECTED] Order failed for {symbol}: {order_res.get('error') or order_res}")
+                                can_execute_broker = False
                         except Exception as e:
                             logger.error(f"eToro live order execution exception: {e}")
+                            can_execute_broker = False
 
-            # Execute in local broker ledger & self-learning memory
-            broker.execute_order(
-                symbol=symbol,
-                direction=trade_dir,
-                allocated_usd=allocated_usd,
-                current_price=quote.price,
-                stop_loss_pct=config.default_stop_loss_pct,
-                take_profit_pct=config.default_take_profit_pct,
-                rationale=f"Autonomous {trade_dir} entry on {symbol}. {rationale}. Dominant: {federation.federation}",
-                contributing_models=federation.outputs
-            )
+            # In live mode, only record in local broker ledger if eToro order was actually executed!
+            if can_execute_broker:
+                broker.execute_order(
+                    symbol=symbol,
+                    direction=trade_dir,
+                    allocated_usd=allocated_usd,
+                    current_price=quote.price,
+                    stop_loss_pct=config.default_stop_loss_pct,
+                    take_profit_pct=config.default_take_profit_pct,
+                    rationale=f"Autonomous {trade_dir} entry on {symbol}. {rationale}. Dominant: {federation.federation}",
+                    contributing_models=federation.outputs
+                )
 
             # Auto-sync newly traded stock to eToro Watchlist
             try:
@@ -934,6 +947,8 @@ def reset_circuit_breaker():
         except Exception as e:
             logger.warning(f"Could not query live balance for circuit breaker reset: {e}")
 
+    if config.execution_mode == "live":
+        broker.positions.clear()
     current_eq = broker.reset_drawdown(new_equity=float(live_equity) if live_equity else None)
     logger.info(f"⚡ [CIRCUIT BREAKER RESET] Peak equity reset to ${current_eq:.2f}. Circuit breaker unlatched.")
     return {
@@ -941,7 +956,8 @@ def reset_circuit_breaker():
         "message": f"Circuit breaker reset. Peak equity aligned to ${current_eq:.2f}.",
         "equity": current_eq,
         "drawdown_pct": 0.0,
-        "circuit_breaker_active": False
+        "circuit_breaker_active": False,
+        "cleared_positions": True if config.execution_mode == "live" else False
     }
 
 @app.post("/api/etoro/sync_5day_trades", tags=["eToro Live Integration"])

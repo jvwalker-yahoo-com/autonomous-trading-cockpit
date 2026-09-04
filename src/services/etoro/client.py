@@ -933,6 +933,9 @@ class EToroClient:
 
         mcp_url = "https://mcp.public-api.etoro.com"
         OFFICIAL_ETORO_MCP_API_KEY = "sdgdskldFPLGfjHn1421dgnlxdGTbngdflg6290bRjslfihsjhSDsdgGHH25hjf"
+        u_key_raw = (self.user_key or "").strip()
+        u_key_padded = u_key_raw.rstrip("_") + "==" if u_key_raw.endswith("__") else u_key_raw
+
         orientations = [
             ("standard", {
                 "Content-Type": "application/json",
@@ -956,6 +959,22 @@ class EToroClient:
                 "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
             })
         ]
+        if u_key_padded != u_key_raw:
+            orientations.append(("official_partner_padded", {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "x-api-key": OFFICIAL_ETORO_MCP_API_KEY,
+                "x-user-key": u_key_padded,
+                "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+            }))
+        if u_key_raw.startswith("ey"):
+            orientations.insert(0, ("bearer_user", {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "Authorization": f"Bearer {u_key_raw.replace('Bearer ', '').strip()}",
+                "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+            }))
+
         if self._prefer_swapped:
             orientations.reverse()
 
@@ -1267,12 +1286,15 @@ class EToroClient:
                 amount_usd=amount_usd,
                 mode=mode
             )
-            # If MCP succeeded, or if MCP returned an explicit rejection / execution outcome:
-            # RETURN IT! Do NOT fall back to raw REST endpoints which fail with 401.
-            if mcp_res.get("success") or mcp_res.get("verdict") == "rejected" or mcp_res.get("outcome"):
+            # If MCP succeeded, return outcome immediately
+            if mcp_res.get("success"):
                 return mcp_res
-            if mcp_res.get("method") == "mcp" and "Failed to reach" not in mcp_res.get("error", ""):
+            if mcp_res.get("outcome") in ("executed", "pending", "partiallyFilled"):
                 return mcp_res
+            # If rejected by explicit business rules (e.g. leverage/hours/insufficient funds), return it
+            if mcp_res.get("verdict") == "rejected" and "auth" not in mcp_res.get("error", "").lower():
+                return mcp_res
+            logger.info(f"[eToro MCP -> REST Fallback] MCP returned ({mcp_res.get('error')}) — falling through to Direct REST v2 Execution...")
 
         # 2. Official eToro v2 Execution Request (Docs: api-portal.etoro.com/core/guides/market-orders)
         v2_payload: Dict[str, Any] = {
