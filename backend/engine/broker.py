@@ -298,6 +298,15 @@ class SimulatedBroker:
         except Exception:
             return {}
 
+    def reset_drawdown(self, new_equity: Optional[float] = None) -> float:
+        """Resets peak equity to current equity (or updates cash to new_equity), clearing any drawdown circuit breaker."""
+        if new_equity is not None and new_equity > 0:
+            self.cash = round(float(new_equity), 2)
+        eq = self.get_equity()
+        self.peak_equity = eq
+        self.save_state()
+        return eq
+
     def close_all_positions(self, current_prices: Optional[Dict[str, float]] = None, exit_rationale: str = "End-of-day market close") -> List[TradeRecord]:
         """Closes all currently open positions at their latest prices and logs them to the trade ledger."""
         closed_trades = []

@@ -184,6 +184,13 @@ def test_all_api_endpoints():
     assert r.status_code == 200
     assert r.json()["cash"] == config.initial_capital
 
+    # Circuit breaker reset endpoint test
+    r = client.post("/api/circuit_breaker/reset")
+    assert r.status_code == 200
+    assert r.json()["status"] == "success"
+    assert r.json()["drawdown_pct"] == 0.0
+    assert r.json()["circuit_breaker_active"] is False
+
 def test_backtester_and_optimizer():
     from backend.engine.backtester import BacktesterEngine
     bt = BacktesterEngine()

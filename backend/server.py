@@ -75,6 +75,10 @@ if saved_settings:
         config.finnhub_api_key = saved_settings["finnhub_api_key"]
         data_feed.set_api_key(config.finnhub_api_key)
 
+# Ensure live mode does not inherit a stale simulation paper drawdown lockout
+if config.execution_mode == "live":
+    broker.reset_drawdown()
+
 active_symbol = "AAPL"
 is_autonomous_loop_running = True
 
@@ -869,7 +873,22 @@ def switch_execution_mode(req: ModeSwitchRequest):
     if target_mode == "live":
         # Clear previous simulated paper positions so live execution slots are immediately open
         broker.positions.clear()
-        broker.save_state()
+        
+        # Reset peak equity watermark and unlatch any paper drawdown circuit breaker
+        live_equity = None
+        try:
+            bal_res = etoro_client.get_account_balances()
+            if bal_res.get("success") and bal_res.get("data"):
+                d = bal_res["data"]
+                if isinstance(d, dict):
+                    live_equity = d.get("totalEquity") or d.get("equity") or d.get("cashBalance") or d.get("availableCash")
+                elif isinstance(d, list) and len(d) > 0 and isinstance(d[0], dict):
+                    live_equity = d[0].get("totalEquity") or d[0].get("equity") or d[0].get("cashBalance")
+        except Exception as e:
+            logger.warning(f"Could not query live balance during mode switch: {e}")
+
+        recal_eq = broker.reset_drawdown(new_equity=float(live_equity) if live_equity else None)
+        logger.info(f"✓ Recalibrated broker equity to ${recal_eq:.2f} (Peak: ${broker.peak_equity:.2f}) and unlatched circuit breaker.")
 
         # Build 5-day historical traded stocks + active watchlist and sync asynchronously in background
         five_day_rep = broker.get_multi_day_report(5)
@@ -896,6 +915,33 @@ def switch_execution_mode(req: ModeSwitchRequest):
         "status": "success",
         "execution_mode": config.execution_mode,
         "message": f"Switched to {'⚡ LIVE eToro Trading' if target_mode == 'live' else '🛡️ Demo & Learning Simulation'}"
+    }
+
+
+@app.post("/api/circuit_breaker/reset", tags=["Arbitration"])
+def reset_circuit_breaker():
+    """Resets peak equity watermark, synchronizes live eToro balance if in live mode, and unlatches the circuit breaker."""
+    live_equity = None
+    if config.execution_mode == "live" and etoro_client.is_configured():
+        try:
+            bal_res = etoro_client.get_account_balances()
+            if bal_res.get("success") and bal_res.get("data"):
+                d = bal_res["data"]
+                if isinstance(d, dict):
+                    live_equity = d.get("totalEquity") or d.get("equity") or d.get("cashBalance") or d.get("availableCash")
+                elif isinstance(d, list) and len(d) > 0 and isinstance(d[0], dict):
+                    live_equity = d[0].get("totalEquity") or d[0].get("equity") or d[0].get("cashBalance")
+        except Exception as e:
+            logger.warning(f"Could not query live balance for circuit breaker reset: {e}")
+
+    current_eq = broker.reset_drawdown(new_equity=float(live_equity) if live_equity else None)
+    logger.info(f"⚡ [CIRCUIT BREAKER RESET] Peak equity reset to ${current_eq:.2f}. Circuit breaker unlatched.")
+    return {
+        "status": "success",
+        "message": f"Circuit breaker reset. Peak equity aligned to ${current_eq:.2f}.",
+        "equity": current_eq,
+        "drawdown_pct": 0.0,
+        "circuit_breaker_active": False
     }
 
 @app.post("/api/etoro/sync_5day_trades", tags=["eToro Live Integration"])
@@ -1018,10 +1064,14 @@ def auto_add_top_screened(top_n: int = 15):
 
 @app.post("/api/portfolio/reset", tags=["Portfolio"])
 def reset_portfolio():
-    """Resets simulated portfolio to initial capital."""
-    broker.cash = config.initial_capital
-    broker.peak_equity = config.initial_capital
-    broker.positions.clear()
+    """Resets simulated portfolio to initial capital (or aligns with live equity if in live mode)."""
+    if config.execution_mode == "live":
+        broker.positions.clear()
+        broker.reset_drawdown()
+    else:
+        broker.cash = config.initial_capital
+        broker.peak_equity = config.initial_capital
+        broker.positions.clear()
     broker.trade_ledger.clear()
     learner.mistake_history.clear()
     learner.total_trades_evaluated = 0

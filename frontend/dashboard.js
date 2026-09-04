@@ -105,6 +105,7 @@ const el = {
   btnTickStep: document.getElementById("btnTickStep"),
   btnSettings: document.getElementById("btnSettings"),
   btnResetPortfolio: document.getElementById("btnResetPortfolio"),
+  btnResetCircuitBreaker: document.getElementById("btnResetCircuitBreaker"),
   btnManualBuy: document.getElementById("btnManualBuy"),
   btnManualShort: document.getElementById("btnManualShort"),
   btnManualClose: document.getElementById("btnManualClose"),
@@ -266,6 +267,14 @@ function renderCockpit(data) {
   updateGateItem(el.gateAnomaly, arbitration.risk_gate_passed, "Anomaly / Risk Gate");
 
   el.arbitrationReasonsList.innerHTML = arbitration.reasons.map(r => `<li>• ${r}</li>`).join("");
+
+  if (el.btnResetCircuitBreaker) {
+    if (arbitration.circuit_breaker_active || !arbitration.drawdown_ok) {
+      el.btnResetCircuitBreaker.style.display = "block";
+    } else {
+      el.btnResetCircuitBreaker.style.display = "none";
+    }
+  }
 
   // 7. Panel 5: Anomaly
   el.anomalyMainBadge.textContent = anomaly.anomaly_detected ? "SPIKE DETECTED" : "NOMINAL";
@@ -482,6 +491,26 @@ if (el.btnResetPortfolio) {
     if (confirm("Reset simulation portfolio back to initial capital and clear open positions?")) {
       await fetch(`${BASE_URL}/api/portfolio/reset`, { method: "POST" });
       await fetchCockpitData();
+    }
+  });
+}
+
+if (el.btnResetCircuitBreaker) {
+  el.btnResetCircuitBreaker.addEventListener("click", async () => {
+    el.btnResetCircuitBreaker.textContent = "⌛ UNLATCHING...";
+    try {
+      const res = await fetch(`${BASE_URL}/api/circuit_breaker/reset`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      el.btnResetCircuitBreaker.textContent = "✓ UNLATCHED";
+      await fetchCockpitData();
+      setTimeout(() => {
+        if (el.btnResetCircuitBreaker) {
+          el.btnResetCircuitBreaker.textContent = "⚡ RESET CIRCUIT BREAKER / UNLATCH SAFETY";
+        }
+      }, 2500);
+    } catch (e) {
+      alert("Failed to reset circuit breaker: " + e.message);
+      el.btnResetCircuitBreaker.textContent = "⚡ RESET CIRCUIT BREAKER / UNLATCH SAFETY";
     }
   });
 }
