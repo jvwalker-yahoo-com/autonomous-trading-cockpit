@@ -713,12 +713,15 @@ def get_etoro_status():
     
     def safe_decode_jwt_payload(token_str: str):
         try:
-            padded = token_str.strip().rstrip("-_=") + "==="
-            b64_str = padded.replace("-", "+").replace("_", "/")
-            raw_bytes = base64.b64decode(b64_str, validate=False)
+            tok = token_str.strip()
+            parts = tok.split(".")
+            target = parts[1] if len(parts) >= 2 else parts[0]
+            s = target.replace("-", "+").replace("_", "/")
+            pad_len = (4 - len(s) % 4) % 4
+            raw_bytes = base64.b64decode(s + ("=" * pad_len), validate=False)
             parsed = json.loads(raw_bytes.decode("utf-8", errors="ignore"))
             if isinstance(parsed, dict):
-                return True, list(parsed.keys()), parsed.get("ean") or parsed.get("cid") or parsed.get("name")
+                return True, list(parsed.keys()), parsed.get("ean") or parsed.get("cid") or parsed.get("name") or parsed.get("username")
         except Exception:
             pass
         return False, [], None
@@ -824,6 +827,24 @@ def test_etoro_mcp(symbol: str = "BTC"):
 def get_etoro_scopes():
     """Fetches granted OAuth scopes and account profile via the official eToro MCP server."""
     return etoro_client.get_mcp_profile_and_scopes()
+
+
+@app.get("/api/etoro/mcp-prepare", tags=["eToro Live Integration"])
+def etoro_mcp_prepare(symbol: str = "BTC", direction: str = "BUY", amount: float = 100.0, mode: str = "real"):
+    """Pre-flights and validates a proposed trade against live quotes and account balance without placing it."""
+    return etoro_client.prepare_mcp_trade(symbol=symbol, direction=direction, amount_usd=amount, mode=mode)
+
+
+@app.get("/api/etoro/balances", tags=["eToro Live Integration"])
+def get_live_balances():
+    """Fetches live multi-account balances (Trading, Cash, Crypto) from eToro via official MCP gateway."""
+    return etoro_client.get_account_balances()
+
+
+@app.get("/api/etoro/portfolio", tags=["eToro Live Integration"])
+def get_live_portfolio(mode: str = "real"):
+    """Fetches live active portfolio holdings and positions from eToro via official MCP gateway."""
+    return etoro_client.get_portfolio(mode=mode)
 
 
 @app.post("/api/mode/switch", tags=["eToro Live Integration"])

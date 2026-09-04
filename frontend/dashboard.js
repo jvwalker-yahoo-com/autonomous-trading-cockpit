@@ -417,7 +417,8 @@ async function triggerManualTrade(action) {
           alert(`⚡ LIVE ETORO ORDER FILLED!\n\nAction: ${action} ${activeSymbol}\nAmount: $100.00\nEngine: ${methodLabel}\nOutcome: ${data.etoro_result.outcome || 'Executed'}\n\nOrder Info: ${JSON.stringify(fillInfo, null, 2)}`);
         } else if (data.etoro_result && !data.etoro_result.success) {
           const errDetail = data.etoro_result.error || data.etoro_result.reasons || (data.etoro_result.order && data.etoro_result.order.error) || data.etoro_result.order;
-          alert(`⚠️ eToro Rejected Live Order (Status: ${data.etoro_result.status_code || data.etoro_result.outcome || 401}):\n\n${typeof errDetail === 'object' ? JSON.stringify(errDetail, null, 2) : errDetail}\n\nVerify that your eToro User Key permissions include 'Write' and Market Data in api-portal.etoro.com.`);
+          const statusDisplay = data.etoro_result.status_code || data.etoro_result.outcome || data.etoro_result.verdict || 'Order Rejected';
+          alert(`⚠️ eToro Live Order Notice (${statusDisplay}):\n\n${typeof errDetail === 'object' ? JSON.stringify(errDetail, null, 2) : errDetail}`);
         } else {
           alert(`⚡ Order dispatched for ${action} ${activeSymbol}.`);
         }

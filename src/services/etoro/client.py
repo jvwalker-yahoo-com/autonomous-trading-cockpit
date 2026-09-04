@@ -359,6 +359,30 @@ class EToroClient:
                 "has_user_key": bool(self.user_key)
             }
 
+        # Priority 1: Check Official eToro MCP Gateway (https://mcp.public-api.etoro.com)
+        mcp_prof = self.get_mcp_profile_and_scopes()
+        if mcp_prof.get("connected"):
+            profile_data = mcp_prof.get("profile", {})
+            user_info = profile_data.get("profile", {}) if isinstance(profile_data, dict) else {}
+            username = user_info.get("username") or profile_data.get("username") or "eToro User"
+            real_cid = user_info.get("realCid") or profile_data.get("realCid")
+            scopes = user_info.get("scopes") or profile_data.get("scopes") or []
+            self._prefer_swapped = False
+            logger.info(f"✓ Authenticated with official eToro MCP Gateway (User: @{username}, Real CID: {real_cid})")
+            return {
+                "status": "connected",
+                "connected": True,
+                "trading_enabled": True,
+                "message": f"✓ Successfully authenticated with eToro via official MCP Gateway! (User: @{username}, Real CID: {real_cid})",
+                "status_code": 200,
+                "base_url": "https://mcp.public-api.etoro.com",
+                "api_key": self.api_key,
+                "user_key": self.user_key,
+                "profile": user_info or profile_data,
+                "scopes": scopes,
+                "timestamp": time.time()
+            }
+
         # 1. Test authenticated user endpoints (requires both valid API Key AND valid User Key)
         user_endpoints = [
             "/api/v1/balances?expand=equityDetails",
@@ -471,14 +495,21 @@ class EToroClient:
         }
 
     def get_account_balances(self) -> Dict[str, Any]:
-        """Fetches cash balance, total invested, and equity from eToro."""
+        """Fetches cash balance, total invested, and equity from eToro via official MCP gateway or fallback."""
+        mcp_res = self.call_mcp_tool("get-my-balances")
+        if mcp_res.get("success"):
+            return {"success": True, "status_code": 200, "data": mcp_res.get("data")}
         success, code, data = self._request("GET", "/api/v1/balances?expand=equityDetails")
         if not success:
             success, code, data = self._request("GET", "/api/v1/balances/accounts")
         return {"success": success, "status_code": code, "data": data}
 
     def get_portfolio(self, mode: str = "real") -> Dict[str, Any]:
-        """Fetches active open positions and portfolio details (demo or real)."""
+        """Fetches active open positions and portfolio details via official MCP gateway or fallback."""
+        account = "real" if mode.lower() in ("real", "live") else "demo"
+        mcp_res = self.call_mcp_tool("get-my-portfolio-summary", {"account": account, "includePositions": True})
+        if mcp_res.get("success"):
+            return {"success": True, "status_code": 200, "data": mcp_res.get("data")}
         is_demo = mode.lower() == "demo"
         endpoints = [
             f"/api/v1/trading/info/{'demo/' if is_demo else ''}portfolio",
@@ -887,6 +918,132 @@ class EToroClient:
     # WebSocket:  wss://ws.etoro.com/ws (Topic: instrument:<id>, Authenticate)
     # =========================================================================
 
+    def call_mcp_tool(
+        self,
+        tool_name: str,
+        arguments: Optional[Dict[str, Any]] = None,
+        timeout: float = 25.0
+    ) -> Dict[str, Any]:
+        """
+        Invokes an MCP tool on the official eToro MCP gateway (https://mcp.public-api.etoro.com).
+        Tries verified header orientations (standard first, then official partner key fallback).
+        """
+        if not self.is_configured():
+            return {"success": False, "error": "eToro credentials not configured"}
+
+        mcp_url = "https://mcp.public-api.etoro.com"
+        OFFICIAL_ETORO_MCP_API_KEY = "sdgdskldFPLGfjHn1421dgnlxdGTbngdflg6290bRjslfihsjhSDsdgGHH25hjf"
+        orientations = [
+            ("standard", {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "x-api-key": self.api_key,
+                "x-user-key": self.user_key,
+                "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+            }),
+            ("official_partner", {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "x-api-key": OFFICIAL_ETORO_MCP_API_KEY,
+                "x-user-key": self.user_key,
+                "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+            }),
+            ("swapped", {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "x-api-key": self.user_key,
+                "x-user-key": self.api_key,
+                "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+            })
+        ]
+        if self._prefer_swapped:
+            orientations.reverse()
+
+        last_err = "No response from MCP"
+        for label, headers in orientations:
+            req_id = str(uuid.uuid4())
+            payload = {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "method": "tools/call",
+                "params": {
+                    "name": tool_name,
+                    "arguments": arguments or {}
+                }
+            }
+            try:
+                resp = requests.post(mcp_url, json=payload, headers=headers, timeout=timeout)
+                if resp.status_code != 200:
+                    last_err = f"MCP HTTP {resp.status_code} ({label})"
+                    if resp.status_code in (401, 403):
+                        continue
+                    return {"success": False, "status_code": resp.status_code, "error": last_err, "raw": resp.text[:300]}
+
+                tool_text = ""
+                for line in resp.text.splitlines():
+                    if line.startswith("data: "):
+                        try:
+                            d = json.loads(line[6:])
+                            if "error" in d:
+                                return {"success": False, "error": d["error"]}
+                            res = d.get("result", {})
+                            if res.get("isError"):
+                                return {"success": False, "error": res}
+                            content = res.get("content", [])
+                            if content and isinstance(content, list):
+                                tool_text = content[0].get("text", "")
+                                break
+                        except Exception:
+                            pass
+
+                if not tool_text:
+                    last_err = f"Empty content received from MCP ({label})"
+                    continue
+
+                try:
+                    parsed = json.loads(tool_text)
+                except Exception:
+                    parsed = {"raw": tool_text}
+
+                # Check if the tool reported an upstream 401/403 in the payload
+                if isinstance(parsed, dict) and parsed.get("statusCode") in (401, 403):
+                    last_err = f"Upstream auth failure ({label}): {parsed.get('statusCode')}"
+                    continue
+
+                if label == "swapped":
+                    self._prefer_swapped = True
+                elif label == "standard":
+                    self._prefer_swapped = False
+
+                return {"success": True, "data": parsed, "orientation": label, "x_request_id": req_id}
+
+            except Exception as e:
+                last_err = f"Exception ({label}): {e}"
+                logger.debug(f"[eToro MCP - {tool_name} - {label}] {e}")
+
+        return {"success": False, "error": last_err}
+
+    def prepare_mcp_trade(
+        self,
+        symbol: str,
+        direction: str = "buy",
+        amount_usd: float = 100.0,
+        mode: str = "real"
+    ) -> Dict[str, Any]:
+        """
+        Validates proposed trade against live quotes, balance, and regulations via eToro MCP prepare-trade.
+        Zero money movement — pure preview and token minting.
+        """
+        account = "real" if mode.lower() in ("real", "live") else "demo"
+        mcp_dir = "buy" if direction.upper() in ("BUY", "LONG") else "sellShort"
+        args = {
+            "account": account,
+            "direction": mcp_dir,
+            "symbol": symbol.upper().strip(),
+            "amount": round(float(amount_usd), 2)
+        }
+        return self.call_mcp_tool("prepare-trade", args, timeout=25.0)
+
     def execute_mcp_trade(
         self,
         symbol: str,
@@ -904,175 +1061,87 @@ class EToroClient:
 
         account = "real" if mode.lower() in ("real", "live") else "demo"
         mcp_dir = "buy" if direction.upper() in ("BUY", "LONG") else "sellShort"
-        mcp_url = "https://mcp.public-api.etoro.com"
+        sym = symbol.upper().strip()
 
-        OFFICIAL_ETORO_MCP_API_KEY = "sdgdskldFPLGfjHn1421dgnlxdGTbngdflg6290bRjslfihsjhSDsdgGHH25hjf"
-        orientations = [
-            ("swapped" if self._prefer_swapped else "standard"),
-            ("standard" if self._prefer_swapped else "swapped"),
-            "official_with_user_key",
-            "official_with_api_key",
-            "user_key_only",
-            "api_key_only"
-        ]
-
-        for orientation in orientations:
-            if orientation == "swapped":
-                headers = {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/event-stream",
-                    "x-api-key": self.user_key,
-                    "x-user-key": self.api_key,
-                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
-                }
-            elif orientation == "standard":
-                headers = {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/event-stream",
-                    "x-api-key": self.api_key,
-                    "x-user-key": self.user_key,
-                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
-                }
-            elif orientation == "official_with_user_key":
-                headers = {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/event-stream",
-                    "x-api-key": OFFICIAL_ETORO_MCP_API_KEY,
-                    "x-user-key": self.user_key,
-                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
-                }
-            elif orientation == "official_with_api_key":
-                headers = {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/event-stream",
-                    "x-api-key": OFFICIAL_ETORO_MCP_API_KEY,
-                    "x-user-key": self.api_key,
-                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
-                }
-            elif orientation == "user_key_only":
-                headers = {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/event-stream",
-                    "x-user-key": self.user_key,
-                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
-                }
-            else:
-                headers = {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/event-stream",
-                    "x-user-key": self.api_key,
-                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
-                }
-
-            # Phase 1: prepare-trade (validates live quotes, spread, account balance, FCA rules)
-            prep_payload = {
-                "jsonrpc": "2.0",
-                "id": str(uuid.uuid4()),
-                "method": "tools/call",
-                "params": {
-                    "name": "prepare-trade",
-                    "arguments": {
-                        "account": account,
-                        "direction": mcp_dir,
-                        "symbol": symbol.upper(),
-                        "amount": round(float(amount_usd), 2)
-                    }
-                }
+        # Step 1: prepare-trade
+        logger.info(f"[eToro MCP] Preparing trade: {mcp_dir} ${amount_usd:.2f} of {sym} on {account} account...")
+        prep_res = self.prepare_mcp_trade(symbol=sym, direction=mcp_dir, amount_usd=amount_usd, mode=account)
+        if not prep_res.get("success"):
+            logger.warning(f"[eToro MCP prepare-trade Call Failed] {prep_res.get('error')}")
+            return {
+                "success": False,
+                "method": "mcp",
+                "error": prep_res.get("error", "Failed to reach eToro prepare-trade gateway")
             }
 
-            try:
-                resp = requests.post(mcp_url, json=prep_payload, headers=headers, timeout=12.0)
-                if resp.status_code == 200:
-                    tool_text = ""
-                    for line in resp.text.splitlines():
-                        if line.startswith("data: "):
-                            try:
-                                d = json.loads(line[6:])
-                                content = d.get("result", {}).get("content", [])
-                                if content and isinstance(content, list):
-                                    tool_text = content[0].get("text", "")
-                                    break
-                            except Exception:
-                                pass
+        prep_data = prep_res.get("data", {})
+        verdict = prep_data.get("verdict")
+        token = prep_data.get("token")
 
-                    if tool_text:
-                        try:
-                            prep_res = json.loads(tool_text)
-                        except Exception:
-                            prep_res = {"raw": tool_text}
+        if verdict == "rejected":
+            reasons = prep_data.get("reasons", [])
+            err_str = "; ".join(reasons) if reasons else "Order rejected by eToro pre-trade validation."
+            logger.warning(f"[eToro MCP prepare-trade Rejected] {err_str}")
+            return {
+                "success": False,
+                "method": "mcp",
+                "verdict": "rejected",
+                "reasons": reasons,
+                "error": err_str,
+                "order": prep_data
+            }
 
-                        verdict = prep_res.get("verdict")
-                        token = prep_res.get("token")
+        if verdict != "ready" or not token:
+            err_str = f"eToro prepare-trade unexpected verdict: {verdict}"
+            logger.warning(f"[eToro MCP Error] {err_str} — {prep_data}")
+            return {
+                "success": False,
+                "method": "mcp",
+                "verdict": verdict,
+                "error": err_str,
+                "order": prep_data
+            }
 
-                        if verdict == "ready" and token:
-                            logger.info(f"[eToro MCP] prepare-trade ready for {symbol}. Placing trade...")
-                            # Phase 2: place-trade
-                            place_payload = {
-                                "jsonrpc": "2.0",
-                                "id": str(uuid.uuid4()),
-                                "method": "tools/call",
-                                "params": {
-                                    "name": "place-trade",
-                                    "arguments": {"token": token}
-                                }
-                            }
-                            place_resp = requests.post(mcp_url, json=place_payload, headers=headers, timeout=30.0)
-                            if place_resp.status_code == 200:
-                                place_tool_text = ""
-                                for p_line in place_resp.text.splitlines():
-                                    if p_line.startswith("data: "):
-                                        try:
-                                            pd = json.loads(p_line[6:])
-                                            pcontent = pd.get("result", {}).get("content", [])
-                                            if pcontent:
-                                                place_tool_text = pcontent[0].get("text", "")
-                                                break
-                                        except Exception:
-                                            pass
+        # Step 2: place-trade with token
+        logger.info(f"[eToro MCP] prepare-trade ready for {sym}. Placing trade with token...")
+        place_res = self.call_mcp_tool("place-trade", {"token": token}, timeout=35.0)
+        if not place_res.get("success"):
+            err_str = place_res.get("error", "Failed to place trade with token")
+            logger.error(f"[eToro MCP place-trade Call Failed] {err_str}")
+            return {
+                "success": False,
+                "method": "mcp",
+                "error": err_str
+            }
 
-                                try:
-                                    place_data = json.loads(place_tool_text)
-                                except Exception:
-                                    place_data = {"raw": place_tool_text}
-
-                                outcome = place_data.get("outcome")
-                                if outcome in ("executed", "pending", "partiallyFilled"):
-                                    logger.info(f"⚡ [eToro MCP Trade Executed] {mcp_dir} ${amount_usd} on {symbol} -> outcome: {outcome}")
-                                    return {
-                                        "success": True,
-                                        "method": "mcp",
-                                        "outcome": outcome,
-                                        "order_id": place_data.get("orderId"),
-                                        "positions": place_data.get("positions", []),
-                                        "order": place_data,
-                                        "details": place_data
-                                    }
-                                else:
-                                    err_msg = place_data.get("status", {}).get("errorMessage") or str(place_data)
-                                    logger.warning(f"[eToro MCP Not Executed] outcome={outcome}: {err_msg}")
-                                    return {
-                                        "success": False,
-                                        "method": "mcp",
-                                        "outcome": outcome,
-                                        "error": err_msg,
-                                        "order": place_data
-                                    }
-                        elif verdict == "rejected":
-                            reasons = prep_res.get("reasons", [])
-                            err_str = "; ".join(reasons) if reasons else "Order rejected by eToro pre-trade validation."
-                            logger.warning(f"[eToro MCP prepare-trade Rejected] {err_str}")
-                            return {
-                                "success": False,
-                                "method": "mcp",
-                                "verdict": "rejected",
-                                "reasons": reasons,
-                                "error": err_str,
-                                "order": prep_res
-                            }
-            except Exception as e:
-                logger.debug(f"[eToro MCP Exception - {orientation}] {e}")
-
-        return {"success": False, "method": "mcp", "error": "MCP execution did not succeed; falling back to direct REST API"}
+        place_data = place_res.get("data", {})
+        outcome = place_data.get("outcome")
+        if outcome in ("executed", "pending", "partiallyFilled"):
+            logger.info(f"⚡ [eToro MCP Trade Executed] {mcp_dir} ${amount_usd} on {sym} -> outcome: {outcome}")
+            return {
+                "success": True,
+                "method": "mcp",
+                "outcome": outcome,
+                "order_id": place_data.get("orderId"),
+                "positions": place_data.get("positions", []),
+                "order": place_data,
+                "details": place_data
+            }
+        else:
+            err_msg = (
+                place_data.get("status", {}).get("errorMessage")
+                or place_data.get("errorMessage")
+                or place_data.get("decodedHint")
+                or f"Order {outcome or 'failed'}"
+            )
+            logger.warning(f"[eToro MCP Not Executed] outcome={outcome}: {err_msg}")
+            return {
+                "success": False,
+                "method": "mcp",
+                "outcome": outcome,
+                "error": err_msg,
+                "order": place_data
+            }
 
     def test_websocket(self) -> Dict[str, Any]:
         """
@@ -1155,99 +1224,15 @@ class EToroClient:
         """
         if not self.is_configured():
             return {"status": "unconfigured", "connected": False}
-
-        mcp_url = "https://mcp.public-api.etoro.com"
-        OFFICIAL_ETORO_MCP_API_KEY = "sdgdskldFPLGfjHn1421dgnlxdGTbngdflg6290bRjslfihsjhSDsdgGHH25hjf"
-        orientations = [
-            ("swapped" if self._prefer_swapped else "standard"),
-            ("standard" if self._prefer_swapped else "swapped"),
-            "official_with_user_key",
-            "official_with_api_key",
-            "user_key_only",
-            "api_key_only"
-        ]
-
-        for orientation in orientations:
-            if orientation == "swapped":
-                headers = {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/event-stream",
-                    "x-api-key": self.user_key,
-                    "x-user-key": self.api_key,
-                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
-                }
-            elif orientation == "standard":
-                headers = {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/event-stream",
-                    "x-api-key": self.api_key,
-                    "x-user-key": self.user_key,
-                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
-                }
-            elif orientation == "official_with_user_key":
-                headers = {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/event-stream",
-                    "x-api-key": OFFICIAL_ETORO_MCP_API_KEY,
-                    "x-user-key": self.user_key,
-                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
-                }
-            elif orientation == "official_with_api_key":
-                headers = {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/event-stream",
-                    "x-api-key": OFFICIAL_ETORO_MCP_API_KEY,
-                    "x-user-key": self.api_key,
-                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
-                }
-            elif orientation == "user_key_only":
-                headers = {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/event-stream",
-                    "x-user-key": self.user_key,
-                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
-                }
-            else:
-                headers = {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/event-stream",
-                    "x-user-key": self.api_key,
-                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
-                }
-
-            req_body = {
-                "jsonrpc": "2.0",
-                "id": str(uuid.uuid4()),
-                "method": "tools/call",
-                "params": {"name": "get-my-profile-and-scopes", "arguments": {}}
+        res = self.call_mcp_tool("get-my-profile-and-scopes")
+        if res.get("success"):
+            return {
+                "status": "success",
+                "connected": True,
+                "orientation": res.get("orientation", "standard"),
+                "profile": res.get("data")
             }
-
-            try:
-                resp = requests.post(mcp_url, json=req_body, headers=headers, timeout=10.0)
-                if resp.status_code == 200:
-                    for line in resp.text.splitlines():
-                        if line.startswith("data: "):
-                            d = json.loads(line[6:])
-                            content = d.get("result", {}).get("content", [])
-                            if content:
-                                res_text = content[0].get("text", "")
-                                try:
-                                    profile_data = json.loads(res_text)
-                                except Exception:
-                                    profile_data = {"raw": res_text}
-                                if isinstance(profile_data, dict) and profile_data.get("statusCode") in (401, 403):
-                                    # Rejected by eToro upstream! Try next orientation
-                                    break
-                                return {
-                                    "status": "success",
-                                    "connected": True,
-                                    "orientation": orientation,
-                                    "profile": profile_data
-                                }
-            except Exception as e:
-                logger.debug(f"[eToro MCP Scopes - {orientation}] {e}")
-
-        return {"status": "failed", "connected": False, "message": "Could not read scopes via MCP"}
+        return {"status": "failed", "connected": False, "message": res.get("error", "Could not read scopes via MCP")}
 
     # =========================================================================
     # TRADING EXECUTION METHODS (Demo / Real)
@@ -1282,11 +1267,11 @@ class EToroClient:
                 amount_usd=amount_usd,
                 mode=mode
             )
-            if mcp_res.get("success"):
+            # If MCP succeeded, or if MCP returned an explicit rejection / execution outcome:
+            # RETURN IT! Do NOT fall back to raw REST endpoints which fail with 401.
+            if mcp_res.get("success") or mcp_res.get("verdict") == "rejected" or mcp_res.get("outcome"):
                 return mcp_res
-            # If rejected by explicit business rule (e.g. leverage/balance/hours), don't blindly spam REST
-            if mcp_res.get("verdict") == "rejected":
-                logger.warning(f"[eToro Pre-Trade Rejected] {mcp_res.get('error')}")
+            if mcp_res.get("method") == "mcp" and "Failed to reach" not in mcp_res.get("error", ""):
                 return mcp_res
 
         # 2. Official eToro v2 Execution Request (Docs: api-portal.etoro.com/core/guides/market-orders)
