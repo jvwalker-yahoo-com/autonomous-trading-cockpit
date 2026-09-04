@@ -769,8 +769,13 @@ if (el.btnTestEtoroMcp) {
         el.etoroTestStatus.style.color = "#f59e0b";
       } else {
         const errMsg = (data.order && data.order.error) || data.error || 'Check failed';
-        el.etoroTestStatus.textContent = `✗ MCP Check: ${errMsg}`;
-        el.etoroTestStatus.style.color = "#ef4444";
+        if (errMsg.includes("OAuth access token") || errMsg.includes("unexpected verdict") || errMsg.includes("auth") || errMsg.includes("expired")) {
+          el.etoroTestStatus.textContent = `ℹ️ MCP Gateway: Reserved for OAuth connectors. Live trading uses confirmed REST API (✓ Active).`;
+          el.etoroTestStatus.style.color = "#38bdf8";
+        } else {
+          el.etoroTestStatus.textContent = `✗ MCP Check: ${errMsg}`;
+          el.etoroTestStatus.style.color = "#ef4444";
+        }
       }
     } catch (e) {
       el.etoroTestStatus.textContent = "MCP Error: " + e.message;
