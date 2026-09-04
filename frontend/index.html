@@ -13,38 +13,42 @@
 
   <!-- TOP STATUS & CONTROL BAR -->
   <header class="top-nav">
-    <div class="brand-group">
-      <div class="pulse-indicator live-pulse" id="heartbeatPulse" title="Heartbeat Liveness"></div>
-      <div class="brand-text">
-        <span class="brand-title">PREDICTIVE EXECUTION COCKPIT</span>
-        <span class="brand-subtitle">AUTONOMOUS TRADING ENGINE // eToro & FINNHUB READY</span>
-      </div>
-    </div>
-
-    <!-- Active Symbol & Live Price Header -->
-    <div class="symbol-ticker-header">
-      <div class="symbol-selector-wrapper">
-        <label for="symbolSelect">ASSET:</label>
-        <select id="symbolSelect" class="cyber-select">
-          <option value="MARA">MARA - Marathon Digital</option>
-          <option value="IREN">IREN - Iris Energy</option>
-          <option value="SOXL">SOXL - Semi Bull 3X ETF</option>
-          <option value="TQQQ">TQQQ - UltraPro QQQ 3X ETF</option>
-          <option value="MSFT">MSFT - Microsoft Corp.</option>
-          <option value="META">META - Meta Platforms</option>
-          <option value="APLD">APLD - Applied Digital</option>
-          <option value="SPY">SPY - S&P 500 ETF</option>
-          <option value="QQQ">QQQ - Invesco QQQ ETF</option>
-          <option value="BULL">BULL - GrowGen / Bull ETF</option>
-          <option value="URA">URA - Uranium ETF</option>
-          <option value="HOOD">HOOD - Robinhood Markets</option>
-          <option value="SOFI">SOFI - SoFi Technologies</option>
-        </select>
+    <div class="top-nav-left">
+      <div class="brand-group">
+        <div class="pulse-indicator live-pulse" id="heartbeatPulse" title="Heartbeat Liveness"></div>
+        <div class="brand-text">
+          <span class="brand-title">PREDICTIVE EXECUTION COCKPIT</span>
+          <span class="brand-subtitle">AUTONOMOUS TRADING ENGINE // eToro & FINNHUB READY</span>
+        </div>
       </div>
 
-      <div class="live-price-box">
-        <span class="price-val" id="headerPrice">$0.00</span>
-        <span class="price-delta badge" id="headerChange">+0.00%</span>
+      <!-- Active Symbol & Live Price Header -->
+      <div class="symbol-ticker-header">
+        <div class="symbol-selector-wrapper">
+          <label for="symbolSelect">ASSET:</label>
+          <select id="symbolSelect" class="cyber-select">
+            <option value="BTC">BTC - Bitcoin</option>
+            <option value="ETH">ETH - Ethereum</option>
+            <option value="SOL">SOL - Solana</option>
+            <option value="XRP">XRP - Ripple</option>
+            <option value="AAPL">AAPL - Apple Inc.</option>
+            <option value="NVDA">NVDA - NVIDIA Corp.</option>
+            <option value="MSFT">MSFT - Microsoft Corp.</option>
+            <option value="TSLA">TSLA - Tesla Inc.</option>
+            <option value="META">META - Meta Platforms</option>
+            <option value="MARA">MARA - Marathon Digital</option>
+            <option value="SOFI">SOFI - SoFi Technologies</option>
+            <option value="APLD">APLD - Applied Digital</option>
+            <option value="SOXL">SOXL - Semi Bull 3X ETF</option>
+            <option value="SQQQ">SQQQ - UltraPro Short QQQ</option>
+            <option value="SPY">SPY - S&P 500 ETF</option>
+          </select>
+        </div>
+
+        <div class="live-price-box">
+          <span class="price-val" id="headerPrice">$0.00</span>
+          <span class="price-delta badge" id="headerChange">+0.00%</span>
+        </div>
       </div>
     </div>
 
