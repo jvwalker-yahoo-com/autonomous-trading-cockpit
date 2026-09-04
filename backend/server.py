@@ -709,21 +709,31 @@ def test_etoro_connection():
 @app.get("/api/etoro/instrument_search", tags=["eToro Live Integration"])
 def etoro_instrument_search(symbol: str = "BTC"):
     """
-    Fast diagnostic: searches eToro API for a symbol using 4s timeouts.
-    Returns raw HTTP responses to identify the working search parameter format.
+    Fast diagnostic: searches eToro API + probes identity endpoint.
+    The identity endpoint (GET /api/v1/data/instruments/{id}/identity) is catalog data
+    requiring no user context — it can verify IDs even if market-data search returns 401.
     Example: GET /api/etoro/instrument_search?symbol=BTC
     """
     sym = symbol.upper().strip()
-    # Run fast search (4s timeout per attempt)
     results = etoro_client.search_instruments(sym)
-    # Run debug probe (stops at first working variant)
     debug = etoro_client.raw_search_debug(sym)
     cached_id = etoro_client._instrument_cache.get(sym)
+
+    # Also probe the identity endpoint for known candidate IDs
+    # Per official docs: instrumentId 1001 = AAPL (from their example)
+    identity_probes = {}
+    candidate_ids = [1, 2, 3, 100, 101, 102, 1001, 1002, 1003, 1004, 1005, 1006, 1007]
+    for cid in candidate_ids:
+        result = etoro_client.lookup_instrument_identity(cid)
+        if result:
+            identity_probes[str(cid)] = result
+
     return {
         "symbol_queried": sym,
         "cached_instrument_id": cached_id,
         "search_results": results[:5],
         "debug_responses": debug,
+        "identity_endpoint_probes": identity_probes,  # Real IDs from catalog
         "cache_size": len(etoro_client._instrument_cache),
         "is_configured": etoro_client.is_configured()
     }

@@ -383,9 +383,11 @@ class EToroClient:
         Tries query, symbolFull, displayName, and symbol variations.
         """
         base_params = {"pageSize": 20}
-        
-        # Try all known eToro search parameter variants
+
+        # Per official eToro docs: the CORRECT search param is 'internalSymbolFull'
+        # See: https://api-portal.etoro.com/core/guides/get-instrument-id.md
         search_variants = [
+            {"internalSymbolFull": query},  # ✅ Official documented param
             {"query": query},
             {"symbolFull": query},
             {"q": query},
@@ -429,6 +431,20 @@ class EToroClient:
         logger.warning(f"[eToro Search] No results found for '{query}' — all search variants exhausted")
         return []
 
+    def lookup_instrument_identity(self, instrument_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Official eToro data endpoint: GET /api/v1/data/instruments/{id}/identity
+        Returns canonical symbol, instrumentId, displayName for a known ID.
+        No user context is sent — catalog data only. Can verify if an ID is correct.
+        """
+        success, code, data = self._request(
+            "GET", f"/api/v1/data/instruments/{instrument_id}/identity",
+            suppress_error_log=True, timeout=4.0
+        )
+        if success and isinstance(data, dict):
+            return data
+        return None
+
     def raw_search_debug(self, query: str) -> Dict[str, Any]:
         """
         Fast diagnostic — tries the most likely search param variants with short 4s timeout.
@@ -436,11 +452,10 @@ class EToroClient:
         """
         results = {}
         endpoints_params = [
-            ("/api/v1/market-data/search",       {"query": query, "pageSize": 3}),
-            ("/api/v1/market-data/search",       {"symbolFull": query, "pageSize": 3}),
-            ("/api/v1/market-data/search",       {"q": query, "pageSize": 3}),
-            ("/api/v1/market-data/instruments",  {"symbolFull": query, "pageSize": 3}),
-            ("/api/v1/market-data/instruments",  {"query": query, "pageSize": 3}),
+            ("/api/v1/market-data/search", {"internalSymbolFull": query, "pageSize": 3}),  # ✅ Official param
+            ("/api/v1/market-data/search", {"query": query, "pageSize": 3}),
+            ("/api/v1/market-data/search", {"symbolFull": query, "pageSize": 3}),
+            ("/api/v1/market-data/instruments", {"symbolFull": query, "pageSize": 3}),
         ]
         for ep, p in endpoints_params:
             key = f"GET {ep}?{list(p.keys())[0]}={query}"
