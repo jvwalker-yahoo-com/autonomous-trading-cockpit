@@ -431,7 +431,14 @@ class EToroClient:
                 "status": "partial_authentication",
                 "connected": False,
                 "trading_enabled": False,
-                "message": f"⚠️ Public API Key is VALID, but eToro rejected your User Key (HTTP 401).\n\nAction Required:\n1. Open eToro Settings -> Trading -> API Key Management\n2. Click 'Create Your API Key' (or Edit existing key)\n3. Set Environment to 'Real' and Permissions to 'Write'\n4. Copy the key and paste into ETORO_USER_KEY in Settings.",
+                "message": (
+                    f"⚠️ Public API Key is VALID, but eToro rejected your User Key (HTTP 401 Unauthorized).\n\n"
+                    f"Action Required:\n"
+                    f"1. Open eToro Settings -> Trading -> API Key Management (https://www.etoro.com/settings/trade)\n"
+                    f"2. Click '+ Create API Key' (set Environment to 'Real' and grant 'Read all' & 'Write all')\n"
+                    f"3. IMMEDIATELY copy the secret JWT token generated (starts with 'ey...'). NOTE: eToro displays this token ONLY ONCE at creation and will never show it again in 'Edit API Key'.\n"
+                    f"4. Paste this fresh JWT token into ETORO_USER_KEY."
+                ),
                 "status_code": 401,
                 "base_url": self.base_url,
                 "api_key": self.api_key
@@ -441,7 +448,13 @@ class EToroClient:
             "status": "authentication_failed",
             "connected": False,
             "trading_enabled": False,
-            "message": f"Authentication rejected by eToro API ({self.base_url}) - HTTP 401 Unauthorized.\n\nPlease verify:\n1. Your Public API Key is from the 'Public Key' box\n2. Your User Key is from the 'Generated Keys' list\n3. No extra spaces or missing characters.",
+            "message": (
+                f"Authentication rejected by eToro API ({self.base_url}) - HTTP 401 Unauthorized.\n\n"
+                f"Please verify:\n"
+                f"1. ETORO_API_KEY is the string from the top 'Public Key' box (or leave blank to use the canonical partner key)\n"
+                f"2. ETORO_USER_KEY is a freshly generated JWT token ('ey...') copied immediately upon clicking '+ Create API Key'\n"
+                f"3. You did not copy the key name or use 'Edit API Key' (which never reveals the secret token)."
+            ),
             "status_code": 401,
             "error_details": {"errorCode": "Unauthorized"},
             "base_url": self.base_url
