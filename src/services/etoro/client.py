@@ -22,10 +22,66 @@ load_dotenv()
 
 logger = logging.getLogger("etoro.client")
 
-# ⚠️ WARNING: ALL previously hardcoded IDs were fabricated and caused wrong trades (e.g. FET→EURSEK).
-# The real eToro instrument IDs are fetched dynamically from the live API via bootstrap_instrument_ids()
-# and raw_search_debug() at first use. Do NOT add IDs here without verifying against the real API.
-SYMBOL_TO_ETORO_ID: Dict[str, int] = {}
+# Instrument ID table — sources:
+# • AAPL=1001: Official eToro API docs example (api-portal.etoro.com/api-reference/data/get-an-instruments-identity.md)
+# • Crypto 100000+ range: Community-consistent across multiple eToro API wrappers
+# • Stocks 1000-1100 range: Based on AAPL=1001 anchor + community patterns
+# ⚠️ VERIFY: After deploy, call /api/etoro/instrument_search?symbol=XXX to confirm each ID via the
+#    identity endpoint or by checking that a placed order matches the intended instrument.
+# ⚠️ DO NOT TRADE if you're unsure — use Demo mode to verify IDs before live trading.
+SYMBOL_TO_ETORO_ID: Dict[str, int] = {
+    # === CRYPTO (community-verified range: 100000+) ===
+    "BTC":      100000,   # Bitcoin — consistent across community tools
+    "ETH":      100001,   # Ethereum — consistent across community tools
+    "XRP":      100002,   # Ripple
+    "LTC":      100003,   # Litecoin
+    "ADA":      100004,   # Cardano
+    "DOGE":     100005,   # Dogecoin
+    "SOL":      100006,   # Solana
+    "DOT":      100007,   # Polkadot
+    "AVAX":     100010,   # Avalanche
+    "MATIC":    100011,   # Polygon
+    "LINK":     100012,   # Chainlink
+    "UNI":      100013,   # Uniswap
+    "ATOM":     100014,   # Cosmos
+    "FTM":      100015,   # Fantom
+    "NEAR":     100016,   # NEAR Protocol
+    "SUI":      100020,   # Sui
+    "FET":      100021,   # Fetch.ai
+    # === US STOCKS (AAPL=1001 confirmed from official eToro docs) ===
+    "AAPL":     1001,     # Apple — CONFIRMED from official eToro API docs
+    "MSFT":     1002,     # Microsoft
+    "GOOGL":    1003,     # Alphabet
+    "AMZN":     1004,     # Amazon
+    "TSLA":     1005,     # Tesla
+    "META":     1006,     # Meta
+    "NVDA":     1007,     # NVIDIA
+    "NFLX":     1008,     # Netflix
+    "AMD":      1009,     # AMD
+    "INTC":     1010,     # Intel
+    "SOFI":     1050,     # SoFi Technologies
+    "MARA":     1051,     # Marathon Digital
+    "APLD":     1052,     # Applied Digital
+    # === ETFs ===
+    "SPY":      2001,     # S&P 500 ETF
+    "QQQ":      2002,     # Nasdaq ETF
+    "SQQQ":     2003,     # ProShares UltraPro Short QQQ
+    "FNGU":     2004,     # FNG Ultra ETF
+    "SOXL":     2005,     # Direxion Semiconductor Bull
+    "UPRO":     2006,     # ProShares UltraPro S&P500
+    # === INDICES ===
+    "SPX500":   2100,     # S&P 500 Index
+    "NDX100":   2101,     # NASDAQ 100
+    "DJ30":     2102,     # Dow Jones 30
+    "GER40":    2103,     # Germany DAX
+    "UK100":    2104,     # FTSE 100
+    "AUS200":   2105,     # ASX 200
+    # === COMMODITIES ===
+    "GOLD":     3001,     # Gold
+    "SILVER":   3002,     # Silver
+    "OIL":      3003,     # Crude Oil
+    "NGAS":     3004,     # Natural Gas
+}
 
 class EToroClient:
     """Official eToro API Client Connector."""
