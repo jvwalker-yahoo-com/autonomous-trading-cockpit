@@ -239,8 +239,6 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
             
             # When in Live mode, dispatch real order to official eToro REST API
             if config.execution_mode == "live" and etoro_client.is_configured():
-                # Ensure real instrument IDs are loaded from the eToro API (once only)
-                etoro_client.bootstrap_instrument_ids()
                 inst_id = etoro_client.resolve_instrument_id(symbol)
                 if not inst_id:
                     logger.warning(f"[LIVE SKIP] Cannot resolve eToro instrument ID for '{symbol}' — skipping live order.")
@@ -590,8 +588,6 @@ def execute_manual_action(req: ManualTradeRequest):
     etoro_res = None
 
     if config.execution_mode == "live" and etoro_client.is_configured():
-        # Ensure real instrument IDs are loaded from the eToro API (once only)
-        etoro_client.bootstrap_instrument_ids()
         inst_id = etoro_client.resolve_instrument_id(req.symbol)
         if not inst_id:
             logger.warning(f"[MANUAL LIVE SKIP] Cannot resolve eToro instrument ID for '{req.symbol}'")

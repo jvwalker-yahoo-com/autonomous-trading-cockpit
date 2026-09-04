@@ -388,6 +388,13 @@ function setFlagActive(element, isActive) {
 // ==========================================
 
 async function triggerManualTrade(action) {
+  const btn = action === "BUY" ? el.btnManualBuy : (action === "SHORT" ? el.btnManualShort : el.btnManualClose);
+  const origText = btn ? btn.textContent : "";
+  if (btn) {
+    btn.textContent = "⌛ DISPATCHING...";
+    btn.disabled = true;
+  }
+
   try {
     const res = await fetch(`${BASE_URL}/api/action/trade`, {
       method: "POST",
@@ -418,6 +425,11 @@ async function triggerManualTrade(action) {
     }
   } catch (err) {
     alert(`Execution error: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.textContent = origText;
+      btn.disabled = false;
+    }
   }
 }
 
