@@ -601,6 +601,9 @@ if (el.btnModeToggle) {
 
 if (el.btnConfirmLiveMode) {
   el.btnConfirmLiveMode.addEventListener("click", async () => {
+    const originalText = el.btnConfirmLiveMode.textContent;
+    el.btnConfirmLiveMode.textContent = "⌛ ENGAGING LIVE...";
+    el.btnConfirmLiveMode.disabled = true;
     try {
       const res = await fetch(`${BASE_URL}/api/mode/switch`, {
         method: "POST",
@@ -620,6 +623,9 @@ if (el.btnConfirmLiveMode) {
       alert("⚡ LIVE eToro Trading Engaged! Orders will be transmitted to your connected eToro account.");
     } catch (e) {
       alert("Error: " + e.message);
+    } finally {
+      el.btnConfirmLiveMode.textContent = originalText;
+      el.btnConfirmLiveMode.disabled = false;
     }
   });
 }

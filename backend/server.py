@@ -785,24 +785,31 @@ def switch_execution_mode(req: ModeSwitchRequest):
         broker.positions.clear()
         broker.save_state()
 
-        # Build 5-day historical traded stocks + active watchlist
+        # Build 5-day historical traded stocks + active watchlist and sync asynchronously in background
         five_day_rep = broker.get_multi_day_report(5)
         traded_symbols = [s.symbol for s in five_day_rep.stock_summaries if s.symbol]
         combined_symbols = list(dict.fromkeys(traded_symbols + config.watchlist))
         if not combined_symbols:
-            combined_symbols = ["TQQQ", "QQQ", "MARA", "BULL", "MSFT", "AAPL", "URA", "SOXL", "IREN"]
+            combined_symbols = ["BTC", "ETH", "AAPL", "NVDA", "TSLA", "MSFT", "SPY", "QQQ"]
 
-        sync_info = etoro_client.sync_symbols_to_watchlist(
-            symbols=combined_symbols,
-            watchlist_name="Autonomous Cockpit"
-        )
-        logger.info(f"✓ Initialized live eToro Watchlist 'Autonomous Cockpit' with {len(combined_symbols)} proven stocks: {combined_symbols}")
+        # Run watchlist sync in background thread so HTTP response is instant
+        def _bg_sync():
+            try:
+                etoro_client.sync_symbols_to_watchlist(
+                    symbols=combined_symbols,
+                    watchlist_name="Autonomous Cockpit"
+                )
+                logger.info(f"✓ Background initialized eToro Watchlist 'Autonomous Cockpit' with {len(combined_symbols)} stocks.")
+            except Exception as e:
+                logger.warning(f"Background watchlist sync notice: {e}")
+
+        import threading
+        threading.Thread(target=_bg_sync, daemon=True).start()
 
     return {
         "status": "success",
         "execution_mode": config.execution_mode,
-        "message": f"Switched to {'⚡ LIVE eToro Trading' if target_mode == 'live' else '🛡️ Demo & Learning Simulation'}",
-        "watchlist_sync": sync_info
+        "message": f"Switched to {'⚡ LIVE eToro Trading' if target_mode == 'live' else '🛡️ Demo & Learning Simulation'}"
     }
 
 @app.post("/api/etoro/sync_5day_trades", tags=["eToro Live Integration"])
