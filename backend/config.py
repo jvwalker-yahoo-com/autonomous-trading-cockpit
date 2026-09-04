@@ -39,6 +39,7 @@ class SystemConfig(BaseModel):
     # Trading Rules
     default_stop_loss_pct: float = float(os.getenv("DEFAULT_STOP_LOSS_PCT", "0.025")) # 2.5%
     default_take_profit_pct: float = float(os.getenv("DEFAULT_TAKE_PROFIT_PCT", "0.050")) # 5.0%
+    min_conviction_score: float = float(os.getenv("MIN_CONVICTION_SCORE", "0.25")) # Conviction score required to trigger BUY/SHORT
     slippage_bps: float = float(os.getenv("SIM_SLIPPAGE_BPS", "5.0")) # 5 bps simulated slippage
     spread_pct: float = float(os.getenv("SIM_SPREAD_PCT", "0.0005")) # 0.05% eToro spread simulation
     

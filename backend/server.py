@@ -74,6 +74,8 @@ if saved_settings:
     if "finnhub_api_key" in saved_settings and saved_settings["finnhub_api_key"]:
         config.finnhub_api_key = saved_settings["finnhub_api_key"]
         data_feed.set_api_key(config.finnhub_api_key)
+    if "min_conviction_score" in saved_settings and saved_settings["min_conviction_score"]:
+        config.min_conviction_score = float(saved_settings["min_conviction_score"])
 
 # Ensure live mode does not inherit a stale simulation paper drawdown lockout or phantom paper positions
 if config.execution_mode == "live":
@@ -157,6 +159,7 @@ class ConfigUpdateRequest(BaseModel):
     active_symbol: Optional[str] = None
     simulation_mode: Optional[bool] = None
     risk_per_trade_pct: Optional[float] = None
+    min_conviction_score: Optional[float] = None
     etoro_api_key: Optional[str] = None
     etoro_user_key: Optional[str] = None
     etoro_base_url: Optional[str] = None
@@ -231,9 +234,10 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     rationale = f"Ensemble score: {federation.federated_score:+.2f} | Winning model: {federation.federation}"
 
     # Determine directional signal
-    if federation.federated_score >= 0.30:
+    conv_thresh = getattr(config, "min_conviction_score", 0.25)
+    if federation.federated_score >= conv_thresh:
         signal = "BUY"
-    elif federation.federated_score <= -0.30:
+    elif federation.federated_score <= -conv_thresh:
         signal = "SHORT"
 
     # Execution if arbitration approved
@@ -676,7 +680,8 @@ def get_system_config():
         "watchlist": config.watchlist,
         "initial_capital": config.initial_capital,
         "max_position_size_usd": config.max_position_size_usd,
-        "max_drawdown_limit_pct": config.max_drawdown_limit_pct
+        "max_drawdown_limit_pct": config.max_drawdown_limit_pct,
+        "min_conviction_score": getattr(config, "min_conviction_score", 0.25)
     }
 
 @app.post("/api/config", tags=["Configuration"])
@@ -706,6 +711,8 @@ def update_system_config(req: ConfigUpdateRequest):
         config.simulation_mode = req.simulation_mode
     if req.risk_per_trade_pct is not None:
         config.risk_per_trade_pct = req.risk_per_trade_pct
+    if req.min_conviction_score is not None:
+        config.min_conviction_score = max(0.05, min(0.95, req.min_conviction_score))
 
     # Persist updated settings to disk
     broker.save_state({
@@ -713,7 +720,8 @@ def update_system_config(req: ConfigUpdateRequest):
         "etoro_api_key": config.etoro_api_key,
         "etoro_user_key": config.etoro_user_key,
         "etoro_base_url": config.etoro_base_url,
-        "finnhub_api_key": config.finnhub_api_key
+        "finnhub_api_key": config.finnhub_api_key,
+        "min_conviction_score": config.min_conviction_score
     })
     return {"status": "updated", "config": get_system_config()}
 

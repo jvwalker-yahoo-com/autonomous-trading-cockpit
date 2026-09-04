@@ -125,8 +125,18 @@ ETORO_EXCHANGES_UK: Dict[str, Dict[str, Any]] = {
         "open_time_uk": (0, 0),
         "close_time_uk": (24, 0),
         "daily_break": "None (Continuous 24/7)",
-        "symbols": ["BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "AVAX", "LINK"]
+        "symbols": [
+            "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX",
+            "LINK", "DOT", "NEAR", "MATIC", "SHIB", "LTC", "UNI",
+            "RENDER", "FET", "SUI", "PEPE"
+        ]
     }
+}
+
+ALL_CRYPTO_SET = {
+    "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX",
+    "LINK", "DOT", "NEAR", "MATIC", "SHIB", "LTC", "UNI",
+    "RENDER", "FET", "SUI", "PEPE"
 }
 
 class TelemetryModule:
@@ -151,7 +161,7 @@ class TelemetryModule:
         sym = symbol.upper()
         
         # Crypto check
-        if any(c in sym for c in ("BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "AVAX")):
+        if any(sym == c or sym.startswith(c) for c in ALL_CRYPTO_SET):
             if not ("FUTURE" in sym or "MICRO" in sym):
                 return ETORO_EXCHANGES_UK["CRYPTO"]
 
