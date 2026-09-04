@@ -1024,10 +1024,12 @@ class EToroClient:
                 except Exception:
                     parsed = {"raw": tool_text}
 
-                # Check if the tool reported an upstream 401/403 in the payload
-                if isinstance(parsed, dict) and parsed.get("statusCode") in (401, 403):
-                    last_err = f"Upstream auth failure ({label}): {parsed.get('statusCode')}"
-                    continue
+                # Check if the tool reported an upstream 401/403 or expired token in the payload
+                if isinstance(parsed, dict):
+                    err_msg = str(parsed.get("error", "")).lower()
+                    if "expired" in err_msg or "not valid" in err_msg or "re-authenticate" in err_msg or parsed.get("statusCode") in (401, 403):
+                        last_err = parsed.get("error") or f"Upstream auth failure ({label}): {parsed.get('statusCode')}"
+                        continue
 
                 if label == "swapped":
                     self._prefer_swapped = True
@@ -1111,13 +1113,15 @@ class EToroClient:
             }
 
         if verdict != "ready" or not token:
-            err_str = f"eToro prepare-trade unexpected verdict: {verdict}"
-            logger.warning(f"[eToro MCP Error] {err_str} — {prep_data}")
+            err_detail = prep_data.get("error") or f"eToro prepare-trade unexpected verdict: {verdict}"
+            if "expired" in str(err_detail).lower() or "not valid" in str(err_detail).lower() or "re-authenticate" in str(err_detail).lower():
+                err_detail = "eToro User Key / OAuth token has EXPIRED. Please generate a fresh token in eToro Settings."
+            logger.warning(f"[eToro MCP Error] {err_detail} — {prep_data}")
             return {
                 "success": False,
                 "method": "mcp",
                 "verdict": verdict,
-                "error": err_str,
+                "error": err_detail,
                 "order": prep_data
             }
 
@@ -1245,12 +1249,18 @@ class EToroClient:
             return {"status": "unconfigured", "connected": False}
         res = self.call_mcp_tool("get-my-profile-and-scopes")
         if res.get("success"):
-            return {
-                "status": "success",
-                "connected": True,
-                "orientation": res.get("orientation", "standard"),
-                "profile": res.get("data")
-            }
+            data = res.get("data", {})
+            if isinstance(data, dict):
+                if data.get("error"):
+                    return {"status": "failed", "connected": False, "message": data.get("error")}
+                profile_obj = data.get("profile") if isinstance(data.get("profile"), dict) else data
+                if profile_obj and (profile_obj.get("username") or profile_obj.get("realCid")):
+                    return {
+                        "status": "success",
+                        "connected": True,
+                        "orientation": res.get("orientation", "standard"),
+                        "profile": data
+                    }
         return {"status": "failed", "connected": False, "message": res.get("error", "Could not read scopes via MCP")}
 
     # =========================================================================

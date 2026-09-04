@@ -768,7 +768,8 @@ if (el.btnTestEtoroMcp) {
         el.etoroTestStatus.textContent = `⚠️ MCP Pre-flight Validation Rejected: ${data.error}`;
         el.etoroTestStatus.style.color = "#f59e0b";
       } else {
-        el.etoroTestStatus.textContent = `✗ MCP Check: ${data.error || 'Check failed'}`;
+        const errMsg = (data.order && data.order.error) || data.error || 'Check failed';
+        el.etoroTestStatus.textContent = `✗ MCP Check: ${errMsg}`;
         el.etoroTestStatus.style.color = "#ef4444";
       }
     } catch (e) {
