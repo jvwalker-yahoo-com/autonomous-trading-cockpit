@@ -1492,15 +1492,31 @@ async function updateWatchlistUI() {
       });
     }
 
-    // Update Header Asset Dropdown with all active watchlist items
+    // Update Header Asset Dropdown: Core Assets + Screened Active Opportunities
     if (assetSelect) {
-      const cur = currentSymbol;
-      assetSelect.innerHTML = list.map(s => `<option value="${s}">${s}</option>`).join("");
-      if (list.includes(cur)) {
+      const cur = activeSymbol || currentSymbol || "BTC";
+      const coreAnchors = ["BTC", "ETH", "SOL", "XRP", "AAPL", "NVDA", "MSFT", "TSLA", "META", "SPY", "QQQ", "SOXL", "SQQQ", "GOLD", "OIL"];
+      
+      // Separate active list into core anchors and dynamic screened opportunities
+      const dynamicScreened = list.filter(s => !coreAnchors.includes(s));
+      
+      let html = `<optgroup label="⭐ Core Assets (Always Available)">`;
+      html += coreAnchors.map(s => `<option value="${s}">${s}</option>`).join("");
+      html += `</optgroup>`;
+
+      if (dynamicScreened.length > 0) {
+        html += `<optgroup label="✨ Screener Opportunities (${dynamicScreened.length})">`;
+        html += dynamicScreened.map(s => `<option value="${s}">${s}</option>`).join("");
+        html += `</optgroup>`;
+      }
+
+      assetSelect.innerHTML = html;
+      
+      // Preserve currently selected symbol without ever forcibly overwriting it
+      if (coreAnchors.includes(cur) || dynamicScreened.includes(cur)) {
         assetSelect.value = cur;
-      } else if (list.length > 0) {
-        assetSelect.value = list[0];
-        currentSymbol = list[0];
+      } else if (list.includes(cur)) {
+        assetSelect.value = cur;
       }
     }
   } catch (e) {

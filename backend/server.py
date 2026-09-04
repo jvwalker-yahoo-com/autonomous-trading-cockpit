@@ -89,9 +89,20 @@ async def start_autonomous_background_worker():
     """Starts the continuous background autonomous execution loop."""
     asyncio.create_task(autonomous_background_worker_loop())
 
+# Permanent Core Anchor Assets — must NEVER be evicted by autonomous screener rotation
+CORE_ANCHOR_SYMBOLS = [
+    "BTC", "ETH", "SOL", "XRP",                      # Major Crypto (24/7)
+    "AAPL", "NVDA", "MSFT", "TSLA", "META",         # Mega-Cap Tech
+    "SPY", "QQQ", "SOXL", "SQQQ",                   # Top ETFs
+    "GOLD", "OIL"                                   # Macro Commodities
+]
+
 async def autonomous_background_worker_loop():
     logger.info("Autonomous Background Trading Loop initialized with Multi-Asset Auto-Discovery.")
     last_universe_scan = 0.0
+
+    # Ensure core anchor assets are in watchlist on boot
+    config.watchlist = list(dict.fromkeys(CORE_ANCHOR_SYMBOLS + config.watchlist))
 
     while True:
         try:
@@ -103,7 +114,8 @@ async def autonomous_background_worker_loop():
                     top_screened = screener.scan_universe(data_feed_manager=data_feed, top_n=20)
                     screened_syms = [s["symbol"] for s in top_screened if s.get("opportunity_score", 0) >= 60]
                     if screened_syms:
-                        combined = list(dict.fromkeys(screened_syms + config.watchlist))[:25]
+                        # Core anchors ALWAYS stay at the front; screened momentum picks appended
+                        combined = list(dict.fromkeys(CORE_ANCHOR_SYMBOLS + screened_syms + config.watchlist))[:40]
                         config.watchlist = combined
                         logger.info(f"✨ [AUTONOMOUS ASSET SELECTION] Rotated active universe to {len(screened_syms)} top opportunities: {screened_syms[:8]} (Total active: {len(config.watchlist)})")
                 except Exception as ex:
