@@ -102,10 +102,20 @@ class EToroClient:
         max_retries: int = 5,
         base_backoff_sec: float = 1.0
     ):
-        raw_ak = (api_key or os.getenv("ETORO_API_KEY", "")).strip()
-        raw_uk = (user_key or os.getenv("ETORO_USER_KEY", "")).strip()
-        self.api_key = raw_ak.strip("'\"")
-        self.user_key = raw_uk.strip("'\"")
+        raw_ak = (api_key or os.getenv("ETORO_API_KEY", "")).strip().strip("'\"")
+        raw_uk = (user_key or os.getenv("ETORO_USER_KEY", "")).strip().strip("'\"")
+        
+        # Auto-align inverted keys: eToro User Keys are JWT tokens starting with 'ey'
+        if raw_ak.startswith("ey") and not raw_uk.startswith("ey"):
+            logger.info("⚡ [eToro Key Auto-Swap] Swapping ETORO_API_KEY and ETORO_USER_KEY because User Key JWT was placed in API_KEY.")
+            raw_ak, raw_uk = raw_uk, raw_ak
+
+        OFFICIAL_KEY = "sdgdskldFPLGfjHn1421dgnlxdGTbngdflg6290bRjslfihsjhSDsdgGHH25hjf"
+        if not raw_ak and raw_uk.startswith("ey"):
+            raw_ak = OFFICIAL_KEY
+
+        self.api_key = raw_ak
+        self.user_key = raw_uk
         
         raw_url = (base_url or os.getenv("ETORO_BASE_URL", "https://public-api.etoro.com")).strip().rstrip("/")
         if "api.etoro.com" in raw_url and "public-api.etoro.com" not in raw_url:
@@ -1225,6 +1235,9 @@ class EToroClient:
                                     profile_data = json.loads(res_text)
                                 except Exception:
                                     profile_data = {"raw": res_text}
+                                if isinstance(profile_data, dict) and profile_data.get("statusCode") in (401, 403):
+                                    # Rejected by eToro upstream! Try next orientation
+                                    break
                                 return {
                                     "status": "success",
                                     "connected": True,

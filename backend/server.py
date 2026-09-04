@@ -711,23 +711,20 @@ def get_etoro_status():
     k_api = etoro_client.api_key or ""
     k_user = etoro_client.user_key or ""
     
-    # Analyze user key format safely without exposing secrets
-    user_key_b64_valid = False
-    user_key_payload_keys = []
-    user_key_ean = None
-    try:
-        # eToro user keys are base64-encoded JSON (urlsafe or standard)
-        padded = k_user.strip().rstrip("-_=") + "==="
-        # replace urlsafe chars
-        b64_str = padded.replace("-", "+").replace("_", "/")
-        raw_bytes = base64.b64decode(b64_str, validate=False)
-        parsed = json.loads(raw_bytes.decode("utf-8", errors="ignore"))
-        if isinstance(parsed, dict):
-            user_key_b64_valid = True
-            user_key_payload_keys = list(parsed.keys())
-            user_key_ean = parsed.get("ean")
-    except Exception:
-        pass
+    def safe_decode_jwt_payload(token_str: str):
+        try:
+            padded = token_str.strip().rstrip("-_=") + "==="
+            b64_str = padded.replace("-", "+").replace("_", "/")
+            raw_bytes = base64.b64decode(b64_str, validate=False)
+            parsed = json.loads(raw_bytes.decode("utf-8", errors="ignore"))
+            if isinstance(parsed, dict):
+                return True, list(parsed.keys()), parsed.get("ean") or parsed.get("cid") or parsed.get("name")
+        except Exception:
+            pass
+        return False, [], None
+
+    user_valid, user_keys, user_app = safe_decode_jwt_payload(k_user)
+    api_valid, api_keys, api_app = safe_decode_jwt_payload(k_api)
 
     return {
         "execution_mode": config.execution_mode,
@@ -740,12 +737,16 @@ def get_etoro_status():
         "api_key_masked": f"{k_api[:4]}...{k_api[-4:]}" if len(k_api) >= 8 else ("raw:" + k_api),
         "user_key_masked": f"{k_user[:4]}...{k_user[-4:]}" if len(k_user) >= 8 else ("raw:" + k_user),
         "user_key_starts_with_ey": k_user.strip().startswith("ey"),
+        "api_key_starts_with_ey": k_api.strip().startswith("ey"),
         "user_key_has_surrounding_quotes": (k_user.startswith('"') and k_user.endswith('"')) or (k_user.startswith("'") and k_user.endswith("'")),
         "user_key_has_whitespace": any(c in k_user for c in " \t\r\n"),
         "api_key_has_whitespace": any(c in k_api for c in " \t\r\n"),
-        "user_key_b64_json_valid": user_key_b64_valid,
-        "user_key_payload_keys": user_key_payload_keys,
-        "user_key_application_name": user_key_ean
+        "user_key_b64_json_valid": user_valid,
+        "user_key_payload_keys": user_keys,
+        "user_key_application_name": user_app,
+        "api_key_b64_json_valid": api_valid,
+        "api_key_payload_keys": api_keys,
+        "api_key_application_name": api_app,
     }
 
 
