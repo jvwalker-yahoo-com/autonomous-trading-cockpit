@@ -12,8 +12,11 @@ import os
 import time
 import uuid
 import random
+import json
 import logging
 import requests
+import asyncio
+import concurrent.futures
 from typing import Dict, Any, Optional, List, Tuple
 from dotenv import load_dotenv
 
@@ -21,6 +24,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger("etoro.client")
+
+CRYPTO_SYMBOLS = {
+    "BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "AVAX", "DOT",
+    "LINK", "MATIC", "UNI", "ATOM", "FTM", "NEAR", "SUI", "FET", "LTC"
+}
 
 # Instrument ID table — sources:
 # • AAPL=1001: Official eToro API docs example (api-portal.etoro.com/api-reference/data/get-an-instruments-identity.md)
@@ -245,7 +253,10 @@ class EToroClient:
             return False, 401, {"message": "eToro credentials not configured."}
 
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        orientations = ["standard", "swapped", "bearer_user", "bearer_api"]
+        if self._prefer_swapped:
+            orientations = ["swapped", "standard", "bearer_user", "bearer_api"]
+        else:
+            orientations = ["standard", "swapped", "bearer_user", "bearer_api"]
 
         last_code = 401
         last_json: Dict[str, Any] = {}
@@ -290,6 +301,10 @@ class EToroClient:
                     last_json = res_json
 
                     if 200 <= response.status_code < 300:
+                        if orientation == "swapped":
+                            self._prefer_swapped = True
+                        elif orientation == "standard":
+                            self._prefer_swapped = False
                         return True, response.status_code, res_json
                     elif response.status_code == 401 and o_idx < len(orientations) - 1:
                         # Try next authentication orientation
@@ -835,6 +850,302 @@ class EToroClient:
         }
 
     # =========================================================================
+    # OFFICIAL ETORO MCP SERVER & WEBSOCKET OPERATIONS
+    # Reference: https://api-portal.etoro.com/core/ai-agents/etoro-skill
+    # MCP Server: https://mcp.public-api.etoro.com (Skill: etoro-public-api-operations)
+    # WebSocket:  wss://ws.etoro.com/ws (Topic: instrument:<id>, Authenticate)
+    # =========================================================================
+
+    def execute_mcp_trade(
+        self,
+        symbol: str,
+        direction: str,
+        amount_usd: float,
+        mode: str = "real"
+    ) -> Dict[str, Any]:
+        """
+        Executes a trade via the official eToro MCP Server (mcp.public-api.etoro.com)
+        using the two-phase prepare-trade -> place-trade workflow.
+        Returns outcome, orderId, and fills if successful, or verified rejection reasons.
+        """
+        if not self.is_configured():
+            return {"success": False, "error": "eToro credentials not configured."}
+
+        account = "real" if mode.lower() in ("real", "live") else "demo"
+        mcp_dir = "buy" if direction.upper() in ("BUY", "LONG") else "sellShort"
+        mcp_url = "https://mcp.public-api.etoro.com"
+
+        orientations = [
+            ("swapped" if self._prefer_swapped else "standard"),
+            ("standard" if self._prefer_swapped else "swapped")
+        ]
+
+        for orientation in orientations:
+            if orientation == "swapped":
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "x-api-key": self.user_key,
+                    "x-user-key": self.api_key,
+                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+                }
+            else:
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "x-api-key": self.api_key,
+                    "x-user-key": self.user_key,
+                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+                }
+
+            # Phase 1: prepare-trade (validates live quotes, spread, account balance, FCA rules)
+            prep_payload = {
+                "jsonrpc": "2.0",
+                "id": str(uuid.uuid4()),
+                "method": "tools/call",
+                "params": {
+                    "name": "prepare-trade",
+                    "arguments": {
+                        "account": account,
+                        "direction": mcp_dir,
+                        "symbol": symbol.upper(),
+                        "amount": round(float(amount_usd), 2)
+                    }
+                }
+            }
+
+            try:
+                resp = requests.post(mcp_url, json=prep_payload, headers=headers, timeout=12.0)
+                if resp.status_code == 200:
+                    tool_text = ""
+                    for line in resp.text.splitlines():
+                        if line.startswith("data: "):
+                            try:
+                                d = json.loads(line[6:])
+                                content = d.get("result", {}).get("content", [])
+                                if content and isinstance(content, list):
+                                    tool_text = content[0].get("text", "")
+                                    break
+                            except Exception:
+                                pass
+
+                    if tool_text:
+                        try:
+                            prep_res = json.loads(tool_text)
+                        except Exception:
+                            prep_res = {"raw": tool_text}
+
+                        verdict = prep_res.get("verdict")
+                        token = prep_res.get("token")
+
+                        if verdict == "ready" and token:
+                            logger.info(f"[eToro MCP] prepare-trade ready for {symbol}. Placing trade...")
+                            # Phase 2: place-trade
+                            place_payload = {
+                                "jsonrpc": "2.0",
+                                "id": str(uuid.uuid4()),
+                                "method": "tools/call",
+                                "params": {
+                                    "name": "place-trade",
+                                    "arguments": {"token": token}
+                                }
+                            }
+                            place_resp = requests.post(mcp_url, json=place_payload, headers=headers, timeout=30.0)
+                            if place_resp.status_code == 200:
+                                place_tool_text = ""
+                                for p_line in place_resp.text.splitlines():
+                                    if p_line.startswith("data: "):
+                                        try:
+                                            pd = json.loads(p_line[6:])
+                                            pcontent = pd.get("result", {}).get("content", [])
+                                            if pcontent:
+                                                place_tool_text = pcontent[0].get("text", "")
+                                                break
+                                        except Exception:
+                                            pass
+
+                                try:
+                                    place_data = json.loads(place_tool_text)
+                                except Exception:
+                                    place_data = {"raw": place_tool_text}
+
+                                outcome = place_data.get("outcome")
+                                if outcome in ("executed", "pending", "partiallyFilled"):
+                                    logger.info(f"⚡ [eToro MCP Trade Executed] {mcp_dir} ${amount_usd} on {symbol} -> outcome: {outcome}")
+                                    return {
+                                        "success": True,
+                                        "method": "mcp",
+                                        "outcome": outcome,
+                                        "order_id": place_data.get("orderId"),
+                                        "positions": place_data.get("positions", []),
+                                        "order": place_data,
+                                        "details": place_data
+                                    }
+                                else:
+                                    err_msg = place_data.get("status", {}).get("errorMessage") or str(place_data)
+                                    logger.warning(f"[eToro MCP Not Executed] outcome={outcome}: {err_msg}")
+                                    return {
+                                        "success": False,
+                                        "method": "mcp",
+                                        "outcome": outcome,
+                                        "error": err_msg,
+                                        "order": place_data
+                                    }
+                        elif verdict == "rejected":
+                            reasons = prep_res.get("reasons", [])
+                            err_str = "; ".join(reasons) if reasons else "Order rejected by eToro pre-trade validation."
+                            logger.warning(f"[eToro MCP prepare-trade Rejected] {err_str}")
+                            return {
+                                "success": False,
+                                "method": "mcp",
+                                "verdict": "rejected",
+                                "reasons": reasons,
+                                "error": err_str,
+                                "order": prep_res
+                            }
+            except Exception as e:
+                logger.debug(f"[eToro MCP Exception - {orientation}] {e}")
+
+        return {"success": False, "method": "mcp", "error": "MCP execution did not succeed; falling back to direct REST API"}
+
+    def test_websocket(self) -> Dict[str, Any]:
+        """
+        Tests WebSocket connectivity and authentication to wss://ws.etoro.com/ws
+        per official eToro WebSocket documentation (api-portal.etoro.com/core/websocket/authentication).
+        """
+        if not self.is_configured():
+            return {
+                "status": "unconfigured",
+                "connected": False,
+                "message": "eToro credentials not configured in environment or Settings."
+            }
+
+        def _run_ws():
+            async def _connect_and_auth():
+                uri = "wss://ws.etoro.com/ws"
+                results = []
+                orientations = [
+                    ("standard", self.user_key, self.api_key),
+                    ("swapped", self.api_key, self.user_key)
+                ]
+                for label, u_key, a_key in orientations:
+                    try:
+                        async with websockets.connect(uri, open_timeout=5) as ws:
+                            req_id = str(uuid.uuid4())
+                            auth_msg = {
+                                "id": req_id,
+                                "operation": "Authenticate",
+                                "data": {
+                                    "userKey": u_key,
+                                    "apiKey": a_key
+                                }
+                            }
+                            await ws.send(json.dumps(auth_msg))
+                            for _ in range(5):
+                                msg = await asyncio.wait_for(ws.recv(), timeout=4)
+                                if isinstance(msg, bytes):
+                                    continue
+                                data = json.loads(msg)
+                                if data.get("operation") == "Authenticate":
+                                    is_ok = data.get("success", False)
+                                    results.append({
+                                        "orientation": label,
+                                        "success": is_ok,
+                                        "response": data
+                                    })
+                                    if is_ok:
+                                        return {
+                                            "status": "connected",
+                                            "connected": True,
+                                            "orientation": label,
+                                            "message": "✓ Successfully authenticated with eToro WebSocket API (wss://ws.etoro.com/ws)!",
+                                            "response": data
+                                        }
+                                    break
+                    except Exception as e:
+                        results.append({"orientation": label, "success": False, "error": str(e)})
+
+                return {
+                    "status": "unauthorized",
+                    "connected": False,
+                    "message": "eToro WebSocket rejected authentication (HTTP 401). Check API permissions.",
+                    "attempts": results
+                }
+
+            return asyncio.run(_connect_and_auth())
+
+        try:
+            import websockets
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_run_ws)
+                return future.result(timeout=12.0)
+        except Exception as e:
+            return {"status": "error", "connected": False, "error": str(e)}
+
+    def get_mcp_profile_and_scopes(self) -> Dict[str, Any]:
+        """
+        Fetches authenticated profile, account IDs (realCid/demoCid), and granted OAuth scopes
+        via the official eToro MCP server tool 'get-my-profile-and-scopes'.
+        """
+        if not self.is_configured():
+            return {"status": "unconfigured", "connected": False}
+
+        mcp_url = "https://mcp.public-api.etoro.com"
+        orientations = [
+            ("swapped" if self._prefer_swapped else "standard"),
+            ("standard" if self._prefer_swapped else "swapped")
+        ]
+
+        for orientation in orientations:
+            if orientation == "swapped":
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "x-api-key": self.user_key,
+                    "x-user-key": self.api_key,
+                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+                }
+            else:
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "x-api-key": self.api_key,
+                    "x-user-key": self.user_key,
+                    "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
+                }
+
+            req_body = {
+                "jsonrpc": "2.0",
+                "id": str(uuid.uuid4()),
+                "method": "tools/call",
+                "params": {"name": "get-my-profile-and-scopes", "arguments": {}}
+            }
+
+            try:
+                resp = requests.post(mcp_url, json=req_body, headers=headers, timeout=10.0)
+                if resp.status_code == 200:
+                    for line in resp.text.splitlines():
+                        if line.startswith("data: "):
+                            d = json.loads(line[6:])
+                            content = d.get("result", {}).get("content", [])
+                            if content:
+                                res_text = content[0].get("text", "")
+                                try:
+                                    profile_data = json.loads(res_text)
+                                except Exception:
+                                    profile_data = {"raw": res_text}
+                                return {
+                                    "status": "success",
+                                    "connected": True,
+                                    "orientation": orientation,
+                                    "profile": profile_data
+                                }
+            except Exception as e:
+                logger.debug(f"[eToro MCP Scopes - {orientation}] {e}")
+
+        return {"status": "failed", "connected": False, "message": "Could not read scopes via MCP"}
+
+    # =========================================================================
     # TRADING EXECUTION METHODS (Demo / Real)
     # =========================================================================
 
@@ -846,53 +1157,83 @@ class EToroClient:
         stop_loss_rate: Optional[float] = None,
         take_profit_rate: Optional[float] = None,
         leverage: int = 1,
-        mode: str = "real"
+        mode: str = "real",
+        symbol: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Submits a market order by amount to eToro using the official execution endpoints.
-        Target: POST /api/v2/trading/execution/orders (real) or /api/v2/trading/execution/demo/orders (demo)
+        Submits a market order by amount to eToro using:
+        1. Official eToro MCP prepare-trade -> place-trade pipeline (smart pre-flight & auto-polling)
+        2. Direct v2 Execution: POST /api/v2/trading/execution/orders (or demo/orders)
+        3. Fallback v1 Execution: POST /api/v1/trading/execution/market-open-orders/by-amount
         """
         is_demo = mode.lower() == "demo"
         is_buy = direction.upper() in ("BUY", "LONG")
+        sym = (symbol or "").strip().upper()
 
-        # 1. Official eToro v2 Execution Request (Docs: api-portal.etoro.com/core/guides/market-orders)
-        v2_payload = {
+        # 1. Try MCP pipeline first if symbol is provided
+        if sym:
+            mcp_res = self.execute_mcp_trade(
+                symbol=sym,
+                direction=direction,
+                amount_usd=amount_usd,
+                mode=mode
+            )
+            if mcp_res.get("success"):
+                return mcp_res
+            # If rejected by explicit business rule (e.g. leverage/balance/hours), don't blindly spam REST
+            if mcp_res.get("verdict") == "rejected":
+                logger.warning(f"[eToro Pre-Trade Rejected] {mcp_res.get('error')}")
+                return mcp_res
+
+        # 2. Official eToro v2 Execution Request (Docs: api-portal.etoro.com/core/guides/market-orders)
+        v2_payload: Dict[str, Any] = {
             "action": "open",
-            "transaction": "buy" if is_buy else "sell",
-            "instrumentId": int(instrument_id),
+            "transaction": "buy" if is_buy else "sellShort",
             "orderType": "mkt",
             "leverage": int(leverage),
             "amount": round(float(amount_usd), 2),
             "orderCurrency": "usd"
         }
-        if stop_loss_rate is not None:
-            v2_payload["stopLossRate"] = round(float(stop_loss_rate), 4)
-        if take_profit_rate is not None:
-            v2_payload["takeProfitRate"] = round(float(take_profit_rate), 4)
+        if sym:
+            v2_payload["symbol"] = sym
+        if instrument_id:
+            v2_payload["instrumentId"] = int(instrument_id)
+
+        # UK / FCA Spot regulation rule:
+        # On spot crypto and unmargined spot assets (leverage == 1), Stop Loss & Take Profit
+        # cannot be attached at open (CFD features prohibited on spot).
+        # Only attach SL/TP when leverage > 1 or for non-crypto CFD assets.
+        is_crypto = sym in CRYPTO_SYMBOLS or (instrument_id and instrument_id >= 100000)
+        if not (is_crypto or leverage == 1):
+            if stop_loss_rate is not None:
+                v2_payload["stopLossRate"] = round(float(stop_loss_rate), 4)
+            if take_profit_rate is not None:
+                v2_payload["takeProfitRate"] = round(float(take_profit_rate), 4)
 
         endpoint = "/api/v2/trading/execution/demo/orders" if is_demo else "/api/v2/trading/execution/orders"
         success, code, data = self._request("POST", endpoint, json_data=v2_payload)
         if success or code in (200, 201, 202):
-            logger.info(f"⚡ [eToro Live v2 Order Submitted] {direction} ${amount_usd:.2f} on Instrument {instrument_id} -> HTTP {code}: {data}")
+            logger.info(f"⚡ [eToro Live v2 Order Submitted] {direction} ${amount_usd:.2f} on {sym or instrument_id} -> HTTP {code}: {data}")
             return {"success": True, "status_code": code, "order": data}
         else:
             logger.warning(f"[eToro v2 Order Attempt] POST {endpoint} -> HTTP {code}: {data}")
 
-        # 2. Fast v1 Fallback if v2 rejected
+        # 3. Fast v1 Fallback if v2 rejected
         v1_endpoint = f"/api/v1/trading/execution/{'demo/' if is_demo else ''}market-open-orders/by-amount"
-        v1_payload = {
+        v1_payload: Dict[str, Any] = {
             "InstrumentID": int(instrument_id),
             "IsBuy": is_buy,
             "Amount": round(float(amount_usd), 2),
             "Leverage": int(leverage),
-            "IsNoStopLoss": stop_loss_rate is None,
-            "IsNoTakeProfit": take_profit_rate is None,
+            "IsNoStopLoss": True if (is_crypto or leverage == 1 or stop_loss_rate is None) else False,
+            "IsNoTakeProfit": True if (is_crypto or leverage == 1 or take_profit_rate is None) else False,
             "IsTslEnabled": False
         }
-        if stop_loss_rate is not None:
-            v1_payload["StopLossRate"] = round(float(stop_loss_rate), 4)
-        if take_profit_rate is not None:
-            v1_payload["TakeProfitRate"] = round(float(take_profit_rate), 4)
+        if not (is_crypto or leverage == 1):
+            if stop_loss_rate is not None:
+                v1_payload["StopLossRate"] = round(float(stop_loss_rate), 4)
+            if take_profit_rate is not None:
+                v1_payload["TakeProfitRate"] = round(float(take_profit_rate), 4)
 
         success, code, data = self._request("POST", v1_endpoint, json_data=v1_payload)
         if success or code in (200, 201, 202):

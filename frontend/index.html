@@ -573,12 +573,18 @@
             <label for="inputEtoroBaseUrl" style="font-size: 11px; color: var(--text-color);">ETORO_BASE_URL:</label>
             <input type="text" id="inputEtoroBaseUrl" class="cyber-input" value="https://public-api.etoro.com" placeholder="https://public-api.etoro.com">
           </div>
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; justify-content: flex-start; gap: 8px; flex-wrap: wrap;">
             <button id="btnTestEtoroConn" class="btn btn-outline" style="border-color: #10b981; color: #10b981; font-size: 11px;" type="button">
-              🧪 TEST CONNECTION (READ-ONLY)
+              🧪 TEST REST API
+            </button>
+            <button id="btnTestEtoroWs" class="btn btn-outline" style="border-color: #38bdf8; color: #38bdf8; font-size: 11px;" type="button">
+              ⚡ TEST WEBSOCKET
+            </button>
+            <button id="btnTestEtoroMcp" class="btn btn-outline" style="border-color: #a855f7; color: #a855f7; font-size: 11px;" type="button">
+              🤖 TEST MCP GATEWAY
             </button>
             <button id="btnSync5DayToEtoro" class="btn btn-secondary" style="font-size: 11px;" type="button">
-              🔄 SYNC 5-DAY TRADES TO ETORO
+              🔄 SYNC WATCHLIST
             </button>
             <span id="etoroTestStatus" style="font-size: 11px; color: var(--text-muted); width: 100%;">Not tested</span>
           </div>

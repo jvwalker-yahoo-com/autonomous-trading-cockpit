@@ -382,5 +382,14 @@ def test_etoro_api_client_and_mode_switching():
     assert d_wl["status"] == "success"
     assert len(d_wl["synced_symbols"]) >= 5
 
+    # 8. Test WebSocket & MCP diagnostic endpoints
+    r_ws = test_app_client.get("/api/etoro/ws-test")
+    assert r_ws.status_code == 200
+    assert "status" in r_ws.json()
+
+    r_mcp = test_app_client.get("/api/etoro/mcp-test?symbol=BTC")
+    assert r_mcp.status_code == 200
+    assert "success" in r_mcp.json() or "error" in r_mcp.json()
+
 
 

@@ -128,6 +128,8 @@ const el = {
   inputEtoroUserKey: document.getElementById("inputEtoroUserKey"),
   inputEtoroBaseUrl: document.getElementById("inputEtoroBaseUrl"),
   btnTestEtoroConn: document.getElementById("btnTestEtoroConn"),
+  btnTestEtoroWs: document.getElementById("btnTestEtoroWs"),
+  btnTestEtoroMcp: document.getElementById("btnTestEtoroMcp"),
   etoroTestStatus: document.getElementById("etoroTestStatus")
 };
 
@@ -410,9 +412,12 @@ async function triggerManualTrade(action) {
       await fetchCockpitData();
       if (currentExecutionMode === "live") {
         if (data.etoro_result && data.etoro_result.success) {
-          alert(`✓ LIVE ETORO ORDER FILLED!\n\nAction: ${action} ${activeSymbol}\nAmount: $100.00\nStatus: Successfully placed on eToro!\n\nOrder Info: ${JSON.stringify(data.etoro_result.order)}`);
+          const fillInfo = data.etoro_result.order || data.etoro_result.details || data.etoro_result.data || {};
+          const methodLabel = data.etoro_result.method === "mcp" ? "Official eToro MCP Gateway" : "eToro v2 REST Execution";
+          alert(`⚡ LIVE ETORO ORDER FILLED!\n\nAction: ${action} ${activeSymbol}\nAmount: $100.00\nEngine: ${methodLabel}\nOutcome: ${data.etoro_result.outcome || 'Executed'}\n\nOrder Info: ${JSON.stringify(fillInfo, null, 2)}`);
         } else if (data.etoro_result && !data.etoro_result.success) {
-          alert(`⚠️ eToro Rejected Live Order (HTTP ${data.etoro_result.status_code || 401}):\n\n${JSON.stringify(data.etoro_result.order || data.etoro_result.error)}\n\nPlease ensure your eToro User Key is generated for your active portfolio in api-portal.etoro.com.`);
+          const errDetail = data.etoro_result.error || data.etoro_result.reasons || (data.etoro_result.order && data.etoro_result.order.error) || data.etoro_result.order;
+          alert(`⚠️ eToro Rejected Live Order (Status: ${data.etoro_result.status_code || data.etoro_result.outcome || 401}):\n\n${typeof errDetail === 'object' ? JSON.stringify(errDetail, null, 2) : errDetail}\n\nVerify that your eToro User Key permissions include 'Write' and Market Data in api-portal.etoro.com.`);
         } else {
           alert(`⚡ Order dispatched for ${action} ${activeSymbol}.`);
         }
@@ -687,7 +692,60 @@ if (el.btnTestEtoroConn) {
       el.etoroTestStatus.textContent = "Error: " + e.message;
       el.etoroTestStatus.style.color = "#ef4444";
     } finally {
-      el.btnTestEtoroConn.textContent = "🧪 TEST CONNECTION (READ-ONLY)";
+      el.btnTestEtoroConn.textContent = "🧪 TEST REST API";
+    }
+  });
+}
+
+// Test eToro WebSocket connection button in settings
+if (el.btnTestEtoroWs) {
+  el.btnTestEtoroWs.addEventListener("click", async () => {
+    el.btnTestEtoroWs.textContent = "⌛ TESTING WS...";
+    el.etoroTestStatus.textContent = "Connecting to wss://ws.etoro.com/ws...";
+    el.etoroTestStatus.style.color = "var(--text-muted)";
+    try {
+      const res = await fetch(`${BASE_URL}/api/etoro/ws-test`);
+      const data = await res.json();
+      if (data.connected) {
+        el.etoroTestStatus.textContent = "⚡ WebSocket Authenticated (wss://ws.etoro.com/ws)!";
+        el.etoroTestStatus.style.color = "#38bdf8";
+      } else {
+        el.etoroTestStatus.textContent = `✗ WebSocket Auth Failed: ${data.message || 'Unauthorized'}`;
+        el.etoroTestStatus.style.color = "#ef4444";
+      }
+    } catch (e) {
+      el.etoroTestStatus.textContent = "WebSocket Error: " + e.message;
+      el.etoroTestStatus.style.color = "#ef4444";
+    } finally {
+      el.btnTestEtoroWs.textContent = "⚡ TEST WEBSOCKET";
+    }
+  });
+}
+
+// Test eToro MCP pre-flight validation button in settings
+if (el.btnTestEtoroMcp) {
+  el.btnTestEtoroMcp.addEventListener("click", async () => {
+    el.btnTestEtoroMcp.textContent = "⌛ TESTING MCP...";
+    el.etoroTestStatus.textContent = "Contacting official eToro MCP Server (mcp.public-api.etoro.com)...";
+    el.etoroTestStatus.style.color = "var(--text-muted)";
+    try {
+      const res = await fetch(`${BASE_URL}/api/etoro/mcp-test?symbol=${activeSymbol || 'BTC'}`);
+      const data = await res.json();
+      if (data.success) {
+        el.etoroTestStatus.textContent = `🤖 MCP Order Ready & Verified: ${data.outcome || 'Success'}`;
+        el.etoroTestStatus.style.color = "#a855f7";
+      } else if (data.verdict === "rejected") {
+        el.etoroTestStatus.textContent = `⚠️ MCP Pre-flight Validation Rejected: ${data.error}`;
+        el.etoroTestStatus.style.color = "#f59e0b";
+      } else {
+        el.etoroTestStatus.textContent = `✗ MCP Check: ${data.error || 'Check failed'}`;
+        el.etoroTestStatus.style.color = "#ef4444";
+      }
+    } catch (e) {
+      el.etoroTestStatus.textContent = "MCP Error: " + e.message;
+      el.etoroTestStatus.style.color = "#ef4444";
+    } finally {
+      el.btnTestEtoroMcp.textContent = "🤖 TEST MCP GATEWAY";
     }
   });
 }

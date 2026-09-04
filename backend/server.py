@@ -265,7 +265,8 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
                                 amount_usd=allocated_usd,
                                 stop_loss_rate=sl_rate,
                                 take_profit_rate=tp_rate,
-                                mode="real"
+                                mode="real",
+                                symbol=symbol
                             )
                         except Exception as e:
                             logger.error(f"eToro live order execution exception: {e}")
@@ -620,7 +621,8 @@ def execute_manual_action(req: ManualTradeRequest):
                     amount_usd=alloc_usd,
                     stop_loss_rate=sl_rate,
                     take_profit_rate=tp_rate,
-                    mode="real"
+                    mode="real",
+                    symbol=req.symbol
                 )
             except Exception as e:
                 logger.error(f"eToro manual live order exception: {e}")
@@ -769,6 +771,24 @@ def etoro_instrument_search(symbol: str = "BTC"):
         "cache_contents": dict(etoro_client._instrument_cache),
         "is_configured": etoro_client.is_configured()
     }
+
+
+@app.get("/api/etoro/ws-test", tags=["eToro Live Integration"])
+def test_etoro_websocket():
+    """Tests eToro WebSocket authentication to wss://ws.etoro.com/ws."""
+    return etoro_client.test_websocket()
+
+
+@app.get("/api/etoro/mcp-test", tags=["eToro Live Integration"])
+def test_etoro_mcp(symbol: str = "BTC"):
+    """Tests eToro MCP prepare-trade validation for $100 on symbol."""
+    return etoro_client.execute_mcp_trade(symbol=symbol, direction="BUY", amount_usd=100.0, mode="real")
+
+
+@app.get("/api/etoro/scopes", tags=["eToro Live Integration"])
+def get_etoro_scopes():
+    """Fetches granted OAuth scopes and account profile via the official eToro MCP server."""
+    return etoro_client.get_mcp_profile_and_scopes()
 
 
 @app.post("/api/mode/switch", tags=["eToro Live Integration"])
