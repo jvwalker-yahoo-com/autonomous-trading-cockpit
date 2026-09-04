@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "etoro-public-api": {
+      "url": "https://mcp.public-api.etoro.com"
+    }
+  }
+}
