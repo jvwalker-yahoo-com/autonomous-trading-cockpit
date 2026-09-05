@@ -399,4 +399,72 @@ def test_etoro_api_client_and_mode_switching():
     assert "success" in r_mcp.json() or "error" in r_mcp.json()
 
 
+def test_instruments_sqlite_db_and_endpoints():
+    """
+    Tests the durable SQLite instruments database, ticker-to-ID lookup function,
+    alias normalization, and associated REST endpoints.
+    """
+    from backend.engine.instruments_db import get_etoro_id, get_instruments_db
+
+    db = get_instruments_db()
+
+    # 1. Test get_etoro_id() function across diverse asset classes
+    assert get_etoro_id("BTC") == 100000
+    assert get_etoro_id("ETH") == 100001
+    assert get_etoro_id("AAPL") == 1001
+    assert get_etoro_id("NVDA") == 1007
+    assert get_etoro_id("VTI") == 2010
+    assert get_etoro_id("NVDL") == 2014
+    assert get_etoro_id("FRA40") == 2106
+
+    # 2. Test alias normalization (e.g. commodities with .FUT suffix)
+    assert get_etoro_id("CORN.FUT") == 3014
+    assert get_etoro_id("CORN") == 3014
+    assert get_etoro_id("GOLD.FUT") == 3001
+    assert get_etoro_id("GOLD") == 3001
+
+    # 3. Test dynamic insertion and immediate lookup
+    db.upsert_instrument("TESTTICKER", 999999, name="Test Instrument Asset", category="Testing")
+    assert get_etoro_id("TESTTICKER") == 999999
+    inst_data = db.get_instrument("TESTTICKER")
+    assert inst_data is not None
+    assert inst_data["instrument_id"] == 999999
+    assert inst_data["name"] == "Test Instrument Asset"
+
+    # 4. Test REST API: GET /api/instruments
+    test_client = TestClient(app)
+    r_list = test_client.get("/api/instruments")
+    assert r_list.status_code == 200
+    data_list = r_list.json()
+    assert data_list["status"] == "success"
+    assert data_list["total_in_db"] >= 100
+    assert len(data_list["instruments"]) >= 50
+
+    # 5. Test REST API: GET /api/instruments with query filter
+    r_query = test_client.get("/api/instruments?query=AAPL")
+    assert r_query.status_code == 200
+    data_q = r_query.json()
+    assert any(item["symbol"] == "AAPL" for item in data_q["instruments"])
+
+    # 6. Test REST API: GET /api/instruments/{symbol}
+    r_aapl = test_client.get("/api/instruments/AAPL")
+    assert r_aapl.status_code == 200
+    data_aapl = r_aapl.json()
+    assert data_aapl["symbol"] == "AAPL"
+    assert data_aapl["instrument_id"] == 1001
+
+    # 7. Test REST API: GET /api/instruments/{symbol} 404 for unknown ticker
+    r_unknown = test_client.get("/api/instruments/NONEXISTENT_TICKER_XYZ")
+    assert r_unknown.status_code == 404
+
+    # 8. Test REST API: POST /api/instruments/sync
+    r_sync = test_client.post("/api/instruments/sync")
+    assert r_sync.status_code == 200
+    data_sync = r_sync.json()
+    assert data_sync["status"] == "success"
+    assert "total_instruments" in data_sync
+    assert data_sync["total_instruments"] >= 100
+
+
+
 

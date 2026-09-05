@@ -832,16 +832,28 @@ class EToroClient:
         """
         Resolves a ticker symbol to its eToro internal Instrument ID.
         Strategy:
-        1. Check local cache (populated from portfolio positions or previous searches)
-        2. Search via real API (requires market-data:read scope)
-        3. Search via official eToro demo credentials (read-only, safe fallback)
-        4. Return None if unconfigured — never return a fake/guessed ID
+        1. Check SQLite Instruments Database (primary persistent store)
+        2. Check local in-memory cache
+        3. Search via real API / demo credentials
+        4. Automatically save newly discovered IDs back to SQLite database
         """
         sym_upper = symbol.strip().upper()
+
+        # Step 1: Query authoritative SQLite Instruments Database
+        try:
+            from backend.engine.instruments_db import get_etoro_id, get_instruments_db
+            db_id = get_etoro_id(sym_upper)
+            if db_id is not None:
+                self._instrument_cache[sym_upper] = db_id
+                return db_id
+        except Exception as e:
+            logger.debug(f"[eToro] SQLite instruments_db lookup notice: {e}")
+
+        # Step 2: Check local in-memory cache
         if sym_upper in self._instrument_cache:
             return self._instrument_cache[sym_upper]
 
-        # Try real API search (works if api key has market-data:read scope)
+        # Step 3: Try real API search (works if api key has market-data:read scope)
         results = self.search_instruments(sym_upper)
         for item in results:
             if isinstance(item, dict):
@@ -851,13 +863,24 @@ class EToroClient:
                 ).upper()
                 cand_id = item.get("instrumentId") or item.get("InstrumentID") or item.get("id")
                 if cand_sym == sym_upper and cand_id:
-                    self._instrument_cache[sym_upper] = int(cand_id)
-                    return int(cand_id)
+                    cid = int(cand_id)
+                    self._instrument_cache[sym_upper] = cid
+                    try:
+                        from backend.engine.instruments_db import get_instruments_db
+                        get_instruments_db().upsert_instrument(sym_upper, cid, name=item.get("displayName") or sym_upper)
+                    except Exception:
+                        pass
+                    return cid
 
-        # Fallback: try official eToro demo credentials for market-data lookup
+        # Step 4: Fallback try official eToro demo credentials for market-data lookup
         if self.is_configured():
             demo_id = self.search_via_demo_creds(sym_upper)
             if demo_id:
+                try:
+                    from backend.engine.instruments_db import get_instruments_db
+                    get_instruments_db().upsert_instrument(sym_upper, demo_id)
+                except Exception:
+                    pass
                 return demo_id
 
         # Mock ID only in unconfigured (test) mode
@@ -866,7 +889,6 @@ class EToroClient:
             self._instrument_cache[sym_upper] = mock_id
             return mock_id
 
-        logger.warning(f"[eToro] Could not resolve instrument ID for '{sym_upper}' — trade blocked.")
         return None
 
 

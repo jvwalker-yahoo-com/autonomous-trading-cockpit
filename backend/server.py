@@ -9,7 +9,7 @@ import asyncio
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -31,6 +31,7 @@ from .engine.backtester import BacktesterEngine, BacktestResult, OptimizationRes
 from .engine.reporter import ReportPDFGenerator, EmailReportDispatcher
 from .engine.screener import MarketScreener, MASTER_STOCK_UNIVERSE, PRESET_WATCHLISTS
 from .engine.etoro_client import EToroClient
+from .engine.instruments_db import get_instruments_db, get_etoro_id
 from .engine.data_feed import BASE_PRICES
 from .engine.models import (
     RegimeState, FederationOutput, ArbitrationOutput,
@@ -42,9 +43,28 @@ from .engine.models import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("auton-cockpit")
 
+# Timezone helper for 10:00 PM UK scheduled catalog synchronization
+try:
+    from zoneinfo import ZoneInfo
+    uk_tz = ZoneInfo("Europe/London")
+except Exception:
+    uk_tz = None
+
+def get_uk_now() -> datetime:
+    if uk_tz is not None:
+        try:
+            return datetime.now(uk_tz)
+        except Exception:
+            pass
+    now_utc = datetime.now(timezone.utc)
+    month = now_utc.month
+    is_bst = (3 < month < 10) or (month == 3 and now_utc.day >= 25) or (month == 10 and now_utc.day <= 25)
+    return now_utc + timedelta(hours=1 if is_bst else 0)
+
 # Instantiate Core Engine Components
 data_feed = DataFeedManager(api_key=config.finnhub_api_key)
 etoro_client = EToroClient(api_key=config.etoro_api_key, user_key=config.etoro_user_key, base_url=config.etoro_base_url)
+instruments_db = get_instruments_db()
 metrics_module = MetricsModule()
 regime_module = RegimeModule()
 federation_module = FederationModule()
@@ -114,6 +134,7 @@ CRYPTO_SYMBOLS = {
 async def autonomous_background_worker_loop():
     logger.info("Autonomous Background Trading Loop initialized with Multi-Asset Auto-Discovery.")
     last_universe_scan = 0.0
+    last_nightly_sync_date = ""
 
     # Ensure core anchor assets are in watchlist on boot
     config.watchlist = list(dict.fromkeys(CORE_ANCHOR_SYMBOLS + config.watchlist))
@@ -122,7 +143,20 @@ async def autonomous_background_worker_loop():
         try:
             now = time.time()
             now_utc = datetime.now(timezone.utc)
+            now_uk = get_uk_now()
             is_weekend = now_utc.weekday() in (5, 6) # Saturday (5) or Sunday (6)
+
+            # Scheduled 10:00 PM UK Time eToro SQLite Database Sync
+            # Automatically syncs newly discovered instruments from eToro catalog every night at 22:00 UK time
+            uk_day_str = now_uk.strftime("%Y-%m-%d")
+            if now_uk.hour == 22 and last_nightly_sync_date != uk_day_str:
+                last_nightly_sync_date = uk_day_str
+                try:
+                    logger.info(f"🕒 [10:00 PM UK Scheduled Task] Starting nightly eToro tickers SQLite catalog sync ({uk_day_str})...")
+                    sync_result = instruments_db.sync_from_etoro(etoro_client)
+                    logger.info(f"✅ [10:00 PM UK Scheduled Task] Sync completed: {sync_result}")
+                except Exception as sync_err:
+                    logger.warning(f"⚠️ [10:00 PM UK Scheduled Task] Sync notice: {sync_err}")
 
             # Dynamic multi-asset discovery across Equities, Crypto (24/7), Commodities, Indices, and ETFs
             if config.auto_rotate_universe and (now - last_universe_scan > config.universe_scan_interval_sec):
@@ -1171,6 +1205,53 @@ def apply_parameters_endpoint(req: ApplyParametersRequest):
         "applied_adx_threshold": req.adx_threshold,
         "message": f"Optimal parameters for {req.symbol.upper()} successfully applied to live cloud trader!"
     }
+
+
+# ==========================================
+# ETORO INSTRUMENTS DATABASE & LOOKUP API
+# ==========================================
+
+@app.get("/api/instruments", tags=["Instruments DB"])
+def list_instruments_endpoint(query: Optional[str] = None, category: Optional[str] = None, limit: int = 100):
+    """
+    Returns stored eToro instruments from the persistent SQLite database.
+    Supports filtering by text search query (symbol or name) and asset category.
+    """
+    if query:
+        results = instruments_db.search_instruments(query=query, limit=limit)
+    else:
+        results = instruments_db.list_all_instruments(category=category, limit=limit)
+    return {
+        "status": "success",
+        "count": len(results),
+        "total_in_db": instruments_db.count(),
+        "instruments": results
+    }
+
+@app.get("/api/instruments/{symbol}", tags=["Instruments DB"])
+def get_instrument_by_symbol_endpoint(symbol: str):
+    """
+    Looks up a ticker symbol in the SQLite database and returns its verified eToro instrument ID and metadata.
+    """
+    sym = symbol.strip().upper()
+    inst = instruments_db.get_instrument(sym)
+    iid = instruments_db.get_etoro_id(sym)
+    if not inst and iid is None:
+        raise HTTPException(status_code=404, detail=f"Instrument '{sym}' not found in SQLite database.")
+    return {
+        "symbol": sym,
+        "instrument_id": iid,
+        "details": inst or {"symbol": sym, "instrument_id": iid}
+    }
+
+@app.post("/api/instruments/sync", tags=["Instruments DB"])
+def trigger_instruments_sync_endpoint():
+    """
+    Manually triggers catalog synchronization with eToro and updates the SQLite database.
+    (This routine also runs automatically every night at 10:00 PM UK time).
+    """
+    result = instruments_db.sync_from_etoro(etoro_client)
+    return result
 
 
 # ==========================================
