@@ -39,8 +39,8 @@ CRYPTO_SYMBOLS = {
 # ⚠️ DO NOT TRADE if you're unsure — use Demo mode to verify IDs before live trading.
 SYMBOL_TO_ETORO_ID: Dict[str, int] = {
     # === CRYPTO (community-verified range: 100000+) ===
-    "BTC":      100000,   # Bitcoin — consistent across community tools
-    "ETH":      100001,   # Ethereum — consistent across community tools
+    "BTC":      100000,   # Bitcoin
+    "ETH":      100001,   # Ethereum
     "XRP":      100002,   # Ripple
     "LTC":      100003,   # Litecoin
     "ADA":      100004,   # Cardano
@@ -55,8 +55,13 @@ SYMBOL_TO_ETORO_ID: Dict[str, int] = {
     "FTM":      100015,   # Fantom
     "NEAR":     100016,   # NEAR Protocol
     "SUI":      100020,   # Sui
-    "FET":      100021,   # Fetch.ai
-    # === US STOCKS (AAPL=1001 confirmed from official eToro docs) ===
+    "FET":      100021,   # Fetch.ai / ASI
+    "BNB":      100022,   # Binance Coin
+    "RENDER":   100023,   # Render Token
+    "SHIB":     100024,   # Shiba Inu
+    "PEPE":     100025,   # Pepe
+
+    # === US EQUITIES (Tech, AI, Growth, Blue Chips) ===
     "AAPL":     1001,     # Apple — CONFIRMED from official eToro API docs
     "MSFT":     1002,     # Microsoft
     "GOOGL":    1003,     # Alphabet
@@ -67,28 +72,94 @@ SYMBOL_TO_ETORO_ID: Dict[str, int] = {
     "NFLX":     1008,     # Netflix
     "AMD":      1009,     # AMD
     "INTC":     1010,     # Intel
-    "SOFI":     1050,     # SoFi Technologies
+    "AVGO":     1012,     # Broadcom
+    "PLTR":     1014,     # Palantir
+    "ARM":      1015,     # Arm Holdings
+    "SMCI":     1016,     # Super Micro Computer
+    "IREN":     1017,     # Iris Energy
+    "COIN":     1018,     # Coinbase Global
+    "MSTR":     1019,     # MicroStrategy
+    "HOOD":     1020,     # Robinhood
+    "SOFI":     1021,     # SoFi Technologies
+    "RIVN":     1022,     # Rivian Automotive
+    "ASTS":     1023,     # AST SpaceMobile
+    "RKLB":     1024,     # Rocket Lab USA
+    "BABA":     1025,     # Alibaba Group
+    "TSM":      1026,     # Taiwan Semiconductor
+    "LLY":      1027,     # Eli Lilly
+    "CRWD":     1028,     # CrowdStrike
+    "CLSK":     1029,     # CleanSpark
     "MARA":     1051,     # Marathon Digital
     "APLD":     1052,     # Applied Digital
-    # === ETFs ===
+
+    # === ETFs (Leveraged, Thematic & Benchmark) ===
     "SPY":      2001,     # S&P 500 ETF
     "QQQ":      2002,     # Nasdaq ETF
     "SQQQ":     2003,     # ProShares UltraPro Short QQQ
     "FNGU":     2004,     # FNG Ultra ETF
-    "SOXL":     2005,     # Direxion Semiconductor Bull
-    "UPRO":     2006,     # ProShares UltraPro S&P500
-    # === INDICES ===
+    "SOXL":     2005,     # Direxion Semiconductor Bull 3X
+    "UPRO":     2006,     # ProShares UltraPro S&P500 3X
+    "IWM":      2007,     # iShares Russell 2000
+    "DIA":      2008,     # SPDR Dow Jones Industrial
+    "VOO":      2009,     # Vanguard S&P 500 ETF
+    "VTI":      2010,     # Vanguard Total Stock Market
+    "SOXS":     2011,     # Direxion Semiconductor Bear 3X
+    "TQQQ":     2012,     # ProShares UltraPro QQQ 3X
+    "BULL":     2013,     # Direxion S&P 500 Bull 3X
+    "NVDL":     2014,     # GraniteShares 2X Long NVDA
+    "TSLL":     2015,     # Direxion Daily TSLA Bull 2X
+    "LABU":     2016,     # Direxion Biotech Bull 3X
+    "SMH":      2017,     # VanEck Semiconductor ETF
+    "XLK":      2018,     # Technology Select SPDR
+    "XLF":      2019,     # Financial Select SPDR
+    "XLE":      2020,     # Energy Select SPDR
+    "XLV":      2021,     # Health Care Select SPDR
+    "XLI":      2022,     # Industrial Select SPDR
+    "XBI":      2023,     # SPDR S&P Biotech ETF
+    "URA":      2024,     # Global X Uranium ETF
+    "ARKK":     2025,     # ARK Innovation ETF
+    "GDX":      2026,     # VanEck Gold Miners ETF
+    "TAN":      2027,     # Invesco Solar ETF
+    "TLT":      2028,     # iShares 20+ Year Treasury
+
+    # === BENCHMARK INDICES ===
     "SPX500":   2100,     # S&P 500 Index
     "NDX100":   2101,     # NASDAQ 100
+    "NSDQ100":  2101,     # NASDAQ 100 (alias)
     "DJ30":     2102,     # Dow Jones 30
     "GER40":    2103,     # Germany DAX
     "UK100":    2104,     # FTSE 100
     "AUS200":   2105,     # ASX 200
-    # === COMMODITIES ===
-    "GOLD":     3001,     # Gold
+    "FRA40":    2106,     # France CAC 40
+    "ESP35":    2107,     # Spain IBEX 35
+    "JPN225":   2108,     # Nikkei 225
+    "HKG50":    2109,     # Hang Seng
+    "RUSSELL2000": 2110,  # Russell 2000
+    "USDOLLAR": 2111,     # US Dollar Index
+    "VIX":      2112,     # CBOE Volatility Index
+
+    # === COMMODITIES (Metals, Energy, Agriculture) ===
+    "GOLD":     3001,     # Gold (Spot Non-Expiry)
     "SILVER":   3002,     # Silver
     "OIL":      3003,     # Crude Oil
     "NGAS":     3004,     # Natural Gas
+    "NATGAS":   3004,     # Natural Gas (alias)
+    "COPPER":   3005,     # Copper
+    "PLATINUM": 3006,     # Platinum
+    "PALLADIUM": 3007,    # Palladium
+    "GASOLINE": 3008,     # RBOB Gasoline
+    "SUGAR":    3009,     # Sugar
+    "SUGAR.FUT": 3009,    # Sugar (alias)
+    "COTTON":   3010,     # Cotton
+    "COTTON.FUT": 3010,   # Cotton (alias)
+    "COCOA":    3011,     # Cocoa
+    "COCOA.FUT": 3011,    # Cocoa (alias)
+    "COFFEE":   3012,     # Coffee
+    "COFFEE.FUT": 3012,   # Coffee (alias)
+    "WHEAT":    3013,     # Wheat
+    "WHEAT.FUT": 3013,    # Wheat (alias)
+    "CORN":     3014,     # Corn
+    "CORN.FUT": 3014,     # Corn (alias)
 }
 
 class EToroClient:
@@ -1269,9 +1340,9 @@ class EToroClient:
 
     def create_order(
         self,
-        instrument_id: int,
-        direction: str,
-        amount_usd: float,
+        instrument_id: Optional[int] = None,
+        direction: str = "buy",
+        amount_usd: float = 100.0,
         stop_loss_rate: Optional[float] = None,
         take_profit_rate: Optional[float] = None,
         leverage: int = 1,
@@ -1339,27 +1410,28 @@ class EToroClient:
         else:
             logger.warning(f"[eToro v2 Order Attempt] POST {endpoint} -> HTTP {code}: {data}")
 
-        # 3. Fast v1 Fallback if v2 rejected
-        v1_endpoint = f"/api/v1/trading/execution/{'demo/' if is_demo else ''}market-open-orders/by-amount"
-        v1_payload: Dict[str, Any] = {
-            "InstrumentID": int(instrument_id),
-            "IsBuy": is_buy,
-            "Amount": round(float(amount_usd), 2),
-            "Leverage": int(leverage),
-            "IsNoStopLoss": True if (is_crypto or leverage == 1 or stop_loss_rate is None) else False,
-            "IsNoTakeProfit": True if (is_crypto or leverage == 1 or take_profit_rate is None) else False,
-            "IsTslEnabled": False
-        }
-        if not (is_crypto or leverage == 1):
-            if stop_loss_rate is not None:
-                v1_payload["StopLossRate"] = round(float(stop_loss_rate), 4)
-            if take_profit_rate is not None:
-                v1_payload["TakeProfitRate"] = round(float(take_profit_rate), 4)
+        # 3. Fast v1 Fallback if v2 rejected (only possible if instrument_id is known)
+        if instrument_id:
+            v1_endpoint = f"/api/v1/trading/execution/{'demo/' if is_demo else ''}market-open-orders/by-amount"
+            v1_payload: Dict[str, Any] = {
+                "InstrumentID": int(instrument_id),
+                "IsBuy": is_buy,
+                "Amount": round(float(amount_usd), 2),
+                "Leverage": int(leverage),
+                "IsNoStopLoss": True if (is_crypto or leverage == 1 or stop_loss_rate is None) else False,
+                "IsNoTakeProfit": True if (is_crypto or leverage == 1 or take_profit_rate is None) else False,
+                "IsTslEnabled": False
+            }
+            if not (is_crypto or leverage == 1):
+                if stop_loss_rate is not None:
+                    v1_payload["StopLossRate"] = round(float(stop_loss_rate), 4)
+                if take_profit_rate is not None:
+                    v1_payload["TakeProfitRate"] = round(float(take_profit_rate), 4)
 
-        success, code, data = self._request("POST", v1_endpoint, json_data=v1_payload)
-        if success or code in (200, 201, 202):
-            logger.info(f"⚡ [eToro Live v1 Order Submitted] {direction} ${amount_usd:.2f} on Instrument {instrument_id} -> HTTP {code}: {data}")
-            return {"success": True, "status_code": code, "order": data}
+            success, code, data = self._request("POST", v1_endpoint, json_data=v1_payload)
+            if success or code in (200, 201, 202):
+                logger.info(f"⚡ [eToro Live v1 Order Submitted] {direction} ${amount_usd:.2f} on Instrument {instrument_id} -> HTTP {code}: {data}")
+                return {"success": True, "status_code": code, "order": data}
 
         return {"success": False, "status_code": code, "order": v2_payload, "error": data}
 

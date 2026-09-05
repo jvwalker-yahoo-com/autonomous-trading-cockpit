@@ -42,12 +42,12 @@ MASTER_STOCK_UNIVERSE: Dict[str, Dict[str, Any]] = {
     "PLATINUM": {"name": "Platinum", "category": "Commodities", "base_price": 945.00, "asset_class": "Commodity", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
     "PALLADIUM": {"name": "Palladium", "category": "Commodities", "base_price": 980.00, "asset_class": "Commodity", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
     "GASOLINE": {"name": "RBOB Gasoline", "category": "Commodities", "base_price": 2.18, "asset_class": "Commodity", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
-    "SUGAR.FUT": {"name": "Sugar Futures", "category": "Commodities", "base_price": 19.40, "asset_class": "Commodity", "trading_hours": "Mon 08:30 - Fri 18:00 UK"},
-    "COTTON.FUT": {"name": "Cotton Futures", "category": "Commodities", "base_price": 72.50, "asset_class": "Commodity", "trading_hours": "Mon 02:00 - Fri 19:20 UK"},
-    "COCOA.FUT": {"name": "Cocoa Futures", "category": "Commodities", "base_price": 7850.00, "asset_class": "Commodity", "trading_hours": "Mon 09:45 - Fri 18:30 UK"},
-    "COFFEE.FUT": {"name": "Coffee Futures", "category": "Commodities", "base_price": 245.00, "asset_class": "Commodity", "trading_hours": "Mon 09:15 - Fri 18:30 UK"},
-    "WHEAT.FUT": {"name": "Wheat Futures", "category": "Commodities", "base_price": 545.00, "asset_class": "Commodity", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
-    "CORN.FUT": {"name": "Corn Futures", "category": "Commodities", "base_price": 405.00, "asset_class": "Commodity", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
+    "SUGAR": {"name": "Sugar", "category": "Commodities", "base_price": 19.40, "asset_class": "Commodity", "trading_hours": "Mon 08:30 - Fri 18:00 UK"},
+    "COTTON": {"name": "Cotton", "category": "Commodities", "base_price": 72.50, "asset_class": "Commodity", "trading_hours": "Mon 02:00 - Fri 19:20 UK"},
+    "COCOA": {"name": "Cocoa", "category": "Commodities", "base_price": 7850.00, "asset_class": "Commodity", "trading_hours": "Mon 09:45 - Fri 18:30 UK"},
+    "COFFEE": {"name": "Coffee", "category": "Commodities", "base_price": 245.00, "asset_class": "Commodity", "trading_hours": "Mon 09:15 - Fri 18:30 UK"},
+    "WHEAT": {"name": "Wheat", "category": "Commodities", "base_price": 545.00, "asset_class": "Commodity", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
+    "CORN": {"name": "Corn", "category": "Commodities", "base_price": 405.00, "asset_class": "Commodity", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
 
     # =========================================================================
     # 3. GLOBAL BENCHMARK INDICES
@@ -137,7 +137,7 @@ PRESET_WATCHLISTS = {
     },
     "commodities_metals_energy": {
         "title": "🛢️ Commodities (Gold, Silver, Oil, NatGas, Copper)",
-        "symbols": ["GOLD", "SILVER", "OIL", "NATGAS", "COPPER", "PLATINUM", "PALLADIUM", "GASOLINE", "SUGAR.FUT", "COCOA.FUT", "COFFEE.FUT"]
+        "symbols": ["GOLD", "SILVER", "OIL", "NATGAS", "COPPER", "PLATINUM", "PALLADIUM", "GASOLINE", "SUGAR", "COCOA", "COFFEE", "CORN", "WHEAT", "COTTON"]
     },
     "global_indices": {
         "title": "📈 Global Benchmark Indices (SPX, Nasdaq, Dow, FTSE, DAX, Nikkei)",

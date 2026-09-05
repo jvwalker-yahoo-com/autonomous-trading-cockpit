@@ -121,15 +121,24 @@ async def autonomous_background_worker_loop():
     while True:
         try:
             now = time.time()
+            now_utc = datetime.now(timezone.utc)
+            is_weekend = now_utc.weekday() in (5, 6) # Saturday (5) or Sunday (6)
+
             # Dynamic multi-asset discovery across Equities, Crypto (24/7), Commodities, Indices, and ETFs
             if config.auto_rotate_universe and (now - last_universe_scan > config.universe_scan_interval_sec):
                 last_universe_scan = now
                 try:
-                    top_screened = screener.scan_universe(data_feed_manager=data_feed, top_n=20)
-                    screened_syms = [s["symbol"] for s in top_screened if s.get("opportunity_score", 0) >= 60]
+                    # On weekends, traditional stock/commodity markets are closed. Focus 100% on 24/7 Crypto!
+                    cat_filter = "Crypto" if is_weekend else None
+                    top_screened = screener.scan_universe(data_feed_manager=data_feed, category_filter=cat_filter, top_n=25)
+                    screened_syms = [s["symbol"] for s in top_screened if s.get("opportunity_score", 0) >= 50]
                     if screened_syms:
-                        # Core anchors ALWAYS stay at the front; screened momentum picks appended
-                        combined = list(dict.fromkeys(CORE_ANCHOR_SYMBOLS + screened_syms + config.watchlist))[:40]
+                        if is_weekend:
+                            crypto_anchors = [s for s in CORE_ANCHOR_SYMBOLS if s in CRYPTO_SYMBOLS]
+                            combined = list(dict.fromkeys(crypto_anchors + screened_syms))
+                        else:
+                            # Core anchors ALWAYS stay at the front; screened momentum picks appended
+                            combined = list(dict.fromkeys(CORE_ANCHOR_SYMBOLS + screened_syms + config.watchlist))[:40]
                         config.watchlist = combined
                         logger.info(f"✨ [AUTONOMOUS ASSET SELECTION] Rotated active universe to {len(screened_syms)} top opportunities: {screened_syms[:8]} (Total active: {len(config.watchlist)})")
                 except Exception as ex:
@@ -261,35 +270,32 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
                     can_execute_broker = False
                 else:
                     inst_id = etoro_client.resolve_instrument_id(symbol)
-                    if not inst_id:
-                        logger.warning(f"[LIVE SKIP] Cannot resolve eToro instrument ID for '{symbol}' — skipping live order.")
-                        can_execute_broker = False
-                    else:
-                        is_short = (trade_dir == "SHORT")
-                        sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
-                        sl_rate = round(quote.price * (1.0 + config.default_stop_loss_pct if is_short else 1.0 - config.default_stop_loss_pct), sl_prec)
-                        tp_rate = round(quote.price * (1.0 - config.default_take_profit_pct if is_short else 1.0 + config.default_take_profit_pct), sl_prec)
+                    is_short = (trade_dir == "SHORT")
+                    sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
+                    sl_rate = round(quote.price * (1.0 + config.default_stop_loss_pct if is_short else 1.0 - config.default_stop_loss_pct), sl_prec)
+                    tp_rate = round(quote.price * (1.0 - config.default_take_profit_pct if is_short else 1.0 + config.default_take_profit_pct), sl_prec)
 
-                        logger.info(f"⚡ [LIVE ETORO ORDER] Dispatching {trade_dir} on {symbol} (ID: {inst_id}) for ${allocated_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
-                        try:
-                            order_res = etoro_client.create_order(
-                                instrument_id=inst_id,
-                                direction=trade_dir,
-                                amount_usd=allocated_usd,
-                                stop_loss_rate=sl_rate,
-                                take_profit_rate=tp_rate,
-                                mode="real",
-                                symbol=symbol
-                            )
-                            if order_res.get("success"):
-                                logger.info(f"✅ [LIVE ETORO SUCCESS] Order filled for {symbol}: {order_res}")
-                                can_execute_broker = True
-                            else:
-                                logger.warning(f"❌ [LIVE ETORO REJECTED] Order failed for {symbol}: {order_res.get('error') or order_res}")
-                                can_execute_broker = False
-                        except Exception as e:
-                            logger.error(f"eToro live order execution exception: {e}")
+                    id_desc = f"ID: {inst_id}" if inst_id else "symbol-only"
+                    logger.info(f"⚡ [LIVE ETORO ORDER] Dispatching {trade_dir} on {symbol} ({id_desc}) for ${allocated_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
+                    try:
+                        order_res = etoro_client.create_order(
+                            instrument_id=inst_id,
+                            direction=trade_dir,
+                            amount_usd=allocated_usd,
+                            stop_loss_rate=sl_rate,
+                            take_profit_rate=tp_rate,
+                            mode="real",
+                            symbol=symbol
+                        )
+                        if order_res.get("success"):
+                            logger.info(f"✅ [LIVE ETORO SUCCESS] Order filled for {symbol}: {order_res}")
+                            can_execute_broker = True
+                        else:
+                            logger.warning(f"❌ [LIVE ETORO REJECTED] Order failed for {symbol}: {order_res.get('error') or order_res}")
                             can_execute_broker = False
+                    except Exception as e:
+                        logger.error(f"eToro live order execution exception: {e}")
+                        can_execute_broker = False
 
             # In live mode, only record in local broker ledger if eToro order was actually executed!
             if can_execute_broker:
@@ -625,29 +631,26 @@ def execute_manual_action(req: ManualTradeRequest):
                 detail=f"Cannot SHORT {req.symbol}: Cryptocurrency is spot/long-only on eToro retail accounts. Please choose BUY (LONG)."
             )
         inst_id = etoro_client.resolve_instrument_id(req.symbol)
-        if not inst_id:
-            logger.warning(f"[MANUAL LIVE SKIP] Cannot resolve eToro instrument ID for '{req.symbol}'")
-            etoro_res = {"success": False, "error": f"Unknown instrument '{req.symbol}' on eToro — check symbol name"}
-        else:
-            is_short = (direction == "SHORT")
-            sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
-            sl_rate = round(quote.price * (1.0 + config.default_stop_loss_pct if is_short else 1.0 - config.default_stop_loss_pct), sl_prec)
-            tp_rate = round(quote.price * (1.0 - config.default_take_profit_pct if is_short else 1.0 + config.default_take_profit_pct), sl_prec)
+        is_short = (direction == "SHORT")
+        sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
+        sl_rate = round(quote.price * (1.0 + config.default_stop_loss_pct if is_short else 1.0 - config.default_stop_loss_pct), sl_prec)
+        tp_rate = round(quote.price * (1.0 - config.default_take_profit_pct if is_short else 1.0 + config.default_take_profit_pct), sl_prec)
 
-            logger.info(f"⚡ [MANUAL LIVE ETORO ORDER] {direction} on {req.symbol} (ID: {inst_id}) for ${alloc_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
-            try:
-                etoro_res = etoro_client.create_order(
-                    instrument_id=inst_id,
-                    direction=direction,
-                    amount_usd=alloc_usd,
-                    stop_loss_rate=sl_rate,
-                    take_profit_rate=tp_rate,
-                    mode="real",
-                    symbol=req.symbol
-                )
-            except Exception as e:
-                logger.error(f"eToro manual live order exception: {e}")
-                etoro_res = {"success": False, "error": str(e)}
+        id_desc = f"ID: {inst_id}" if inst_id else "symbol-only"
+        logger.info(f"⚡ [MANUAL LIVE ETORO ORDER] {direction} on {req.symbol} ({id_desc}) for ${alloc_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
+        try:
+            etoro_res = etoro_client.create_order(
+                instrument_id=inst_id,
+                direction=direction,
+                amount_usd=alloc_usd,
+                stop_loss_rate=sl_rate,
+                take_profit_rate=tp_rate,
+                mode="real",
+                symbol=req.symbol
+            )
+        except Exception as e:
+            logger.error(f"eToro manual live order exception: {e}")
+            etoro_res = {"success": False, "error": str(e)}
 
     pos = broker.execute_order(
         symbol=req.symbol,

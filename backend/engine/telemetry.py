@@ -176,7 +176,7 @@ class TelemetryModule:
         # Commodities check
         if any(cm in sym for cm in ("OIL", "SILVER", "COPPER", "NATGAS", "PLATINUM", "PALLADIUM")):
             return ETORO_EXCHANGES_UK["COMMODITIES_METALS_ENERGY"]
-        if any(ag in sym for ag in ("SUGAR", "COTTON", "COCOA")):
+        if any(ag == sym or ag in sym for ag in ("SUGAR", "COTTON", "COCOA", "COFFEE", "WHEAT", "CORN")):
             return ETORO_EXCHANGES_UK["COMMODITIES_AGRI"]
 
         # Indices check
