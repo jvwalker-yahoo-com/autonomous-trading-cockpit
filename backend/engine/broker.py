@@ -307,18 +307,34 @@ class SimulatedBroker:
         self.save_state()
         return eq
 
-    def close_all_positions(self, current_prices: Optional[Dict[str, float]] = None, exit_rationale: str = "End-of-day market close") -> List[TradeRecord]:
-        """Closes all currently open positions at their latest prices and logs them to the trade ledger."""
+    def close_all_positions(
+        self,
+        current_prices: Optional[Dict[str, float]] = None,
+        exit_rationale: str = "User requested emergency close of all trades",
+        data_feed=None
+    ) -> List[TradeRecord]:
+        """Closes all currently open positions at their latest prices, logs them to trade ledger, and clears positions."""
         closed_trades = []
         symbols = list(self.positions.keys())
         for sym in symbols:
             pos = self.positions.get(sym)
             if not pos:
                 continue
-            price = current_prices.get(sym, pos.current_price) if current_prices else pos.current_price
+            price = pos.current_price
+            if current_prices and sym in current_prices:
+                price = current_prices[sym]
+            elif data_feed is not None:
+                try:
+                    quote = data_feed.get_latest_quote(sym)
+                    if quote and quote.price > 0:
+                        price = quote.price
+                except Exception:
+                    pass
             tr = self.close_position(sym, price, exit_rationale=exit_rationale)
             if tr:
                 closed_trades.append(tr)
+        self.positions.clear()
+        self.save_state()
         return closed_trades
 
     def get_per_stock_summary(self, trades_list: Optional[List[TradeRecord]] = None, include_open: bool = True) -> List[StockPerformanceSummary]:

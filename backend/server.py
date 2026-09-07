@@ -116,28 +116,28 @@ async def start_autonomous_background_worker():
     """Starts the continuous background autonomous execution loop."""
     asyncio.create_task(autonomous_background_worker_loop())
 
-# Permanent Core Anchor Assets — must NEVER be evicted by autonomous screener rotation
+# Permanent Core Anchor Assets — Low-Spread US Equities, Benchmark/Leveraged ETFs & Macro Commodities
 CORE_ANCHOR_SYMBOLS = [
-    "BTC", "ETH", "SOL", "XRP",                      # Major Crypto (24/7)
-    "AAPL", "NVDA", "MSFT", "TSLA", "META",         # Mega-Cap Tech
-    "SPY", "QQQ", "SOXL", "SQQQ",                   # Top ETFs
-    "GOLD", "OIL"                                   # Macro Commodities
+    "AAPL", "NVDA", "MSFT", "TSLA", "META", "AMZN", "GOOGL",  # Mega-Cap Tech Titans
+    "SPY", "QQQ", "SOXL", "SQQQ", "IWM",                     # Top Benchmark & Leveraged ETFs
+    "GOLD", "OIL", "SILVER"                                  # Macro Commodities
 ]
 
-# Spot crypto assets on eToro cannot be shorted by retail accounts (LONG only)
+# Cryptocurrency assets permanently prohibited from trading due to excessive spread costs
 CRYPTO_SYMBOLS = {
     "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX",
     "LINK", "DOT", "NEAR", "MATIC", "SHIB", "LTC", "UNI",
-    "RENDER", "FET", "SUI", "PEPE"
+    "RENDER", "FET", "SUI", "PEPE", "ALGO", "ATOM", "FTM"
 }
+CRYPTO_TRADING_DISABLED = True
 
 async def autonomous_background_worker_loop():
-    logger.info("Autonomous Background Trading Loop initialized with Multi-Asset Auto-Discovery.")
+    logger.info("Autonomous Background Trading Loop initialized (Crypto Permanently Disabled).")
     last_universe_scan = 0.0
     last_nightly_sync_date = ""
 
-    # Ensure core anchor assets are in watchlist on boot
-    config.watchlist = list(dict.fromkeys(CORE_ANCHOR_SYMBOLS + config.watchlist))
+    # Ensure core anchor assets are in watchlist on boot (strictly excluding any crypto)
+    config.watchlist = [s for s in dict.fromkeys(CORE_ANCHOR_SYMBOLS + config.watchlist) if s not in CRYPTO_SYMBOLS]
 
     while True:
         try:
@@ -158,21 +158,21 @@ async def autonomous_background_worker_loop():
                 except Exception as sync_err:
                     logger.warning(f"⚠️ [10:00 PM UK Scheduled Task] Sync notice: {sync_err}")
 
-            # Dynamic multi-asset discovery across Equities, Crypto (24/7), Commodities, Indices, and ETFs
+            # On weekends, traditional stock/commodity markets are closed.
+            # Crypto trading is permanently deactivated per user mandate due to excessive spread costs.
+            if is_weekend:
+                await asyncio.sleep(config.execution_loop_interval * 3)
+                continue
+
+            # Dynamic multi-asset discovery across Equities, Commodities, Indices, and ETFs (Crypto permanently excluded)
             if config.auto_rotate_universe and (now - last_universe_scan > config.universe_scan_interval_sec):
                 last_universe_scan = now
                 try:
-                    # On weekends, traditional stock/commodity markets are closed. Focus 100% on 24/7 Crypto!
-                    cat_filter = "Crypto" if is_weekend else None
-                    top_screened = screener.scan_universe(data_feed_manager=data_feed, category_filter=cat_filter, top_n=25)
-                    screened_syms = [s["symbol"] for s in top_screened if s.get("opportunity_score", 0) >= 50]
+                    top_screened = screener.scan_universe(data_feed_manager=data_feed, top_n=25)
+                    screened_syms = [s["symbol"] for s in top_screened if s.get("opportunity_score", 0) >= 50 and s["symbol"] not in CRYPTO_SYMBOLS]
                     if screened_syms:
-                        if is_weekend:
-                            crypto_anchors = [s for s in CORE_ANCHOR_SYMBOLS if s in CRYPTO_SYMBOLS]
-                            combined = list(dict.fromkeys(crypto_anchors + screened_syms))
-                        else:
-                            # Core anchors ALWAYS stay at the front; screened momentum picks appended
-                            combined = list(dict.fromkeys(CORE_ANCHOR_SYMBOLS + screened_syms + config.watchlist))[:40]
+                        clean_watchlist = [s for s in config.watchlist if s not in CRYPTO_SYMBOLS]
+                        combined = list(dict.fromkeys(CORE_ANCHOR_SYMBOLS + screened_syms + clean_watchlist))[:40]
                         config.watchlist = combined
                         logger.info(f"✨ [AUTONOMOUS ASSET SELECTION] Rotated active universe to {len(screened_syms)} top opportunities: {screened_syms[:8]} (Total active: {len(config.watchlist)})")
                 except Exception as ex:
@@ -220,6 +220,10 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     """
     Executes one complete analytical and autonomous execution pass for a symbol.
     """
+    # Permanent deactivation of Crypto trading per user mandate due to high spread costs
+    if symbol in CRYPTO_SYMBOLS:
+        return {}
+
     global active_symbol
     active_symbol = symbol
 
@@ -551,6 +555,31 @@ def get_daily_report():
         "full_trade_ledger": [t.model_dump() for t in broker.trade_ledger]
     }
 
+@app.post("/api/positions/close_all", tags=["Portfolio"])
+def close_all_positions_endpoint():
+    """
+    Emergency Close All Trades:
+    Closes all open positions both on eToro (live or demo) and in the local portfolio ledger.
+    """
+    etoro_res = {}
+    if etoro_client.is_configured():
+        try:
+            mode = "real" if config.execution_mode == "live" else "demo"
+            etoro_res = etoro_client.close_all_positions(mode=mode)
+        except Exception as e:
+            logger.error(f"eToro close_all_positions exception: {e}")
+            etoro_res = {"error": str(e)}
+
+    # Close all in local broker
+    closed_trades = broker.close_all_positions(data_feed=data_feed, exit_rationale="User requested emergency close of all trades")
+
+    return {
+        "status": "success",
+        "message": f"Successfully closed all open trades ({len(closed_trades)} local, {etoro_res.get('closed_count', 0)} eToro).",
+        "closed_local_trades": [t.model_dump() for t in closed_trades],
+        "etoro_result": etoro_res
+    }
+
 @app.get("/api/reports/five_day", tags=["Audit & Reporting"])
 @app.get("/api/reports/multi_day", tags=["Audit & Reporting"])
 def get_five_day_report(days: int = 5):
@@ -642,28 +671,31 @@ def get_learning_stats():
 @app.post("/api/action/trade", tags=["Manual Controls"])
 def execute_manual_action(req: ManualTradeRequest):
     """Executes a manual Buy, Short, or Close position order."""
-    quote = data_feed.get_latest_quote(req.symbol)
+    sym = req.symbol.strip().upper()
+    quote = data_feed.get_latest_quote(sym)
     if req.action.upper() == "CLOSE":
         if config.execution_mode == "live" and etoro_client.is_configured():
             try:
-                etoro_client.close_position(req.symbol, mode="real")
+                etoro_client.close_position(sym, mode="real")
             except Exception as e:
                 logger.error(f"eToro manual live close exception: {e}")
-        trade = broker.close_position(req.symbol, quote.price, exit_rationale="Manual user close")
+        trade = broker.close_position(sym, quote.price, exit_rationale="Manual user close")
         if not trade:
-            raise HTTPException(status_code=400, detail="No active position found for this symbol")
+            return {"status": "success", "closed_trade": None, "message": f"No active local position found for {sym} (already closed)."}
         return {"status": "success", "closed_trade": trade}
-    
+
+    # Permanent deactivation of Crypto trading per user mandate due to high spread costs
+    if sym in CRYPTO_SYMBOLS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot trade {sym}: Cryptocurrency trading is permanently deactivated due to excessive spread costs."
+        )
+
     direction = "LONG" if req.action.upper() == "BUY" else "SHORT"
     alloc_usd = req.amount_usd or 100.0
     etoro_res = None
 
     if config.execution_mode == "live" and etoro_client.is_configured():
-        if direction == "SHORT" and req.symbol in CRYPTO_SYMBOLS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cannot SHORT {req.symbol}: Cryptocurrency is spot/long-only on eToro retail accounts. Please choose BUY (LONG)."
-            )
         inst_id = etoro_client.resolve_instrument_id(req.symbol)
         is_short = (direction == "SHORT")
         sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
@@ -1078,6 +1110,11 @@ def add_to_watchlist(req: WatchlistAddRequest):
     sym = req.symbol.strip().upper()
     if not sym:
         raise HTTPException(status_code=400, detail="Symbol cannot be empty")
+    if sym in CRYPTO_SYMBOLS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot add {sym}: Cryptocurrency trading is permanently deactivated due to excessive spread costs."
+        )
     if sym not in config.watchlist:
         config.watchlist.append(sym)
     # Warmup data feed for new symbol

@@ -466,5 +466,46 @@ def test_instruments_sqlite_db_and_endpoints():
     assert data_sync["total_instruments"] >= 100
 
 
+def test_close_all_trades_and_crypto_deactivation():
+    """
+    Verifies that:
+    1. Emergency close all endpoint POST /api/positions/close_all successfully clears positions.
+    2. Any attempt to manually BUY or SHORT crypto tickers (e.g. BTC, ETH) is rejected with HTTP 400.
+    3. Adding crypto tickers to the active watchlist is rejected with HTTP 400.
+    4. Market screener permanently excludes all crypto assets.
+    """
+    test_client = TestClient(app)
+
+    # 1. Test POST /api/positions/close_all
+    r_close = test_client.post("/api/positions/close_all")
+    assert r_close.status_code == 200
+    close_data = r_close.json()
+    assert close_data["status"] == "success"
+    assert "closed_local_trades" in close_data
+
+    # 2. Test manual trade rejection for Crypto
+    r_btc_buy = test_client.post("/api/action/trade", json={"symbol": "BTC", "action": "BUY", "amount_usd": 100.0})
+    assert r_btc_buy.status_code == 400
+    assert "Cryptocurrency trading is permanently deactivated" in r_btc_buy.json()["detail"]
+
+    r_eth_short = test_client.post("/api/action/trade", json={"symbol": "ETH", "action": "SHORT", "amount_usd": 100.0})
+    assert r_eth_short.status_code == 400
+    assert "Cryptocurrency trading is permanently deactivated" in r_eth_short.json()["detail"]
+
+    # 3. Test watchlist add rejection for Crypto
+    r_add_crypto = test_client.post("/api/watchlist/add", json={"symbol": "SOL"})
+    assert r_add_crypto.status_code == 400
+    assert "Cryptocurrency trading is permanently deactivated" in r_add_crypto.json()["detail"]
+
+    # 4. Test market screener exclusion
+    from backend.engine.screener import MarketScreener
+    from backend.server import CRYPTO_SYMBOLS
+    screened = MarketScreener.scan_universe()
+    for item in screened:
+        assert item["symbol"] not in CRYPTO_SYMBOLS
+        assert item.get("category", "").lower() != "crypto"
+
+
+
 
 

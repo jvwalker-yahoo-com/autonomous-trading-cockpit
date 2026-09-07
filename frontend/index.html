@@ -351,7 +351,10 @@
     <article class="panel panel-positions">
       <div class="panel-header">
         <h3><span class="panel-num">07</span> ACTIVE POSITIONS (FRACTIONAL)</h3>
-        <span class="badge" id="posCountBadge">0 OPEN</span>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button id="btnCloseAllPositions" class="btn" style="padding: 3px 10px; font-size: 11px; background: #dc2626; border: 1px solid #ef4444; color: #fff; border-radius: 4px; font-weight: 600; cursor: pointer;">🚨 CLOSE ALL TRADES</button>
+          <span class="badge" id="posCountBadge">0 OPEN</span>
+        </div>
       </div>
       <div class="panel-body table-responsive">
         <table class="cyber-table">

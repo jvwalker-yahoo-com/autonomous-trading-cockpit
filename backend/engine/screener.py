@@ -131,10 +131,6 @@ MASTER_STOCK_UNIVERSE: Dict[str, Dict[str, Any]] = {
 
 # Pre-Built Preset Watchlists for 1-Click Multi-Asset Loading
 PRESET_WATCHLISTS = {
-    "crypto_top_coins": {
-        "title": "🪙 Top Cryptocurrencies (24/7 Trading)",
-        "symbols": ["BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX", "LINK", "DOT", "NEAR", "RENDER", "SUI"]
-    },
     "commodities_metals_energy": {
         "title": "🛢️ Commodities (Gold, Silver, Oil, NatGas, Copper)",
         "symbols": ["GOLD", "SILVER", "OIL", "NATGAS", "COPPER", "PLATINUM", "PALLADIUM", "GASOLINE", "SUGAR", "COCOA", "COFFEE", "CORN", "WHEAT", "COTTON"]
@@ -152,9 +148,9 @@ PRESET_WATCHLISTS = {
         "symbols": ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "AMD", "PLTR", "ARM", "SMCI", "AVGO"]
     },
     "multi_asset_macro": {
-        "title": "🌍 Multi-Asset Macro Universe (Crypto + Commodities + Indices + ETFs + Stocks)",
+        "title": "🌍 Multi-Asset Macro Universe (Commodities + Indices + ETFs + Stocks)",
         "symbols": [
-            "BTC", "ETH", "SOL", "GOLD", "OIL", "SILVER", "NATGAS", "SPX500", "NSDQ100", "DJ30",
+            "GOLD", "OIL", "SILVER", "NATGAS", "SPX500", "NSDQ100", "DJ30",
             "UK100", "GER40", "JPN225", "SPY", "QQQ", "SOXL", "TQQQ", "NVDA", "TSLA", "AAPL",
             "MSFT", "META", "PLTR", "MARA", "COIN", "MSTR", "HOOD", "URA", "SMCI", "RKLB"
         ]
@@ -165,8 +161,13 @@ PRESET_WATCHLISTS = {
     }
 }
 
+PROHIBITED_CRYPTO = {
+    "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX", "LINK", "DOT", "NEAR", "MATIC",
+    "SHIB", "LTC", "UNI", "RENDER", "FET", "SUI", "PEPE", "ALGO", "ATOM", "FTM"
+}
+
 class MarketScreener:
-    """Scans all multi-asset instruments across Crypto, Commodities, Indices, ETFs, and Equities."""
+    """Scans all multi-asset instruments across Commodities, Indices, ETFs, and Equities (Crypto Deactivated)."""
 
     @staticmethod
     def scan_universe(data_feed_manager=None, category_filter: Optional[str] = None, top_n: int = 35) -> List[Dict[str, Any]]:
@@ -185,6 +186,10 @@ class MarketScreener:
         results = []
 
         for symbol, info in MASTER_STOCK_UNIVERSE.items():
+            # Permanent exclusion of Crypto per user mandate
+            if symbol in PROHIBITED_CRYPTO or info.get("category", "").lower() == "crypto" or info.get("asset_class", "").lower() == "crypto":
+                continue
+
             if category_filter and category_filter.lower() != "all":
                 if info.get("category", "").lower() != category_filter.lower() and info.get("asset_class", "").lower() != category_filter.lower():
                     continue

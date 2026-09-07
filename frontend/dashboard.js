@@ -109,6 +109,7 @@ const el = {
   btnManualBuy: document.getElementById("btnManualBuy"),
   btnManualShort: document.getElementById("btnManualShort"),
   btnManualClose: document.getElementById("btnManualClose"),
+  btnCloseAllPositions: document.getElementById("btnCloseAllPositions"),
   settingsModal: document.getElementById("settingsModal"),
   btnCloseModal: document.getElementById("btnCloseModal"),
   btnSaveConfig: document.getElementById("btnSaveConfig"),
@@ -485,6 +486,31 @@ if (el.btnTickStep) {
 if (el.btnManualBuy) el.btnManualBuy.addEventListener("click", () => triggerManualTrade("BUY"));
 if (el.btnManualShort) el.btnManualShort.addEventListener("click", () => triggerManualTrade("SHORT"));
 if (el.btnManualClose) el.btnManualClose.addEventListener("click", () => triggerManualTrade("CLOSE"));
+
+if (el.btnCloseAllPositions) {
+  el.btnCloseAllPositions.addEventListener("click", async () => {
+    if (!confirm("🚨 Are you sure you want to CLOSE ALL TRADES right now?\nThis will close all open positions on eToro and in your local trading portfolio.")) {
+      return;
+    }
+    el.btnCloseAllPositions.textContent = "⏳ CLOSING ALL...";
+    try {
+      const res = await fetch(`${BASE_URL}/api/positions/close_all`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      el.btnCloseAllPositions.textContent = "✓ CLOSED ALL";
+      alert(data.message || "All trades successfully closed!");
+      await fetchCockpitData();
+      setTimeout(() => {
+        if (el.btnCloseAllPositions) {
+          el.btnCloseAllPositions.textContent = "🚨 CLOSE ALL TRADES";
+        }
+      }, 3000);
+    } catch (err) {
+      alert("Failed to close all positions: " + err.message);
+      el.btnCloseAllPositions.textContent = "🚨 CLOSE ALL TRADES";
+    }
+  });
+}
 
 if (el.btnResetPortfolio) {
   el.btnResetPortfolio.addEventListener("click", async () => {

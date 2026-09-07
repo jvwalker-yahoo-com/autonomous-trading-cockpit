@@ -27,7 +27,8 @@ logger = logging.getLogger("etoro.client")
 
 CRYPTO_SYMBOLS = {
     "BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "AVAX", "DOT",
-    "LINK", "MATIC", "UNI", "ATOM", "FTM", "NEAR", "SUI", "FET", "LTC"
+    "LINK", "MATIC", "UNI", "ATOM", "FTM", "NEAR", "SUI", "FET",
+    "LTC", "BNB", "SHIB", "PEPE", "RENDER"
 }
 
 # Instrument ID table — sources:
@@ -1381,6 +1382,15 @@ class EToroClient:
         is_buy = direction.upper() in ("BUY", "LONG")
         sym = (symbol or "").strip().upper()
 
+        # Permanent deactivation of Crypto trading per user mandate due to high spread costs
+        if sym in CRYPTO_SYMBOLS:
+            logger.warning(f"🚫 [eToro] Trade rejected for {sym}: Cryptocurrency trading is permanently deactivated due to excessive spread costs.")
+            return {
+                "success": False,
+                "status_code": 400,
+                "error": f"Cryptocurrency trading is permanently deactivated for {sym} due to excessive spread costs."
+            }
+
         # 1. Try MCP pipeline first if symbol is provided
         if sym:
             mcp_res = self.execute_mcp_trade(
@@ -1483,3 +1493,76 @@ class EToroClient:
                 return {"success": True, "status_code": code, "result": data}
 
         return {"success": False, "status_code": 404, "position_id": position_id}
+
+    def close_all_positions(self, mode: str = "real") -> Dict[str, Any]:
+        """
+        Closes all open positions on eToro (both via MCP and Direct REST endpoints).
+        Returns list of closed position IDs and execution outcomes.
+        """
+        account = "real" if mode.lower() in ("real", "live") else "demo"
+        closed = []
+        errors = []
+
+        # 1. Try MCP tool get-my-positions-and-orders
+        positions = []
+        try:
+            pos_res = self.call_mcp_tool("get-my-positions-and-orders", {"account": account})
+            if pos_res.get("success") and isinstance(pos_res.get("data"), dict):
+                direct = pos_res["data"].get("direct") or {}
+                positions = direct.get("positions") or []
+        except Exception as e:
+            logger.debug(f"[eToro] MCP get-my-positions-and-orders notice: {e}")
+
+        # 2. Fallback to REST get_portfolio
+        if not positions:
+            try:
+                pf_res = self.get_portfolio(mode=mode)
+                if pf_res.get("success") and pf_res.get("data"):
+                    d = pf_res["data"]
+                    if isinstance(d, dict):
+                        positions = d.get("positions") or d.get("items") or d.get("data") or []
+                    elif isinstance(d, list):
+                        positions = d
+            except Exception as e:
+                logger.warning(f"[eToro] REST get_portfolio notice: {e}")
+
+        # 3. Close each discovered position
+        for pos in positions:
+            pos_id = None
+            if isinstance(pos, dict):
+                pos_id = pos.get("positionId") or pos.get("PositionID") or pos.get("id") or pos.get("orderId")
+            elif isinstance(pos, (int, str)):
+                pos_id = pos
+
+            if pos_id is not None:
+                # Try MCP prepare-close -> place-close first
+                closed_via_mcp = False
+                try:
+                    mcp_prep = self.call_mcp_tool("prepare-close", {"account": account, "positionId": int(pos_id)})
+                    if mcp_prep.get("success") and isinstance(mcp_prep.get("data"), dict):
+                        token = mcp_prep["data"].get("confirmationToken")
+                        if token:
+                            mcp_place = self.call_mcp_tool("place-close", {"token": token})
+                            if mcp_place.get("success"):
+                                closed.append(pos_id)
+                                closed_via_mcp = True
+                except Exception as e:
+                    logger.debug(f"[eToro] MCP close exception on {pos_id}: {e}")
+
+                if not closed_via_mcp:
+                    # Fallback to direct REST close
+                    res = self.close_position(str(pos_id), mode=mode)
+                    if res.get("success"):
+                        closed.append(pos_id)
+                    else:
+                        errors.append({"position_id": pos_id, "error": res})
+
+        logger.info(f"⚡ [eToro Close All] Processed {len(positions)} positions -> {len(closed)} successfully closed.")
+        return {
+            "status": "success",
+            "positions_found": len(positions),
+            "closed_count": len(closed),
+            "closed_positions": closed,
+            "errors": errors
+        }
+
