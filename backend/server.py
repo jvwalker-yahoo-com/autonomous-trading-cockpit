@@ -207,6 +207,7 @@ class ConfigUpdateRequest(BaseModel):
     etoro_user_key: Optional[str] = None
     etoro_base_url: Optional[str] = None
     execution_mode: Optional[str] = None
+    watchlist: Optional[List[str]] = None
 
 class ModeSwitchRequest(BaseModel):
     mode: str # "demo" or "live"
@@ -809,6 +810,9 @@ def update_system_config(req: ConfigUpdateRequest):
         config.risk_per_trade_pct = req.risk_per_trade_pct
     if req.min_conviction_score is not None:
         config.min_conviction_score = max(0.05, min(0.95, req.min_conviction_score))
+    if req.watchlist is not None:
+        config.watchlist = [s for s in req.watchlist if s not in CRYPTO_SYMBOLS]
+        logger.info(f"Updated watchlist to {len(config.watchlist)} assets (Crypto purged): {config.watchlist[:10]}")
 
     # Persist updated settings to disk
     broker.save_state({
@@ -1010,9 +1014,9 @@ def switch_execution_mode(req: ModeSwitchRequest):
         # Build 5-day historical traded stocks + active watchlist and sync asynchronously in background
         five_day_rep = broker.get_multi_day_report(5)
         traded_symbols = [s.symbol for s in five_day_rep.stock_summaries if s.symbol]
-        combined_symbols = list(dict.fromkeys(traded_symbols + config.watchlist))
+        combined_symbols = [s for s in dict.fromkeys(traded_symbols + config.watchlist) if s not in CRYPTO_SYMBOLS]
         if not combined_symbols:
-            combined_symbols = ["BTC", "ETH", "AAPL", "NVDA", "TSLA", "MSFT", "SPY", "QQQ"]
+            combined_symbols = ["AAPL", "NVDA", "TSLA", "MSFT", "SPY", "QQQ", "GOLD", "OIL"]
 
         # Run watchlist sync in background thread so HTTP response is instant
         def _bg_sync():
