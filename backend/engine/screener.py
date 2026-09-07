@@ -64,7 +64,6 @@ MASTER_STOCK_UNIVERSE: Dict[str, Dict[str, Any]] = {
     "ESP35": {"name": "IBEX 35 (Spain)", "category": "Indices", "base_price": 11350.00, "asset_class": "Index", "trading_hours": "Mon 08:00 - Fri 16:30 UK"},
     "JPN225": {"name": "Nikkei 225 (Japan)", "category": "Indices", "base_price": 38650.00, "asset_class": "Index", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
     "HKG50": {"name": "Hang Seng (Hong Kong)", "category": "Indices", "base_price": 17700.00, "asset_class": "Index", "trading_hours": "Mon 01:15 - Fri 08:00 UK"},
-    "CHINA50": {"name": "FTSE China A50", "category": "Indices", "base_price": 11800.00, "asset_class": "Index", "trading_hours": "Mon 01:00 - Fri 08:00 UK"},
     "AUS200": {"name": "ASX 200 (Australia)", "category": "Indices", "base_price": 8100.00, "asset_class": "Index", "trading_hours": "Mon 01:00 - Fri 07:00 UK"},
 
     # =========================================================================
