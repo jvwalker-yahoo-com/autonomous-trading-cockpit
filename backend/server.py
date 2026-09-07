@@ -556,7 +556,7 @@ def get_daily_report():
     }
 
 @app.post("/api/positions/close_all", tags=["Portfolio"])
-def close_all_positions_endpoint():
+def close_all_positions_endpoint(only_crypto: bool = False):
     """
     Emergency Close All Trades:
     Closes all open positions both on eToro (live or demo) and in the local portfolio ledger.
@@ -565,20 +565,36 @@ def close_all_positions_endpoint():
     if etoro_client.is_configured():
         try:
             mode = "real" if config.execution_mode == "live" else "demo"
-            etoro_res = etoro_client.close_all_positions(mode=mode)
+            etoro_res = etoro_client.close_all_positions(mode=mode, only_crypto=only_crypto)
         except Exception as e:
             logger.error(f"eToro close_all_positions exception: {e}")
             etoro_res = {"error": str(e)}
 
     # Close all in local broker
-    closed_trades = broker.close_all_positions(data_feed=data_feed, exit_rationale="User requested emergency close of all trades")
+    if only_crypto:
+        closed_trades = []
+        for sym in list(broker.positions.keys()):
+            if sym in CRYPTO_SYMBOLS:
+                t = broker.close_position(sym, exit_rationale="User requested close of all crypto trades")
+                if t:
+                    closed_trades.append(t)
+    else:
+        closed_trades = broker.close_all_positions(data_feed=data_feed, exit_rationale="User requested emergency close of all trades")
 
     return {
         "status": "success",
-        "message": f"Successfully closed all open trades ({len(closed_trades)} local, {etoro_res.get('closed_count', 0)} eToro).",
+        "message": f"Successfully closed open trades ({len(closed_trades)} local, {etoro_res.get('closed_count', 0)} eToro).",
         "closed_local_trades": [t.model_dump() for t in closed_trades],
         "etoro_result": etoro_res
     }
+
+@app.post("/api/positions/close_crypto", tags=["Portfolio"])
+def close_crypto_positions_endpoint():
+    """
+    Close All Crypto Positions:
+    Closes all open cryptocurrency positions on eToro and in local broker while preserving non-crypto holdings.
+    """
+    return close_all_positions_endpoint(only_crypto=True)
 
 @app.get("/api/reports/five_day", tags=["Audit & Reporting"])
 @app.get("/api/reports/multi_day", tags=["Audit & Reporting"])
@@ -676,7 +692,18 @@ def execute_manual_action(req: ManualTradeRequest):
     if req.action.upper() == "CLOSE":
         if config.execution_mode == "live" and etoro_client.is_configured():
             try:
-                etoro_client.close_position(sym, mode="real")
+                if sym.isdigit():
+                    etoro_client.close_position(sym, mode="real")
+                else:
+                    # Find matching position(s) by symbol from live portfolio
+                    pf = etoro_client.get_portfolio(mode="real")
+                    if pf.get("success") and pf.get("data"):
+                        for h in pf["data"].get("holdings", []):
+                            if h.get("market", {}).get("symbol", "").upper() == sym:
+                                for p in h.get("positions", []):
+                                    pid = p.get("positionId")
+                                    if pid:
+                                        etoro_client.close_position(str(pid), mode="real", instrument_id=h.get("market", {}).get("instrumentId"))
             except Exception as e:
                 logger.error(f"eToro manual live close exception: {e}")
         trade = broker.close_position(sym, quote.price, exit_rationale="Manual user close")

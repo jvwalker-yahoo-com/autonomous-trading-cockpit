@@ -1471,13 +1471,43 @@ class EToroClient:
         self,
         position_id: str,
         units: Optional[float] = None,
-        mode: str = "real"
+        mode: str = "real",
+        instrument_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Closes an open position on eToro (Demo or Real).
+        Tries:
+        1. Official eToro MCP prepare-close -> place-close pipeline
+        2. Direct REST: POST /api/v1/trading/execution/{demo/}market-close-orders/positions/{position_id}
         """
         is_demo = mode.lower() == "demo"
-        payload = {"UnitsToDeduct": units} if units is not None else {}
+        account = "demo" if is_demo else "real"
+        
+        # 1. MCP prepare-close -> place-close
+        try:
+            prep_payload = {"account": account, "positionId": int(position_id)}
+            if units is not None:
+                prep_payload["unitsToDeduct"] = units
+            mcp_prep = self.call_mcp_tool("prepare-close", prep_payload)
+            if mcp_prep.get("success") and isinstance(mcp_prep.get("data"), dict):
+                pdata = mcp_prep["data"]
+                token = pdata.get("token") or pdata.get("confirmationToken")
+                if token and pdata.get("verdict") == "ready":
+                    mcp_place = self.call_mcp_tool("place-close", {"token": token}, timeout=45.0)
+                    if mcp_place.get("success") and isinstance(mcp_place.get("data"), dict):
+                        outcome = mcp_place["data"].get("outcome")
+                        if outcome in ("executed", "pending", "partiallyFilled"):
+                            logger.info(f"⚡ [eToro MCP Position Closed] Position {position_id} -> outcome: {outcome}")
+                            return {"success": True, "method": "mcp", "outcome": outcome, "result": mcp_place["data"]}
+        except Exception as e:
+            logger.debug(f"[eToro MCP close exception on {position_id}]: {e}")
+
+        # 2. Direct REST v1
+        payload: Dict[str, Any] = {}
+        if instrument_id is not None:
+            payload["InstrumentId"] = int(instrument_id)
+        if units is not None:
+            payload["UnitsToDeduct"] = units
 
         endpoints = [
             (f"/api/v1/trading/execution/{'demo/' if is_demo else ''}market-close-orders/positions/{position_id}", "POST"),
@@ -1494,43 +1524,93 @@ class EToroClient:
 
         return {"success": False, "status_code": 404, "position_id": position_id}
 
-    def close_all_positions(self, mode: str = "real") -> Dict[str, Any]:
+    def close_all_positions(self, mode: str = "real", only_crypto: bool = False) -> Dict[str, Any]:
         """
         Closes all open positions on eToro (both via MCP and Direct REST endpoints).
+        If only_crypto is True, only closes cryptocurrency positions.
         Returns list of closed position IDs and execution outcomes.
         """
         account = "real" if mode.lower() in ("real", "live") else "demo"
         closed = []
         errors = []
 
-        # 1. Try MCP tool get-my-positions-and-orders
+        # 1. Try MCP tool get-my-portfolio-summary with includePositions=True
         positions = []
         try:
-            pos_res = self.call_mcp_tool("get-my-positions-and-orders", {"account": account})
-            if pos_res.get("success") and isinstance(pos_res.get("data"), dict):
-                direct = pos_res["data"].get("direct") or {}
-                positions = direct.get("positions") or []
+            pf_res = self.call_mcp_tool("get-my-portfolio-summary", {"account": account, "includePositions": True})
+            if pf_res.get("success") and isinstance(pf_res.get("data"), dict):
+                holdings = pf_res["data"].get("holdings") or []
+                for h in holdings:
+                    sym = h.get("market", {}).get("symbol", "").upper()
+                    iid = h.get("market", {}).get("instrumentId")
+                    for p in h.get("positions", []):
+                        if only_crypto:
+                            is_crypto = sym in CRYPTO_SYMBOLS or (iid and int(iid) >= 100000)
+                            if not is_crypto:
+                                continue
+                        positions.append({
+                            **p,
+                            "symbol": sym,
+                            "instrumentId": iid
+                        })
         except Exception as e:
-            logger.debug(f"[eToro] MCP get-my-positions-and-orders notice: {e}")
+            logger.debug(f"[eToro] MCP get-my-portfolio-summary notice: {e}")
 
-        # 2. Fallback to REST get_portfolio
+        # 2. Try MCP tool get-my-positions-and-orders if empty
         if not positions:
             try:
-                pf_res = self.get_portfolio(mode=mode)
-                if pf_res.get("success") and pf_res.get("data"):
-                    d = pf_res["data"]
+                pos_res = self.call_mcp_tool("get-my-positions-and-orders", {"account": account})
+                if pos_res.get("success") and isinstance(pos_res.get("data"), dict):
+                    direct = pos_res["data"].get("direct") or {}
+                    raw_pos = direct.get("positions") or []
+                    for p in raw_pos:
+                        sym = p.get("symbol", "").upper()
+                        iid = p.get("instrumentId")
+                        if only_crypto:
+                            is_crypto = sym in CRYPTO_SYMBOLS or (iid and int(iid) >= 100000)
+                            if not is_crypto:
+                                continue
+                        positions.append(p)
+            except Exception as e:
+                logger.debug(f"[eToro] MCP get-my-positions-and-orders notice: {e}")
+
+        # 3. Fallback to REST get_portfolio
+        if not positions:
+            try:
+                rest_pf = self.get_portfolio(mode=mode)
+                if rest_pf.get("success") and rest_pf.get("data"):
+                    d = rest_pf["data"]
                     if isinstance(d, dict):
-                        positions = d.get("positions") or d.get("items") or d.get("data") or []
-                    elif isinstance(d, list):
-                        positions = d
+                        holdings = d.get("holdings") or []
+                        for h in holdings:
+                            sym = h.get("market", {}).get("symbol", "").upper()
+                            iid = h.get("market", {}).get("instrumentId")
+                            for p in h.get("positions", []):
+                                if only_crypto:
+                                    is_crypto = sym in CRYPTO_SYMBOLS or (iid and int(iid) >= 100000)
+                                    if not is_crypto:
+                                        continue
+                                positions.append({**p, "symbol": sym, "instrumentId": iid})
+                        if not positions:
+                            raw_items = d.get("positions") or d.get("items") or d.get("data") or []
+                            for p in raw_items:
+                                sym = p.get("symbol", "").upper() if isinstance(p, dict) else ""
+                                iid = p.get("instrumentId") if isinstance(p, dict) else None
+                                if only_crypto:
+                                    is_crypto = sym in CRYPTO_SYMBOLS or (iid and int(iid) >= 100000)
+                                    if not is_crypto:
+                                        continue
+                                positions.append(p)
             except Exception as e:
                 logger.warning(f"[eToro] REST get_portfolio notice: {e}")
 
-        # 3. Close each discovered position
+        # 4. Close each discovered position
         for pos in positions:
             pos_id = None
+            inst_id = None
             if isinstance(pos, dict):
                 pos_id = pos.get("positionId") or pos.get("PositionID") or pos.get("id") or pos.get("orderId")
+                inst_id = pos.get("instrumentId") or pos.get("InstrumentID")
             elif isinstance(pos, (int, str)):
                 pos_id = pos
 
@@ -1540,22 +1620,28 @@ class EToroClient:
                 try:
                     mcp_prep = self.call_mcp_tool("prepare-close", {"account": account, "positionId": int(pos_id)})
                     if mcp_prep.get("success") and isinstance(mcp_prep.get("data"), dict):
-                        token = mcp_prep["data"].get("confirmationToken")
-                        if token:
-                            mcp_place = self.call_mcp_tool("place-close", {"token": token})
+                        pdata = mcp_prep["data"]
+                        token = pdata.get("token") or pdata.get("confirmationToken")
+                        if token and pdata.get("verdict") == "ready":
+                            mcp_place = self.call_mcp_tool("place-close", {"token": token}, timeout=45.0)
                             if mcp_place.get("success"):
-                                closed.append(pos_id)
-                                closed_via_mcp = True
+                                outcome = mcp_place.get("data", {}).get("outcome")
+                                if outcome in ("executed", "pending", "partiallyFilled"):
+                                    closed.append(pos_id)
+                                    closed_via_mcp = True
                 except Exception as e:
                     logger.debug(f"[eToro] MCP close exception on {pos_id}: {e}")
 
                 if not closed_via_mcp:
                     # Fallback to direct REST close
-                    res = self.close_position(str(pos_id), mode=mode)
+                    res = self.close_position(str(pos_id), mode=mode, instrument_id=inst_id)
                     if res.get("success"):
                         closed.append(pos_id)
                     else:
                         errors.append({"position_id": pos_id, "error": res})
+
+                # Modest pacing to respect rate limits
+                time.sleep(1.5)
 
         logger.info(f"⚡ [eToro Close All] Processed {len(positions)} positions -> {len(closed)} successfully closed.")
         return {
