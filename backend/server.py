@@ -284,7 +284,7 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     rationale = f"Ensemble score: {federation.federated_score:+.2f} | Winning model: {federation.federation}"
 
     # Determine directional signal
-    conv_thresh = getattr(config, "min_conviction_score", 0.12)
+    conv_thresh = getattr(config, "min_conviction_score", 0.08)
     if federation.federated_score >= conv_thresh:
         signal = "BUY"
     elif federation.federated_score <= -conv_thresh:
