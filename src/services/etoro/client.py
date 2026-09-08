@@ -1143,7 +1143,9 @@ class EToroClient:
         symbol: str,
         direction: str = "buy",
         amount_usd: float = 100.0,
-        mode: str = "real"
+        mode: str = "real",
+        stop_loss_rate: Optional[float] = None,
+        take_profit_rate: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Validates proposed trade against live quotes, balance, and regulations via eToro MCP prepare-trade.
@@ -1157,6 +1159,10 @@ class EToroClient:
             "symbol": symbol.upper().strip(),
             "amount": round(float(amount_usd), 2)
         }
+        if stop_loss_rate is not None:
+            args["stopLossRate"] = round(float(stop_loss_rate), 4)
+        if take_profit_rate is not None:
+            args["takeProfitRate"] = round(float(take_profit_rate), 4)
         return self.call_mcp_tool("prepare-trade", args, timeout=25.0)
 
     def execute_mcp_trade(
@@ -1164,7 +1170,9 @@ class EToroClient:
         symbol: str,
         direction: str,
         amount_usd: float,
-        mode: str = "real"
+        mode: str = "real",
+        stop_loss_rate: Optional[float] = None,
+        take_profit_rate: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Executes a trade via the official eToro MCP Server (mcp.public-api.etoro.com)
@@ -1180,7 +1188,14 @@ class EToroClient:
 
         # Step 1: prepare-trade
         logger.info(f"[eToro MCP] Preparing trade: {mcp_dir} ${amount_usd:.2f} of {sym} on {account} account...")
-        prep_res = self.prepare_mcp_trade(symbol=sym, direction=mcp_dir, amount_usd=amount_usd, mode=account)
+        prep_res = self.prepare_mcp_trade(
+            symbol=sym,
+            direction=mcp_dir,
+            amount_usd=amount_usd,
+            mode=account,
+            stop_loss_rate=stop_loss_rate,
+            take_profit_rate=take_profit_rate
+        )
         if not prep_res.get("success"):
             logger.warning(f"[eToro MCP prepare-trade Call Failed] {prep_res.get('error')}")
             return {
@@ -1397,7 +1412,9 @@ class EToroClient:
                 symbol=sym,
                 direction=direction,
                 amount_usd=amount_usd,
-                mode=mode
+                mode=mode,
+                stop_loss_rate=stop_loss_rate,
+                take_profit_rate=take_profit_rate
             )
             # If MCP succeeded, return outcome immediately
             if mcp_res.get("success"):

@@ -178,10 +178,10 @@ async def autonomous_background_worker_loop():
                 except Exception as ex:
                     logger.warning(f"Dynamic asset discovery notice: {ex}")
 
-            # Cycle analysis across all currently active dynamic watchlist assets
+            # Cycle analysis across all currently active dynamic watchlist assets (non-blocking thread)
             for sym in list(config.watchlist):
-                run_analysis_cycle(sym)
-                await asyncio.sleep(0.3)
+                await asyncio.to_thread(run_analysis_cycle, sym)
+                await asyncio.sleep(0.1)
 
         except Exception as e:
             logger.error(f"Autonomous background cycle exception: {e}")
@@ -250,8 +250,10 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     # 6. Quadrant classification
     quadrant = quadrant_module.quadrant(metrics["risk"], metrics["impact"])
 
-    # 7. Model Federation (Multi-Strategy Scoring + Adaptive Weights)
-    federation = federation_module.model_federation(indicators, quote.price, sentiment, learner.weights)
+    # 7. Model Federation (Multi-Strategy Scoring + Adaptive Weights + Regime Awareness)
+    federation = federation_module.model_federation(
+        indicators, quote.price, sentiment, learner.weights, trend=regime.trend
+    )
 
     # 8. Arbitration & Risk Gates (including eToro UK Market Hours gate)
     equity = broker.get_equity()
@@ -282,7 +284,7 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     rationale = f"Ensemble score: {federation.federated_score:+.2f} | Winning model: {federation.federation}"
 
     # Determine directional signal
-    conv_thresh = getattr(config, "min_conviction_score", 0.25)
+    conv_thresh = getattr(config, "min_conviction_score", 0.12)
     if federation.federated_score >= conv_thresh:
         signal = "BUY"
     elif federation.federated_score <= -conv_thresh:

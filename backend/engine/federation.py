@@ -103,9 +103,16 @@ class FederationModule:
             rationale = f"Neutral market sentiment coverage ({score:+.2f})"
         return round(score, 3), sig, rationale
 
-    def model_federation(self, indicators: Dict[str, float], price: float, sentiment_val: float, current_weights: Dict[str, float]) -> FederationOutput:
+    def model_federation(
+        self,
+        indicators: Dict[str, float],
+        price: float,
+        sentiment_val: float,
+        current_weights: Dict[str, float],
+        trend: str = "CHOPPY"
+    ) -> FederationOutput:
         """
-        Executes multi-model scoring, applies dynamically calibrated weights,
+        Executes multi-model scoring, applies regime-aware dynamically calibrated weights,
         and determines consensus winner.
         """
         s_mom, sig_mom, rat_mom = self.score_momentum_trend(indicators, price)
@@ -120,17 +127,47 @@ class FederationModule:
             "news_sentiment": s_sent
         }
 
-        # Normalize weights
-        total_w = sum(current_weights.get(k, 0.25) for k in self.strategy_names)
+        # Dynamic Regime-Aware Strategy Calibration:
+        # In trending regimes, Trend Following and Breakouts dominate, and Mean Reversion
+        # is suppressed so it doesn't fight the trend.
+        # In range-bound/choppy regimes, Mean Reversion dominates.
+        if trend in ("BULL_TREND", "BEAR_TREND"):
+            regime_priors = {
+                "momentum_trend": 0.45,
+                "volatility_breakout": 0.30,
+                "news_sentiment": 0.15,
+                "mean_reversion": 0.10
+            }
+        else:  # CHOPPY / Range-Bound
+            regime_priors = {
+                "mean_reversion": 0.50,
+                "volatility_breakout": 0.20,
+                "news_sentiment": 0.20,
+                "momentum_trend": 0.10
+            }
+
+        # Blend regime prior with adaptive learner weights
+        blended_weights = {}
+        for k in self.strategy_names:
+            learner_w = current_weights.get(k, 0.25)
+            prior_w = regime_priors.get(k, 0.25)
+            blended_weights[k] = prior_w * 0.7 + learner_w * 0.3
+
+        total_w = sum(blended_weights.values())
         if total_w <= 0:
             total_w = 1.0
-        normalized_weights = {k: current_weights.get(k, 0.25) / total_w for k in self.strategy_names}
+        normalized_weights = {k: blended_weights[k] / total_w for k in self.strategy_names}
 
         # Calculate weighted consensus score
         weighted_score = sum(scores_map[k] * normalized_weights[k] for k in self.strategy_names)
 
-        # Determine highest contributor / dominant model
+        # Dominant Model Confirmation:
+        # If the leading model in its natural regime has high conviction,
+        # ensure its directional strength is appropriately captured rather than overly diluted.
         dominant_model = max(self.strategy_names, key=lambda k: abs(scores_map[k]) * normalized_weights[k])
+        dom_score = scores_map[dominant_model]
+        if abs(dom_score) >= 0.40 and (dom_score * weighted_score >= 0):
+            weighted_score = weighted_score * 0.6 + (dom_score * 0.4)
 
         model_details = [
             ModelSignal(name="Momentum Trend (EMA/MACD)", signal=sig_mom, score=s_mom, weight=round(normalized_weights["momentum_trend"], 3), rationale=rat_mom),
