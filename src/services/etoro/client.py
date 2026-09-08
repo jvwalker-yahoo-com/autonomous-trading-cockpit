@@ -1061,14 +1061,6 @@ class EToroClient:
                 "x-user-key": u_key_padded,
                 "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
             }))
-        if u_key_raw.startswith("ey"):
-            orientations.insert(0, ("bearer_user", {
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream",
-                "Authorization": f"Bearer {u_key_raw.replace('Bearer ', '').strip()}",
-                "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
-            }))
-
         if self._prefer_swapped:
             orientations.reverse()
 
