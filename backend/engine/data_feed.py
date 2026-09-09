@@ -45,6 +45,8 @@ class DataFeedManager:
         self.last_quotes: Dict[str, MarketDataPoint] = {}
         self.simulated_states: Dict[str, Dict[str, float]] = {}
         self._quote_cache: Dict[str, Tuple[float, MarketDataPoint]] = {}
+        self._sentiment_cache: Dict[str, Tuple[float, float]] = {}
+        self._finnhub_sentiment_disabled = False
         self._last_external_api_call = 0.0
         self.last_api_call_time = 0.0
         self.api_latency_ms = 12.0
@@ -293,20 +295,33 @@ class DataFeedManager:
     def get_news_sentiment(self, symbol: str) -> float:
         """
         Returns a sentiment score between -1.0 (very bearish) and +1.0 (very bullish).
+        Utilizes 10-minute caching to eliminate blocking external HTTP calls.
         """
-        if self.api_key and len(self.api_key) > 5:
+        now = time.time()
+        cached = self._sentiment_cache.get(symbol)
+        if cached:
+            cached_t, score = cached
+            if (now - cached_t) < 600.0:
+                return score
+
+        # 1. External Finnhub News Sentiment (if supported and enabled)
+        if self.api_key and len(self.api_key) > 5 and not self._finnhub_sentiment_disabled:
             try:
                 url = f"https://finnhub.io/api/v1/news-sentiment?symbol={symbol}&token={self.api_key}"
-                resp = requests.get(url, timeout=2.5)
+                resp = requests.get(url, timeout=1.0)
                 if resp.status_code == 200:
                     data = resp.json()
-                    buzz = data.get("buzz", {})
                     bullish_pct = data.get("sentiment", {}).get("bullishPercent", 0.5)
-                    return round((bullish_pct - 0.5) * 2.0, 2)
+                    score = round((bullish_pct - 0.5) * 2.0, 2)
+                    self._sentiment_cache[symbol] = (now, score)
+                    return score
+                elif resp.status_code in (401, 403, 429):
+                    # Finnhub news-sentiment is not available on standard/free tier — disable to prevent lag
+                    self._finnhub_sentiment_disabled = True
             except Exception:
                 pass
         
-        # Synthetic news sentiment based on price momentum with noise
+        # 2. Mathematical momentum-derived sentiment
         hist = self.history_windows.get(symbol, [100.0])
         if len(hist) > 10:
             denom = hist[-10]
@@ -314,6 +329,10 @@ class DataFeedManager:
                 ret = (hist[-1] - denom) / denom
             else:
                 ret = 0.0
-            sentiment = math.tanh(ret * 20.0) + random.uniform(-0.1, 0.1)
-            return round(max(-1.0, min(1.0, sentiment)), 2)
-        return 0.05
+            sentiment = math.tanh(ret * 20.0) + random.uniform(-0.05, 0.05)
+            score = round(max(-1.0, min(1.0, sentiment)), 2)
+        else:
+            score = 0.05
+
+        self._sentiment_cache[symbol] = (now, score)
+        return score

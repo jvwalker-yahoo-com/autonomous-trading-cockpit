@@ -447,12 +447,12 @@ def get_quadrant(symbol: Optional[str] = None):
     return res["quadrant"]
 
 @app.get("/heartbeat", response_model=HeartbeatOutput, tags=["Cockpit Core"])
-def get_heartbeat():
+async def get_heartbeat():
     """Liveness and system uptime heartbeat"""
     return telemetry_module.heartbeat()
 
 @app.get("/sync_drift", response_model=SyncDriftOutput, tags=["Cockpit Core"])
-def get_sync_drift():
+async def get_sync_drift():
     """Clock drift, market open state, and telemetry latency"""
     return telemetry_module.sync_drift()
 
@@ -764,7 +764,7 @@ def trigger_analysis_tick(symbol: Optional[str] = None):
     return run_analysis_cycle(sym)
 
 @app.get("/api/config", tags=["Configuration"])
-def get_system_config():
+async def get_system_config():
     """Returns current system configuration and API status."""
     return {
         "finnhub_api_key_configured": bool(config.finnhub_api_key and len(config.finnhub_api_key) > 5),
