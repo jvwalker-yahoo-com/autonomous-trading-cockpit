@@ -462,43 +462,59 @@ async def get_sync_drift():
 # EXTENDED PORTFOLIO & LEARNING ENDPOINTS
 # ==========================================
 
+# Cache for full cockpit snapshot to prevent redundant execution cycles on frequent UI polling
+_cockpit_snapshot_cache: Dict[str, Any] = {}
+
 @app.get("/api/cockpit/snapshot", tags=["Cockpit Extended"])
-def get_cockpit_full_snapshot(symbol: Optional[str] = None):
+async def get_cockpit_full_snapshot(symbol: Optional[str] = None):
     """
     Returns full aggregate snapshot of all 9 panels in a single fast call for smooth UI polling.
+    Cached for 3 seconds to ensure instant 0ms responses for UI clients without blocking the engine.
     """
     sym = symbol or active_symbol
-    analysis = run_analysis_cycle(sym)
+    now = time.time()
+    
+    # 1. Check Snapshot Cache
+    cached = _cockpit_snapshot_cache.get(sym)
+    if cached:
+        cached_t, cached_payload = cached
+        if (now - cached_t) < 3.0:
+            return cached_payload
+
+    analysis = await asyncio.to_thread(run_analysis_cycle, sym)
     portfolio = broker.get_portfolio_summary(active_symbol=sym, simulation_mode=config.simulation_mode)
     learning = learner.get_stats()
     heartbeat = telemetry_module.heartbeat()
     sync_drift = telemetry_module.sync_drift()
 
-    return {
-        "state": analysis["regime"],
-        "decision": analysis["decision"],
-        "federation": analysis["federation"],
-        "arbitration": analysis["arbitration"],
-        "anomaly": analysis["anomalies"],
-        "quadrant": analysis["quadrant"],
+    payload = {
+        "state": analysis.get("regime"),
+        "decision": analysis.get("decision"),
+        "federation": analysis.get("federation"),
+        "arbitration": analysis.get("arbitration"),
+        "anomaly": analysis.get("anomalies"),
+        "quadrant": analysis.get("quadrant"),
         "node_events": list(reversed(regime_module.recent_events[-15:])),
         "heartbeat": heartbeat,
         "sync_drift": sync_drift,
         "portfolio": portfolio,
         "learning": learning,
         "quote": {
-            "symbol": analysis["quote"].symbol,
-            "price": analysis["quote"].price,
-            "change": round(analysis["quote"].change, 2),
-            "change_pct": round(analysis["quote"].change_pct, 2),
-            "high": analysis["quote"].high,
-            "low": analysis["quote"].low,
-            "volume": int(analysis["quote"].volume)
-        },
+            "symbol": getattr(analysis.get("quote"), "symbol", sym),
+            "price": getattr(analysis.get("quote"), "price", 0.0),
+            "change": round(getattr(analysis.get("quote"), "change", 0.0), 2),
+            "change_pct": round(getattr(analysis.get("quote"), "change_pct", 0.0), 2),
+            "high": getattr(analysis.get("quote"), "high", 0.0),
+            "low": getattr(analysis.get("quote"), "low", 0.0),
+            "volume": int(getattr(analysis.get("quote"), "volume", 0))
+        } if analysis.get("quote") else {},
         "watchlist": config.watchlist,
         "execution_mode": config.execution_mode,
         "is_configured": etoro_client.is_configured()
     }
+
+    _cockpit_snapshot_cache[sym] = (now, payload)
+    return payload
 
 @app.get("/api/portfolio", response_model=PortfolioSummary, tags=["Portfolio"])
 def get_portfolio():

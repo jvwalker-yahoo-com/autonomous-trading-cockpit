@@ -139,7 +139,11 @@ const el = {
 // POLLING & DATA REFRESH
 // ==========================================
 
+let isFetchingSnapshot = false;
+
 async function fetchCockpitData() {
+  if (isFetchingSnapshot) return;
+  isFetchingSnapshot = true;
   try {
     const url = `${BASE_URL}/api/cockpit/snapshot?symbol=${activeSymbol}`;
     const res = await fetch(url);
@@ -148,8 +152,12 @@ async function fetchCockpitData() {
     renderCockpit(data);
   } catch (err) {
     console.warn("Cockpit telemetry poll error:", err);
-    el.pillSyncDrift.textContent = "OFFLINE";
-    el.pillSyncDrift.className = "pill-val color-danger";
+    if (el.pillSyncDrift) {
+      el.pillSyncDrift.textContent = "OFFLINE";
+      el.pillSyncDrift.className = "pill-val color-danger";
+    }
+  } finally {
+    isFetchingSnapshot = false;
   }
 }
 
@@ -1875,4 +1883,4 @@ try {
 
 pollTimer = setInterval(() => {
   fetchCockpitData().catch(e => console.warn("Poll interval error:", e));
-}, 1500);
+}, 3500);
