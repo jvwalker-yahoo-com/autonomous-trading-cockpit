@@ -44,6 +44,8 @@ class DataFeedManager:
         self.volume_windows: Dict[str, List[float]] = {}
         self.last_quotes: Dict[str, MarketDataPoint] = {}
         self.simulated_states: Dict[str, Dict[str, float]] = {}
+        self._quote_cache: Dict[str, Tuple[float, MarketDataPoint]] = {}
+        self._last_external_api_call = 0.0
         self.last_api_call_time = 0.0
         self.api_latency_ms = 12.0
         
@@ -82,18 +84,29 @@ class DataFeedManager:
     def set_api_key(self, key: str):
         self.api_key = key.strip()
 
-    def get_latest_quote(self, symbol: str) -> MarketDataPoint:
+    def get_latest_quote(self, symbol: str, max_cache_age_sec: float = 15.0) -> MarketDataPoint:
         """
-        Fetches live quote from Finnhub if API key is provided and valid,
-        otherwise updates high-fidelity simulation tick.
+        Fetches live quote with 15s TTL caching and rate limiting.
+        Protects against Finnhub 429 quota exhaustion and eliminates event loop blocking.
         """
+        now = time.time()
         start_t = time.perf_counter()
+
+        # 1. Fast Cache Hit (within TTL)
+        cached = self._quote_cache.get(symbol)
+        if cached:
+            cached_t, cached_quote = cached
+            if (now - cached_t) < max_cache_age_sec:
+                return cached_quote
+
         quote = None
         
-        if self.api_key and len(self.api_key) > 5:
+        # 2. Rate-limited Finnhub API call (at most 1 external call per 0.8s)
+        if self.api_key and len(self.api_key) > 5 and (now - self._last_external_api_call) >= 0.8:
+            self._last_external_api_call = now
             try:
                 url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={self.api_key}"
-                resp = requests.get(url, timeout=3.0)
+                resp = requests.get(url, timeout=1.5)
                 self.api_latency_ms = max(5.0, (time.perf_counter() - start_t) * 1000.0)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -110,12 +123,17 @@ class DataFeedManager:
                             timestamp=float(data.get("t", time.time()))
                         )
             except Exception:
-                pass # Gracefully fall back to simulated tick
+                pass # Gracefully fall back to simulated tick or previous quote
 
         if quote is None:
-            # Fallback high-fidelity simulation
-            self.api_latency_ms = max(4.0, (time.perf_counter() - start_t) * 1000.0 + random.uniform(2.0, 15.0))
+            # Fallback to existing recent quote if available, or high-fidelity simulation
+            if cached:
+                return cached[1]
+            self.api_latency_ms = max(4.0, (time.perf_counter() - start_t) * 1000.0 + random.uniform(2.0, 10.0))
             quote = self._generate_simulated_tick(symbol)
+
+        # Cache valid quote
+        self._quote_cache[symbol] = (now, quote)
 
         # Update rolling buffer
         if symbol not in self.history_windows:

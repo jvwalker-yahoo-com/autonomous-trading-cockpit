@@ -116,11 +116,11 @@ async def start_autonomous_background_worker():
     """Starts the continuous background autonomous execution loop."""
     asyncio.create_task(autonomous_background_worker_loop())
 
-# Permanent Core Anchor Assets — Low-Spread US Equities, Benchmark/Leveraged ETFs & Macro Commodities
+# Permanent Core Anchor Assets — 100% Tradable Low-Spread US Equities ($10 min, 0 crypto, 0 PRIIPs block)
 CORE_ANCHOR_SYMBOLS = [
-    "AAPL", "NVDA", "MSFT", "TSLA", "META", "AMZN", "GOOGL",  # Mega-Cap Tech Titans
-    "SPY", "QQQ", "SOXL", "SQQQ", "IWM",                     # Top Benchmark & Leveraged ETFs
-    "GOLD", "OIL", "SILVER"                                  # Macro Commodities
+    "NVDA", "AAPL", "MSFT", "TSLA", "META", "AMZN", "GOOGL",
+    "AMD", "PLTR", "ARM", "SMCI", "COIN", "MSTR", "HOOD",
+    "SOFI", "ASTS", "RKLB", "LLY", "NFLX", "IREN"
 ]
 
 # Cryptocurrency assets permanently prohibited from trading due to excessive spread costs
@@ -164,11 +164,11 @@ async def autonomous_background_worker_loop():
                 await asyncio.sleep(config.execution_loop_interval * 3)
                 continue
 
-            # Dynamic multi-asset discovery across Equities, Commodities, Indices, and ETFs (Crypto permanently excluded)
+            # Dynamic multi-asset discovery across tradable US Equities (Crypto & structural non-tradables excluded)
             if config.auto_rotate_universe and (now - last_universe_scan > config.universe_scan_interval_sec):
                 last_universe_scan = now
                 try:
-                    top_screened = screener.scan_universe(data_feed_manager=data_feed, top_n=25)
+                    top_screened = await asyncio.to_thread(screener.scan_universe, data_feed, "Stock", 25, True)
                     screened_syms = [s["symbol"] for s in top_screened if s.get("opportunity_score", 0) >= 50 and s["symbol"] not in CRYPTO_SYMBOLS]
                     if screened_syms:
                         clean_watchlist = [s for s in config.watchlist if s not in CRYPTO_SYMBOLS]
@@ -331,6 +331,10 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
                         if order_res.get("success"):
                             logger.info(f"✅ [LIVE ETORO SUCCESS] Order filled for {symbol}: {order_res}")
                             can_execute_broker = True
+                            try:
+                                etoro_client.sync_symbols_to_watchlist([symbol], watchlist_name="Autonomous Cockpit")
+                            except Exception as e:
+                                logger.debug(f"Watchlist auto-sync notice for {symbol}: {e}")
                         else:
                             logger.warning(f"❌ [LIVE ETORO REJECTED] Order failed for {symbol}: {order_res.get('error') or order_res}")
                             can_execute_broker = False
@@ -350,12 +354,6 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
                     rationale=f"Autonomous {trade_dir} entry on {symbol}. {rationale}. Dominant: {federation.federation}",
                     contributing_models=federation.outputs
                 )
-
-            # Auto-sync newly traded stock to eToro Watchlist
-            try:
-                etoro_client.sync_symbols_to_watchlist([symbol], watchlist_name="Autonomous Cockpit")
-            except Exception as e:
-                logger.warning(f"Watchlist auto-sync notice for {symbol}: {e}")
 
     decision = DecisionOutput(
         symbol=symbol,

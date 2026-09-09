@@ -1,21 +1,115 @@
 {
   "initial_capital": 10000.0,
-  "cash": 1300.0,
+  "cash": 1178.07,
   "peak_equity": 1300.0,
-  "positions": {},
-  "trade_ledger": [],
+  "positions": {
+    "AAPL": {
+      "id": "pos_656bffa0",
+      "symbol": "AAPL",
+      "direction": "SHORT",
+      "shares": 0.279,
+      "entry_price": 223.13,
+      "current_price": 223.24,
+      "cost_basis_usd": 62.25,
+      "market_value_usd": 62.25,
+      "unrealized_pnl_usd": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "stop_loss": 228.71,
+      "take_profit": 211.97,
+      "entry_time": "2026-09-09T14:06:58.119451+00:00",
+      "rationale": "Autonomous SHORT entry on AAPL. Ensemble score: -0.62 | Winning model: mean_reversion. Dominant: mean_reversion",
+      "contributing_models": {
+        "momentum_trend": 0.142,
+        "mean_reversion": -1.0,
+        "volatility_breakout": 0.0,
+        "news_sentiment": 0.2
+      }
+    },
+    "NVDA": {
+      "id": "pos_6f6a76d3",
+      "symbol": "NVDA",
+      "direction": "SHORT",
+      "shares": 0.4513,
+      "entry_price": 130.12,
+      "current_price": 130.19,
+      "cost_basis_usd": 58.73,
+      "market_value_usd": 58.73,
+      "unrealized_pnl_usd": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "stop_loss": 133.38,
+      "take_profit": 123.62,
+      "entry_time": "2026-09-09T14:07:04.586910+00:00",
+      "rationale": "Autonomous SHORT entry on NVDA. Ensemble score: -0.59 | Winning model: mean_reversion. Dominant: mean_reversion",
+      "contributing_models": {
+        "momentum_trend": 0.499,
+        "mean_reversion": -1.0,
+        "volatility_breakout": 0.0,
+        "news_sentiment": 0.27
+      }
+    }
+  },
+  "trade_ledger": [
+    {
+      "id": "tr_69de891a",
+      "symbol": "NVDA",
+      "direction": "LONG",
+      "shares": 0.2206,
+      "entry_price": 128.59,
+      "exit_price": 130.19,
+      "cost_basis_usd": 28.37,
+      "exit_value_usd": 28.72,
+      "realized_pnl_usd": 0.35,
+      "realized_pnl_pct": 1.23,
+      "win": true,
+      "entry_time": "2026-09-09T14:06:43.625953+00:00",
+      "exit_time": "2026-09-09T14:07:04.586012+00:00",
+      "entry_rationale": "Autonomous LONG entry on NVDA. Ensemble score: +0.28 | Winning model: momentum_trend. Dominant: momentum_trend",
+      "exit_rationale": "Opposite signal reversal",
+      "contributing_models": {
+        "momentum_trend": 0.506,
+        "mean_reversion": -0.695,
+        "volatility_breakout": 0.0,
+        "news_sentiment": 0.3
+      },
+      "mistake_analysis": null
+    },
+    {
+      "id": "tr_6546bc9e",
+      "symbol": "NVDA",
+      "direction": "SHORT",
+      "shares": 0.2322,
+      "entry_price": 122.93,
+      "exit_price": 128.53,
+      "cost_basis_usd": 28.54,
+      "exit_value_usd": 27.24,
+      "realized_pnl_usd": -1.3,
+      "realized_pnl_pct": -4.56,
+      "win": false,
+      "entry_time": "2026-09-08T15:01:36.842707+00:00",
+      "exit_time": "2026-09-09T14:06:43.624730+00:00",
+      "entry_rationale": "Autonomous SHORT entry on NVDA. Ensemble score: -0.29 | Winning model: momentum_trend. Dominant: momentum_trend",
+      "exit_rationale": "Stop-Loss hit on SHORT at 128.53 (Target SL: 126.00)",
+      "contributing_models": {
+        "momentum_trend": -0.435,
+        "mean_reversion": 0.0,
+        "volatility_breakout": 0.0,
+        "news_sentiment": -0.09
+      },
+      "mistake_analysis": "Adverse trend continuation against SHORT position on NVDA hitting Stop-Loss."
+    }
+  ],
   "learner_weights": {
-    "momentum_trend": 0.25,
-    "mean_reversion": 0.25,
-    "volatility_breakout": 0.25,
-    "news_sentiment": 0.25
+    "momentum_trend": 0.2328,
+    "mean_reversion": 0.2187,
+    "volatility_breakout": 0.2187,
+    "news_sentiment": 0.3298
   },
   "mistake_history": [],
-  "total_trades_evaluated": 0,
-  "winning_trades_count": 0,
-  "losing_trades_count": 0,
-  "total_win_usd": 0.0,
-  "total_loss_usd": 0.0,
+  "total_trades_evaluated": 2,
+  "winning_trades_count": 1,
+  "losing_trades_count": 1,
+  "total_win_usd": 0.35,
+  "total_loss_usd": 1.3,
   "settings": {
     "execution_mode": "demo"
   }

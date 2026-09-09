@@ -165,11 +165,22 @@ PROHIBITED_CRYPTO = {
     "SHIB", "LTC", "UNI", "RENDER", "FET", "SUI", "PEPE", "ALGO", "ATOM", "FTM"
 }
 
+# Assets with structural execution restrictions on eToro UK retail accounts:
+# 1. Commodities require $1,000 minimum exposure on eToro and buy is restricted.
+# 2. US-domiciled ETFs are restricted by UK PRIIPs regulations.
+UNTRADABLE_RETAIL_SYMBOLS = {
+    "GOLD", "SILVER", "OIL", "NATGAS", "COPPER", "PLATINUM", "PALLADIUM",
+    "GASOLINE", "SUGAR", "COTTON", "COCOA", "COFFEE", "WHEAT", "CORN",
+    "SPY", "QQQ", "IWM", "DIA", "VOO", "VTI", "SOXL", "SOXS", "TQQQ",
+    "SQQQ", "BULL", "UPRO", "NVDL", "TSLL", "LABU", "FNGU", "SMH",
+    "XLK", "XLF", "XLE", "XLV", "XLI", "XBI", "URA", "ARKK", "GDX", "TAN", "TLT"
+}
+
 class MarketScreener:
     """Scans all multi-asset instruments across Commodities, Indices, ETFs, and Equities (Crypto Deactivated)."""
 
     @staticmethod
-    def scan_universe(data_feed_manager=None, category_filter: Optional[str] = None, top_n: int = 35) -> List[Dict[str, Any]]:
+    def scan_universe(data_feed_manager=None, category_filter: Optional[str] = None, top_n: int = 35, tradable_only: bool = False) -> List[Dict[str, Any]]:
         """
         Scans multi-asset instruments and ranks by quantitative opportunity score.
         Evaluates:
@@ -189,7 +200,12 @@ class MarketScreener:
             if symbol in PROHIBITED_CRYPTO or info.get("category", "").lower() == "crypto" or info.get("asset_class", "").lower() == "crypto":
                 continue
 
-            if category_filter and category_filter.lower() != "all":
+            # When screening for autonomous trading, exclude commodities ($1,000 margin) and PRIIPs ETFs
+            if tradable_only or (category_filter and category_filter.lower() == "stock"):
+                if symbol in UNTRADABLE_RETAIL_SYMBOLS or info.get("asset_class", "").lower() != "stock":
+                    continue
+
+            if category_filter and category_filter.lower() != "all" and category_filter.lower() != "stock":
                 if info.get("category", "").lower() != category_filter.lower() and info.get("asset_class", "").lower() != category_filter.lower():
                     continue
 

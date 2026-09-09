@@ -41,34 +41,25 @@ INITIAL_SEED_INSTRUMENTS: List[Dict[str, Any]] = [
 
     # === 2. US EQUITIES (Tech, AI, Growth & Blue Chips) ===
     {"symbol": "AAPL", "instrument_id": 1001, "name": "Apple Inc", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "MSFT", "instrument_id": 1002, "name": "Microsoft Corp", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "GOOGL", "instrument_id": 1003, "name": "Alphabet Inc", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "AMZN", "instrument_id": 1004, "name": "Amazon.com Inc", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "TSLA", "instrument_id": 1005, "name": "Tesla Inc", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "META", "instrument_id": 1006, "name": "Meta Platforms", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "NVDA", "instrument_id": 1007, "name": "NVIDIA Corp", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "NFLX", "instrument_id": 1008, "name": "Netflix Inc", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "AMD", "instrument_id": 1009, "name": "Advanced Micro Devices", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "INTC", "instrument_id": 1010, "name": "Intel Corp", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "AVGO", "instrument_id": 1012, "name": "Broadcom Inc", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "PLTR", "instrument_id": 1014, "name": "Palantir Technologies", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "ARM", "instrument_id": 1015, "name": "Arm Holdings", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "SMCI", "instrument_id": 1016, "name": "Super Micro Computer", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "IREN", "instrument_id": 1017, "name": "Iris Energy", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "COIN", "instrument_id": 1018, "name": "Coinbase Global", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "MSTR", "instrument_id": 1019, "name": "MicroStrategy Inc", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "HOOD", "instrument_id": 1020, "name": "Robinhood Markets", "category": "Fintech & Growth", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "SOFI", "instrument_id": 1021, "name": "SoFi Technologies", "category": "Fintech & Growth", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "RIVN", "instrument_id": 1022, "name": "Rivian Automotive", "category": "EVs & Clean Tech", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "ASTS", "instrument_id": 1023, "name": "AST SpaceMobile", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "RKLB", "instrument_id": 1024, "name": "Rocket Lab USA", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "BABA", "instrument_id": 1025, "name": "Alibaba Group", "category": "Global Blue Chips", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "TSM", "instrument_id": 1026, "name": "Taiwan Semiconductor", "category": "Global Blue Chips", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "LLY", "instrument_id": 1027, "name": "Eli Lilly and Co", "category": "Global Blue Chips", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "CRWD", "instrument_id": 1028, "name": "CrowdStrike Holdings", "category": "Cybersecurity", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "CLSK", "instrument_id": 1029, "name": "CleanSpark Inc", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "MARA", "instrument_id": 1051, "name": "Marathon Digital", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "APLD", "instrument_id": 1052, "name": "Applied Digital", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "NVDA", "instrument_id": 1137, "name": "NVIDIA Corporation", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "MSFT", "instrument_id": 1004, "name": "Microsoft Corp", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "TSLA", "instrument_id": 1111, "name": "Tesla Motors, Inc.", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "META", "instrument_id": 1003, "name": "Meta Platforms Inc", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "AMZN", "instrument_id": 1005, "name": "Amazon.com Inc", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "GOOGL", "instrument_id": 6434, "name": "Alphabet Inc Class A", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "AMD", "instrument_id": 1832, "name": "Advanced Micro Devices Inc", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "NFLX", "instrument_id": 1127, "name": "Netflix, Inc.", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "PLTR", "instrument_id": 7991, "name": "Palantir Technologies Inc.", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "ARM", "instrument_id": 1365, "name": "ARM Holdings PLC", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "SMCI", "instrument_id": 1069, "name": "Super Micro Computer, Inc", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "IREN", "instrument_id": 10736, "name": "Iris Energy Ltd", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "COIN", "instrument_id": 6168, "name": "Coinbase Global Inc", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "MSTR", "instrument_id": 6473, "name": "Strategy Inc", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "HOOD", "instrument_id": 9272, "name": "Robinhood Markets Inc.", "category": "Fintech & Growth", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "SOFI", "instrument_id": 9255, "name": "SoFi Technologies Inc", "category": "Fintech & Growth", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "ASTS", "instrument_id": 10088, "name": "AST SpaceMobile Inc", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "RKLB", "instrument_id": 9085, "name": "Rocket Lab Corp", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "LLY", "instrument_id": 1567, "name": "Eli Lilly & Co", "category": "Global Blue Chips", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
 
     # === 3. BENCHMARK & LEVERAGED ETFS ===
     {"symbol": "SPY", "instrument_id": 2001, "name": "SPDR S&P 500 ETF", "category": "ETFs", "asset_class": "ETF", "trading_hours": "14:30 - 21:00 UK"},
@@ -179,29 +170,33 @@ class InstrumentsDBManager:
             conn.commit()
 
     def _seed_if_empty(self):
-        """Seeds master universe instruments if table is empty or sparsely populated."""
+        """Seeds or updates master universe instruments so authoritative IDs are always present."""
         with self._get_connection() as conn:
-            count = conn.execute("SELECT COUNT(*) as cnt FROM instruments;").fetchone()["cnt"]
-            if count < len(INITIAL_SEED_INSTRUMENTS):
-                logger.info(f"[InstrumentsDB] Seeding {len(INITIAL_SEED_INSTRUMENTS)} master universe tickers into SQLite...")
-                now_str = datetime.now(timezone.utc).isoformat()
-                for inst in INITIAL_SEED_INSTRUMENTS:
-                    conn.execute("""
-                        INSERT OR REPLACE INTO instruments 
-                        (symbol, instrument_id, name, category, asset_class, trading_hours, is_active, last_updated)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-                    """, (
-                        inst["symbol"].upper().strip(),
-                        int(inst["instrument_id"]),
-                        inst.get("name", inst["symbol"]),
-                        inst.get("category", "General"),
-                        inst.get("asset_class", "Stock"),
-                        inst.get("trading_hours", "eToro Hours"),
-                        1,
-                        now_str
-                    ))
-                conn.commit()
-                logger.info(f"✓ [InstrumentsDB] Pre-seeded SQLite database at {self.db_path} ({len(INITIAL_SEED_INSTRUMENTS)} assets).")
+            now_str = datetime.now(timezone.utc).isoformat()
+            for inst in INITIAL_SEED_INSTRUMENTS:
+                conn.execute("""
+                    INSERT INTO instruments 
+                    (symbol, instrument_id, name, category, asset_class, trading_hours, is_active, last_updated)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(symbol) DO UPDATE SET
+                        instrument_id = excluded.instrument_id,
+                        name = excluded.name,
+                        category = excluded.category,
+                        asset_class = excluded.asset_class,
+                        trading_hours = excluded.trading_hours,
+                        last_updated = excluded.last_updated;
+                """, (
+                    inst["symbol"].upper().strip(),
+                    int(inst["instrument_id"]),
+                    inst.get("name", inst["symbol"]),
+                    inst.get("category", "General"),
+                    inst.get("asset_class", "Stock"),
+                    inst.get("trading_hours", "eToro Hours"),
+                    1,
+                    now_str
+                ))
+            conn.commit()
+            logger.info(f"✓ [InstrumentsDB] Synced SQLite database at {self.db_path} with authoritative seed IDs ({len(INITIAL_SEED_INSTRUMENTS)} assets).")
 
     def get_etoro_id(self, symbol: str) -> Optional[int]:
         """

@@ -50,14 +50,14 @@ class SystemConfig(BaseModel):
     market_close_hour_utc: int = 20 # 20:00 UTC = 21:00 UK BST (16:00 US EST)
     market_close_minute_utc: int = 0
     
-    # Target Watchlist — Mega-cap tech + high-beta stocks + leveraged & benchmark ETFs + macro commodities (Crypto deactivated)
+    # Target Watchlist — 100% Tradable US Mega-Cap Tech & High-Beta Equities ($10 min, 0 crypto, 0 PRIIPs block)
     watchlist: List[str] = [
-        "NVDA", "AAPL", "MSFT", "TSLA", "META", "AMZN", "GOOGL",  # Mega-cap tech
-        "SPY", "QQQ", "SOXL", "SQQQ", "IWM",                      # ETFs
-        "GOLD", "OIL", "SOFI", "MARA"                             # Commodities & High-beta equities
+        "NVDA", "AAPL", "MSFT", "TSLA", "META", "AMZN", "GOOGL",
+        "AMD", "PLTR", "ARM", "SMCI", "COIN", "MSTR", "HOOD",
+        "SOFI", "ASTS", "RKLB", "LLY", "NFLX", "IREN"
     ]
     auto_rotate_universe: bool = os.getenv("AUTO_ROTATE_UNIVERSE", "true").lower() in ("true", "1", "yes")
-    universe_scan_interval_sec: float = float(os.getenv("UNIVERSE_SCAN_INTERVAL_SEC", "30.0"))
+    universe_scan_interval_sec: float = float(os.getenv("UNIVERSE_SCAN_INTERVAL_SEC", "60.0"))
     
     # Email Reporting (PDF Delivery to lisawalker6898@gmail.com)
     report_recipient_email: str = os.getenv("REPORT_RECIPIENT_EMAIL", "lisawalker6898@gmail.com")

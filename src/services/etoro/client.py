@@ -64,30 +64,30 @@ SYMBOL_TO_ETORO_ID: Dict[str, int] = {
 
     # === US EQUITIES (Tech, AI, Growth, Blue Chips) ===
     "AAPL":     1001,     # Apple — CONFIRMED from official eToro API docs
-    "MSFT":     1002,     # Microsoft
-    "GOOGL":    1003,     # Alphabet
-    "AMZN":     1004,     # Amazon
-    "TSLA":     1005,     # Tesla
-    "META":     1006,     # Meta
-    "NVDA":     1007,     # NVIDIA
-    "NFLX":     1008,     # Netflix
-    "AMD":      1009,     # AMD
+    "NVDA":     1137,     # NVIDIA Corp — CONFIRMED via MCP
+    "MSFT":     1004,     # Microsoft — CONFIRMED via MCP
+    "TSLA":     1111,     # Tesla Motors — CONFIRMED via MCP
+    "META":     1003,     # Meta Platforms — CONFIRMED via MCP
+    "AMZN":     1005,     # Amazon.com — CONFIRMED via MCP
+    "GOOGL":    6434,     # Alphabet Inc — CONFIRMED via MCP
+    "AMD":      1832,     # AMD — CONFIRMED via MCP
+    "NFLX":     1127,     # Netflix — CONFIRMED via MCP
+    "PLTR":     7991,     # Palantir — CONFIRMED via MCP
+    "ARM":      1365,     # Arm Holdings — CONFIRMED via MCP
+    "SMCI":     1069,     # Super Micro Computer — CONFIRMED via MCP
+    "IREN":     10736,    # Iris Energy — CONFIRMED via MCP
+    "COIN":     6168,     # Coinbase Global — CONFIRMED via MCP
+    "MSTR":     6473,     # Strategy Inc — CONFIRMED via MCP
+    "HOOD":     9272,     # Robinhood Markets — CONFIRMED via MCP
+    "SOFI":     9255,     # SoFi Technologies — CONFIRMED via MCP
+    "ASTS":     10088,    # AST SpaceMobile — CONFIRMED via MCP
+    "RKLB":     9085,     # Rocket Lab — CONFIRMED via MCP
+    "LLY":      1567,     # Eli Lilly — CONFIRMED via MCP
     "INTC":     1010,     # Intel
     "AVGO":     1012,     # Broadcom
-    "PLTR":     1014,     # Palantir
-    "ARM":      1015,     # Arm Holdings
-    "SMCI":     1016,     # Super Micro Computer
-    "IREN":     1017,     # Iris Energy
-    "COIN":     1018,     # Coinbase Global
-    "MSTR":     1019,     # MicroStrategy
-    "HOOD":     1020,     # Robinhood
-    "SOFI":     1021,     # SoFi Technologies
     "RIVN":     1022,     # Rivian Automotive
-    "ASTS":     1023,     # AST SpaceMobile
-    "RKLB":     1024,     # Rocket Lab USA
     "BABA":     1025,     # Alibaba Group
     "TSM":      1026,     # Taiwan Semiconductor
-    "LLY":      1027,     # Eli Lilly
     "CRWD":     1028,     # CrowdStrike
     "CLSK":     1029,     # CleanSpark
     "MARA":     1051,     # Marathon Digital
