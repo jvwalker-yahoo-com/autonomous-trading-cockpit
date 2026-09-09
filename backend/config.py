@@ -27,7 +27,7 @@ class SystemConfig(BaseModel):
     # Mode & Execution ('demo' = Virtual Simulation & Self-Learning, 'live' = Real eToro API Execution)
     execution_mode: str = os.getenv("EXECUTION_MODE", "demo").lower() # 'demo' or 'live'
     simulation_mode: bool = os.getenv("SIMULATION_MODE", "true").lower() in ("true", "1", "yes")
-    execution_loop_interval: float = float(os.getenv("EXECUTION_LOOP_INTERVAL", "2.0")) # seconds
+    execution_loop_interval: float = float(os.getenv("EXECUTION_LOOP_INTERVAL", "8.0")) # seconds
     
     # Portfolio & Sizing (Calibrated for £1,000 GBP / ~$1,300 USD account)
     initial_capital: float = float(os.getenv("INITIAL_CAPITAL", "1300.0")) # £1,000 GBP ≈ $1,300 USD

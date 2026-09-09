@@ -133,6 +133,8 @@ CRYPTO_TRADING_DISABLED = True
 
 async def autonomous_background_worker_loop():
     logger.info("Autonomous Background Trading Loop initialized (Crypto Permanently Disabled).")
+    # Startup grace period: allows Uvicorn to bind port 0.0.0.0:$PORT and pass Render health checks
+    await asyncio.sleep(4.0)
     last_universe_scan = 0.0
     last_nightly_sync_date = ""
 
@@ -1329,24 +1331,30 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
-    @app.get("/cockpit", include_in_schema=False)
-    @app.get("/app", include_in_schema=False)
-    async def serve_cockpit_ui():
-        index_file = FRONTEND_DIR / "index.html"
-        if index_file.exists():
-            return FileResponse(index_file)
-        return JSONResponse({"error": "Frontend UI index.html not found"}, status_code=404)
+@app.get("/", include_in_schema=False)
+@app.get("/cockpit", include_in_schema=False)
+@app.get("/app", include_in_schema=False)
+async def serve_cockpit_ui():
+    index_file = FRONTEND_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    return JSONResponse({"status": "healthy", "service": "autonomous-trading-cockpit"}, status_code=200)
 
-    @app.get("/style.css", include_in_schema=False)
-    async def serve_css():
-        css_file = FRONTEND_DIR / "style.css"
-        if css_file.exists():
-            return FileResponse(css_file, media_type="text/css")
-        return JSONResponse({"error": "style.css not found"}, status_code=404)
+@app.head("/", include_in_schema=False)
+@app.head("/heartbeat", include_in_schema=False)
+async def serve_head_health():
+    return Response(status_code=200)
 
-    @app.get("/dashboard.js", include_in_schema=False)
-    async def serve_js():
-        js_file = FRONTEND_DIR / "dashboard.js"
-        if js_file.exists():
-            return FileResponse(js_file, media_type="application/javascript")
-        return JSONResponse({"error": "dashboard.js not found"}, status_code=404)
+@app.get("/style.css", include_in_schema=False)
+async def serve_css():
+    css_file = FRONTEND_DIR / "style.css"
+    if css_file.exists():
+        return FileResponse(css_file, media_type="text/css")
+    return JSONResponse({"error": "style.css not found"}, status_code=404)
+
+@app.get("/dashboard.js", include_in_schema=False)
+async def serve_js():
+    js_file = FRONTEND_DIR / "dashboard.js"
+    if js_file.exists():
+        return FileResponse(js_file, media_type="application/javascript")
+    return JSONResponse({"error": "dashboard.js not found"}, status_code=404)
