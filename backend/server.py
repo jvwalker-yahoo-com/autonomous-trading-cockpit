@@ -142,6 +142,7 @@ async def autonomous_background_worker_loop():
     await asyncio.sleep(4.0)
     last_universe_scan = 0.0
     last_nightly_sync_date = ""
+    last_auth_warn = 0.0
 
     # Ensure core anchor assets are in watchlist on boot (strictly excluding any crypto)
     config.watchlist = [s for s in dict.fromkeys(CORE_ANCHOR_SYMBOLS + config.watchlist) if s not in CRYPTO_SYMBOLS]
@@ -152,6 +153,14 @@ async def autonomous_background_worker_loop():
             now_utc = datetime.now(timezone.utc)
             now_uk = get_uk_now()
             is_weekend = now_utc.weekday() in (5, 6) # Saturday (5) or Sunday (6)
+
+            # Prominently log auth required notice once per 90s if eToro is in 401 lockout
+            if etoro_client.is_in_auth_cooldown() and (now - last_auth_warn > 90.0):
+                last_auth_warn = now
+                logger.warning(
+                    "🔑 [ETORO AUTH NOTICE] Live orders paused: eToro returned HTTP 401 Unauthorized. "
+                    "Please update your ETORO_USER_KEY in Cockpit Settings (⚙️ CONFIG) or Render Environment Variables."
+                )
 
             # Scheduled 10:00 PM UK Time eToro SQLite Database Sync
             # Automatically syncs newly discovered instruments from eToro catalog every night at 22:00 UK time
@@ -315,7 +324,10 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
 
             # When in Live mode, dispatch real order to official eToro REST API
             if config.execution_mode == "live" and etoro_client.is_configured():
-                if trade_dir == "SHORT" and symbol in CRYPTO_SYMBOLS:
+                if etoro_client.is_in_auth_cooldown():
+                    logger.debug(f"[eToro Auth Paused] Skipping live order on {symbol} - waiting for fresh credentials.")
+                    can_execute_broker = False
+                elif trade_dir == "SHORT" and symbol in CRYPTO_SYMBOLS:
                     logger.info(f"ℹ️ [CRYPTO LONG-ONLY] Skipping autonomous SHORT on {symbol}: Crypto is spot long-only on eToro.")
                     can_execute_broker = False
                 else:
@@ -345,7 +357,15 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
                             except Exception as e:
                                 logger.debug(f"Watchlist auto-sync notice for {symbol}: {e}")
                         else:
-                            logger.warning(f"❌ [LIVE ETORO REJECTED] Order failed for {symbol}: {order_res.get('error') or order_res}")
+                            err_payload = order_res.get('error') or order_res
+                            err_str = str(err_payload).lower()
+                            if order_res.get("status_code") == 401 or "unauthorized" in err_str or "re-authenticate" in err_str:
+                                logger.warning(
+                                    f"🔑 [ETORO RE-AUTHENTICATION REQUIRED] Order failed for {symbol}: eToro rejected credentials (HTTP 401 Unauthorized). "
+                                    f"Live orders paused for 60s to protect API rate limits. Please paste a fresh ETORO_USER_KEY in Cockpit Settings (⚙️ CONFIG)."
+                                )
+                            else:
+                                logger.warning(f"❌ [LIVE ETORO REJECTED] Order failed for {symbol}: {err_payload}")
                             can_execute_broker = False
                     except Exception as e:
                         logger.error(f"eToro live order execution exception: {e}")
@@ -903,6 +923,9 @@ def get_etoro_status():
         "api_key_b64_json_valid": api_valid,
         "api_key_payload_keys": api_keys,
         "api_key_application_name": api_app,
+        "auth_cooldown": etoro_client.is_in_auth_cooldown(),
+        "auth_cooldown_remaining_sec": max(0, int(etoro_client._auth_cooldown_until - time.time())) if etoro_client.is_in_auth_cooldown() else 0,
+        "last_auth_error": etoro_client._last_auth_error,
     }
 
 

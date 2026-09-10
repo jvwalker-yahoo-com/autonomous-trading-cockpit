@@ -405,6 +405,35 @@ def test_etoro_api_client_and_mode_switching():
     assert r_mcp.status_code == 200
     assert "success" in r_mcp.json() or "error" in r_mcp.json()
 
+    # 9. Test eToro Auth Cooldown & 401 Re-Auth Safeguard
+    from backend.server import etoro_client as server_etoro_client
+    assert not client_instance.is_in_auth_cooldown()
+    client_instance.trigger_auth_cooldown("Test 401 Unauthorized", cooldown_sec=15.0)
+    assert client_instance.is_in_auth_cooldown() is True
+    
+    # Verify create_order immediately suppresses orders during cooldown without burning API calls
+    cooldown_order = client_instance.create_order(symbol="AAPL", amount_usd=50.0)
+    assert cooldown_order["success"] is False
+    assert cooldown_order["status_code"] == 401
+    assert "re-auth cooldown" in cooldown_order["error"]
+
+    # Verify /api/etoro/status reflects active cooldown on server client
+    server_etoro_client.trigger_auth_cooldown("Test 401 Unauthorized", cooldown_sec=15.0)
+    r_status = test_app_client.get("/api/etoro/status")
+    assert r_status.status_code == 200
+    stat_json = r_status.json()
+    assert stat_json["auth_cooldown"] is True
+    assert stat_json["auth_cooldown_remaining_sec"] > 0
+    assert "Test 401" in stat_json["last_auth_error"]
+
+    # Clear cooldown for subsequent tests
+    client_instance._auth_cooldown_until = 0.0
+    client_instance._last_auth_error = ""
+    server_etoro_client._auth_cooldown_until = 0.0
+    server_etoro_client._last_auth_error = ""
+    assert client_instance.is_in_auth_cooldown() is False
+    assert server_etoro_client.is_in_auth_cooldown() is False
+
 
 def test_instruments_sqlite_db_and_endpoints():
     """

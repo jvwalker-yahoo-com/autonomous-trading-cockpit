@@ -199,6 +199,18 @@ class EToroClient:
         self._instrument_cache: Dict[str, int] = dict(SYMBOL_TO_ETORO_ID)
         self._ids_bootstrapped: bool = False
         self._prefer_swapped: bool = False  # Set by test_connection if swapped orientation works
+        self._auth_cooldown_until: float = 0.0
+        self._last_auth_error: str = ""
+
+    def is_in_auth_cooldown(self) -> bool:
+        """Returns True if client is in cooldown following an HTTP 401 Unauthorized rejection."""
+        return time.time() < self._auth_cooldown_until
+
+    def trigger_auth_cooldown(self, reason: str = "HTTP 401 Unauthorized", cooldown_sec: float = 60.0):
+        """Activates auth cooldown to suppress repeated invalid order dispatches and prevent 429 rate limit locks."""
+        self._auth_cooldown_until = time.time() + cooldown_sec
+        self._last_auth_error = reason
+        logger.warning(f"🔒 [eToro Auth Cooldown Activated] Outbound orders paused for {cooldown_sec:.0f}s: {reason}")
 
     def bootstrap_instrument_ids(self) -> Dict[str, int]:
         """
@@ -277,16 +289,18 @@ class EToroClient:
             "Accept": "application/json",
             "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-Client)"
         }
+        u_clean = (user_key or "").strip().strip('"').strip("'")
+        a_clean = (api_key or "").strip().strip('"').strip("'")
         if orientation == "bearer_user":
-            tok = user_key.replace("Bearer ", "").strip()
+            tok = u_clean.replace("Bearer ", "").strip()
             return {**base, "Authorization": f"Bearer {tok}"}
         elif orientation == "bearer_api":
-            tok = api_key.replace("Bearer ", "").strip()
+            tok = a_clean.replace("Bearer ", "").strip()
             return {**base, "Authorization": f"Bearer {tok}"}
         elif orientation == "swapped":
-            return {**base, "x-api-key": user_key, "x-user-key": api_key}
+            return {**base, "x-api-key": u_clean, "x-user-key": a_clean}
         else:  # standard
-            return {**base, "x-api-key": api_key, "x-user-key": user_key}
+            return {**base, "x-api-key": a_clean, "x-user-key": u_clean}
 
     def _get_auth_header_variants(self) -> List[Dict[str, str]]:
         """
@@ -1027,29 +1041,30 @@ class EToroClient:
 
         mcp_url = "https://mcp.public-api.etoro.com"
         OFFICIAL_ETORO_MCP_API_KEY = "sdgdskldFPLGfjHn1421dgnlxdGTbngdflg6290bRjslfihsjhSDsdgGHH25hjf"
-        u_key_raw = (self.user_key or "").strip()
+        u_key_raw = (self.user_key or "").strip().strip('"').strip("'")
+        a_key_raw = (self.api_key or "").strip().strip('"').strip("'")
         u_key_padded = u_key_raw.rstrip("_") + "==" if u_key_raw.endswith("__") else u_key_raw
 
         orientations = [
             ("standard", {
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream",
-                "x-api-key": self.api_key,
-                "x-user-key": self.user_key,
+                "x-api-key": a_key_raw,
+                "x-user-key": u_key_raw,
                 "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
             }),
             ("official_partner", {
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream",
                 "x-api-key": OFFICIAL_ETORO_MCP_API_KEY,
-                "x-user-key": self.user_key,
+                "x-user-key": u_key_raw,
                 "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
             }),
             ("swapped", {
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream",
-                "x-api-key": self.user_key,
-                "x-user-key": self.api_key,
+                "x-api-key": u_key_raw,
+                "x-user-key": a_key_raw,
                 "User-Agent": "Autonomous-Trading-Cockpit/2.0 (eToro-MCP)"
             })
         ]
@@ -1127,6 +1142,11 @@ class EToroClient:
             except Exception as e:
                 last_err = f"Exception ({label}): {e}"
                 logger.debug(f"[eToro MCP - {tool_name} - {label}] {e}")
+
+        # If all orientations failed with auth error, enter auth cooldown
+        err_lower = str(last_err).lower()
+        if "401" in err_lower or "unauthorized" in err_lower or "re-authenticate" in err_lower or "not valid" in err_lower or "expired" in err_lower:
+            self.trigger_auth_cooldown(f"MCP credentials rejected: {last_err}")
 
         return {"success": False, "error": last_err}
 
@@ -1389,6 +1409,16 @@ class EToroClient:
         is_buy = direction.upper() in ("BUY", "LONG")
         sym = (symbol or "").strip().upper()
 
+        # Suppress order attempts during auth failure cooldown to prevent API hammering and 429 rate limit locks
+        if self.is_in_auth_cooldown():
+            rem = max(1, int(self._auth_cooldown_until - time.time()))
+            logger.debug(f"[eToro] Order for {sym or instrument_id} suppressed: Auth cooldown active ({rem}s remaining).")
+            return {
+                "success": False,
+                "status_code": 401,
+                "error": f"eToro credentials rejected (HTTP 401). Order suppressed during re-auth cooldown ({rem}s remaining)."
+            }
+
         # Permanent deactivation of Crypto trading per user mandate due to high spread costs
         if sym in CRYPTO_SYMBOLS:
             logger.warning(f"🚫 [eToro] Trade rejected for {sym}: Cryptocurrency trading is permanently deactivated due to excessive spread costs.")
@@ -1416,6 +1446,15 @@ class EToroClient:
             # If rejected by explicit business rules (e.g. leverage/hours/insufficient funds), return it
             if mcp_res.get("verdict") == "rejected" and "auth" not in mcp_res.get("error", "").lower():
                 return mcp_res
+            # If rejected due to invalid/expired credentials, trigger cooldown and return immediately (do not hammer REST with invalid keys)
+            mcp_err_str = str(mcp_res.get("error", "")).lower()
+            if "401" in mcp_err_str or "unauthorized" in mcp_err_str or "re-authenticate" in mcp_err_str or "not valid" in mcp_err_str or "expired" in mcp_err_str:
+                self.trigger_auth_cooldown(f"MCP prepare-trade auth failure: {mcp_res.get('error')}")
+                return {
+                    "success": False,
+                    "status_code": 401,
+                    "error": mcp_res.get("error", "eToro credentials rejected (HTTP 401).")
+                }
             logger.info(f"[eToro MCP -> REST Fallback] MCP returned ({mcp_res.get('error')}) — falling through to Direct REST v2 Execution...")
 
         # 2. Official eToro v2 Execution Request (Docs: api-portal.etoro.com/core/guides/market-orders)
@@ -1448,6 +1487,10 @@ class EToroClient:
         if success or code in (200, 201, 202):
             logger.info(f"⚡ [eToro Live v2 Order Submitted] {direction} ${amount_usd:.2f} on {sym or instrument_id} -> HTTP {code}: {data}")
             return {"success": True, "status_code": code, "order": data}
+        elif code == 401:
+            self.trigger_auth_cooldown("Direct REST v2 execution returned HTTP 401 Unauthorized")
+            logger.warning(f"[eToro v2 Order Rejected] POST {endpoint} -> HTTP 401 Unauthorized: {data}")
+            return {"success": False, "status_code": 401, "order": v2_payload, "error": data}
         else:
             logger.warning(f"[eToro v2 Order Attempt] POST {endpoint} -> HTTP {code}: {data}")
 

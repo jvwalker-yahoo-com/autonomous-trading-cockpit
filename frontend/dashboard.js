@@ -656,11 +656,31 @@ async function fetchEtoroStatus() {
       const activeMode = (localMode === "live") ? "live" : (data.execution_mode || "live");
       localStorage.setItem("execution_mode", activeMode);
       updateExecutionModeUI(activeMode);
+
+      // Handle eToro Auth Cooldown / 401 Notice Banner
+      const authBanner = document.getElementById("etoroAuthAlertBanner");
+      const authMsg = document.getElementById("etoroAuthAlertMsg");
+      if (authBanner) {
+        if (data.auth_cooldown || (activeMode === "live" && data.last_auth_error)) {
+          authBanner.classList.remove("hidden");
+          if (authMsg && data.last_auth_error) {
+            authMsg.textContent = `${data.last_auth_error} (Cooldown: ${data.auth_cooldown_remaining_sec || 60}s remaining). Please paste a fresh ETORO_USER_KEY.`;
+          }
+        } else {
+          authBanner.classList.add("hidden");
+        }
+      }
     }
   } catch (e) {
     console.error("Error fetching eToro status:", e);
   }
 }
+
+const btnOpenConfigFromAlert = document.getElementById("btnOpenConfigFromAlert");
+if (btnOpenConfigFromAlert && el.btnSettings) {
+  btnOpenConfigFromAlert.addEventListener("click", () => el.btnSettings.click());
+}
+
 fetchEtoroStatus();
 
 if (el.btnModeToggle) {
