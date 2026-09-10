@@ -374,6 +374,12 @@ def test_etoro_api_client_and_mode_switching():
         config.simulation_mode = orig_sim
         broker.save_state({"execution_mode": orig_mode, "simulation_mode": orig_sim})
 
+    # 4b. Test POST /api/config endpoint update
+    r_cfg = test_app_client.post("/api/config", json={"risk_per_trade_pct": 0.02})
+    assert r_cfg.status_code == 200
+    assert r_cfg.json()["status"] == "updated"
+    assert "config" in r_cfg.json()
+
     # 5. Test Instrument ID Resolution
     # AAPL=1001 confirmed from official eToro API docs.
     # BTC=100000 consistent across community eToro API wrappers.

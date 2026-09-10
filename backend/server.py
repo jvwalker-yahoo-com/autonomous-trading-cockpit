@@ -8,7 +8,7 @@ import time
 import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -809,7 +809,7 @@ def trigger_analysis_tick(symbol: Optional[str] = None):
     return run_analysis_cycle(sym)
 
 @app.get("/api/config", tags=["Configuration"])
-async def get_system_config():
+def get_system_config():
     """Returns current system configuration and API status."""
     return {
         "finnhub_api_key_configured": bool(config.finnhub_api_key and len(config.finnhub_api_key) > 5),
