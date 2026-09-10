@@ -120,8 +120,9 @@ async def start_autonomous_background_worker():
     """Starts the continuous background autonomous execution loop."""
     asyncio.create_task(autonomous_background_worker_loop())
 
-# Permanent Core Anchor Assets — 100% Tradable Low-Spread US Equities ($10 min, 0 crypto, 0 PRIIPs block)
+# Permanent Core Anchor Assets — European Morning (UK100, GER40) + US Tech Titans ($10 min, 0 crypto, 0 PRIIPs block)
 CORE_ANCHOR_SYMBOLS = [
+    "UK100", "GER40",
     "NVDA", "AAPL", "MSFT", "TSLA", "META", "AMZN", "GOOGL",
     "AMD", "PLTR", "ARM", "SMCI", "COIN", "MSTR", "HOOD",
     "SOFI", "ASTS", "RKLB", "LLY", "NFLX", "IREN"
@@ -298,10 +299,12 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
 
     # Execution if arbitration approved
     if arbitration.approved and signal in ("BUY", "SHORT"):
-        # Position sizing based on confidence & risk budget (capped at $100 to protect small account)
-        max_alloc = min(config.max_position_size_usd, min(100.0, max(20.0, equity * 0.10)))
+        # Position sizing based on confidence & risk budget (capped at $100 for stocks, $100-$200 for indices)
+        is_index = symbol in ("UK100", "GER40", "FRA40", "SPX500", "NSDQ100", "DJ30")
+        min_alloc = 100.0 if is_index else 20.0
+        max_alloc = min(config.max_position_size_usd, min(200.0 if is_index else 100.0, max(min_alloc, equity * 0.15)))
         alloc_base = max_alloc * confidence
-        allocated_usd = max(20.0, min(max_alloc, alloc_base))
+        allocated_usd = max(min_alloc, min(max_alloc, alloc_base))
         target_shares = round(allocated_usd / max(0.00000001, quote.price), 4)
 
         # Autonomous trade entry (if not already holding this direction)

@@ -50,8 +50,9 @@ class SystemConfig(BaseModel):
     market_close_hour_utc: int = 20 # 20:00 UTC = 21:00 UK BST (16:00 US EST)
     market_close_minute_utc: int = 0
     
-    # Target Watchlist — 100% Tradable US Mega-Cap Tech & High-Beta Equities ($10 min, 0 crypto, 0 PRIIPs block)
+    # Target Watchlist — European Morning Coverage (UK100, GER40) + US Mega-Cap Tech Titans ($10 min, 0 crypto, 0 PRIIPs block)
     watchlist: List[str] = [
+        "UK100", "GER40",
         "NVDA", "AAPL", "MSFT", "TSLA", "META", "AMZN", "GOOGL",
         "AMD", "PLTR", "ARM", "SMCI", "COIN", "MSTR", "HOOD",
         "SOFI", "ASTS", "RKLB", "LLY", "NFLX", "IREN"
