@@ -7,8 +7,10 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: EXECUTION_MODE
+        value: "live"
       - key: SIMULATION_MODE
-        value: "true"
+        value: "false"
       - key: INITIAL_CAPITAL
         value: "10000.0"
       - key: FINNHUB_API_KEY

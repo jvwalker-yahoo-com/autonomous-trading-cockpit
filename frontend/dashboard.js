@@ -167,7 +167,27 @@ function renderCockpit(data) {
     const { quote, state, decision, federation, arbitration, anomaly, quadrant, portfolio, learning, heartbeat, sync_drift, node_events, execution_mode } = data;
 
     if (execution_mode) {
-      updateExecutionModeUI(execution_mode);
+      const userPreference = localStorage.getItem("execution_mode") || "live";
+      if (userPreference === "live" && execution_mode === "demo") {
+        if (!window._isReassertingLive) {
+          window._isReassertingLive = true;
+          console.warn("⚠️ Server reported demo mode while user preference is LIVE. Auto-restoring live mode...");
+          fetch(`${BASE_URL}/api/mode/switch`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: "live" })
+          }).then(r => {
+            if (r.ok) updateExecutionModeUI("live");
+          }).catch(e => {
+            console.error("Failed to auto-restore live mode:", e);
+          }).finally(() => {
+            setTimeout(() => { window._isReassertingLive = false; }, 4000);
+          });
+        }
+        updateExecutionModeUI("live");
+      } else {
+        updateExecutionModeUI(execution_mode);
+      }
     }
 
     // 1. Header & Quick Telemetry
@@ -552,7 +572,7 @@ if (el.btnResetCircuitBreaker) {
 // ==========================================
 // ETORO LIVE / DEMO SWITCH & SETTINGS LOGIC
 // ==========================================
-let currentExecutionMode = "demo";
+let currentExecutionMode = localStorage.getItem("execution_mode") || "live";
 
 function updateExecutionModeUI(mode) {
   currentExecutionMode = mode;
@@ -597,7 +617,7 @@ async function fetchEtoroStatus() {
       localBaseUrl = "https://public-api.etoro.com";
       localStorage.setItem("etoro_base_url", localBaseUrl);
     }
-    const localMode = localStorage.getItem("execution_mode") || "demo";
+    const localMode = localStorage.getItem("execution_mode") || "live";
 
     const res = await fetch(`${BASE_URL}/api/etoro/status`);
     if (res.ok) {
@@ -614,16 +634,28 @@ async function fetchEtoroStatus() {
             etoro_base_url: localBaseUrl
           })
         });
-        if (localMode === "live") {
-          await fetch(`${BASE_URL}/api/mode/switch`, {
+      }
+
+      // If user's preference is live, ensure backend is in live mode
+      if (localMode === "live" && data.execution_mode !== "live") {
+        console.warn("⚡ Auto-restoring user preference: Switching server to LIVE mode...");
+        try {
+          const switchRes = await fetch(`${BASE_URL}/api/mode/switch`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ mode: "live" })
           });
+          if (switchRes.ok) {
+            data.execution_mode = "live";
+          }
+        } catch (err) {
+          console.warn("Could not auto-restore live mode:", err);
         }
       }
 
-      updateExecutionModeUI(data.execution_mode || localMode || "demo");
+      const activeMode = (localMode === "live") ? "live" : (data.execution_mode || "live");
+      localStorage.setItem("execution_mode", activeMode);
+      updateExecutionModeUI(activeMode);
     }
   } catch (e) {
     console.error("Error fetching eToro status:", e);
@@ -906,7 +938,7 @@ if (el.btnSettings) {
       ]);
       if (cfgRes.ok) {
         const cfg = await cfgRes.json();
-        if (el.selectSimMode) el.selectSimMode.value = cfg.execution_mode || "demo";
+        if (el.selectSimMode) el.selectSimMode.value = localStorage.getItem("execution_mode") || cfg.execution_mode || "live";
         if (el.inputRiskPct) el.inputRiskPct.value = ((cfg.risk_per_trade_pct || 0.02) * 100).toFixed(1);
         if (el.inputEtoroBaseUrl) el.inputEtoroBaseUrl.value = cfg.etoro_base_url || "https://public-api.etoro.com";
       }

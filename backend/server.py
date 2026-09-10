@@ -82,6 +82,9 @@ saved_settings = broker.load_state()
 if saved_settings:
     if "execution_mode" in saved_settings and saved_settings["execution_mode"]:
         config.execution_mode = saved_settings["execution_mode"]
+        config.simulation_mode = (config.execution_mode != "live")
+    if "simulation_mode" in saved_settings and saved_settings["simulation_mode"] is not None:
+        config.simulation_mode = bool(saved_settings["simulation_mode"])
     if "etoro_api_key" in saved_settings and saved_settings["etoro_api_key"]:
         config.etoro_api_key = saved_settings["etoro_api_key"]
         etoro_client.api_key = config.etoro_api_key
@@ -99,6 +102,7 @@ if saved_settings:
 
 # Ensure live mode does not inherit a stale simulation paper drawdown lockout or phantom paper positions
 if config.execution_mode == "live":
+    config.simulation_mode = False
     broker.positions.clear()
     broker.reset_drawdown()
 
@@ -820,6 +824,8 @@ def update_system_config(req: ConfigUpdateRequest):
         etoro_client.base_url = config.etoro_base_url
     if req.execution_mode is not None:
         config.execution_mode = req.execution_mode.strip().lower()
+        if req.simulation_mode is None:
+            config.simulation_mode = (config.execution_mode != "live")
     if req.active_symbol:
         active_symbol = req.active_symbol.upper()
     if req.simulation_mode is not None:
@@ -835,6 +841,7 @@ def update_system_config(req: ConfigUpdateRequest):
     # Persist updated settings to disk
     broker.save_state({
         "execution_mode": config.execution_mode,
+        "simulation_mode": config.simulation_mode,
         "etoro_api_key": config.etoro_api_key,
         "etoro_user_key": config.etoro_user_key,
         "etoro_base_url": config.etoro_base_url,
@@ -1004,9 +1011,13 @@ def switch_execution_mode(req: ModeSwitchRequest):
         )
 
     config.execution_mode = target_mode
+    config.simulation_mode = (target_mode != "live")
     # Persist execution mode to disk
-    broker.save_state({"execution_mode": config.execution_mode})
-    logger.info(f"Execution mode switched to: {config.execution_mode.upper()}")
+    broker.save_state({
+        "execution_mode": config.execution_mode,
+        "simulation_mode": config.simulation_mode
+    })
+    logger.info(f"Execution mode switched to: {config.execution_mode.upper()} (simulation_mode={config.simulation_mode})")
 
     sync_info = None
     if target_mode == "live":
@@ -1214,7 +1225,19 @@ def reset_portfolio():
     """Resets simulated portfolio to initial capital (or aligns with live equity if in live mode)."""
     if config.execution_mode == "live":
         broker.positions.clear()
-        broker.reset_drawdown()
+        live_eq = None
+        if etoro_client.is_configured():
+            try:
+                bal_res = etoro_client.get_account_balances()
+                if bal_res.get("success") and bal_res.get("data"):
+                    d = bal_res["data"]
+                    if isinstance(d, dict):
+                        live_eq = d.get("totalEquity") or d.get("equity") or d.get("cashBalance")
+                    elif isinstance(d, list) and len(d) > 0 and isinstance(d[0], dict):
+                        live_eq = d[0].get("totalEquity") or d[0].get("equity") or d[0].get("cashBalance")
+            except Exception:
+                pass
+        broker.reset_drawdown(new_equity=float(live_eq) if live_eq else config.initial_capital)
     else:
         broker.cash = config.initial_capital
         broker.peak_equity = config.initial_capital

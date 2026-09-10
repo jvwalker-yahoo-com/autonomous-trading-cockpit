@@ -25,8 +25,8 @@ class SystemConfig(BaseModel):
     etoro_base_url: str = os.getenv("ETORO_BASE_URL", "https://public-api.etoro.com")
     
     # Mode & Execution ('demo' = Virtual Simulation & Self-Learning, 'live' = Real eToro API Execution)
-    execution_mode: str = os.getenv("EXECUTION_MODE", "demo").lower() # 'demo' or 'live'
-    simulation_mode: bool = os.getenv("SIMULATION_MODE", "true").lower() in ("true", "1", "yes")
+    execution_mode: str = os.getenv("EXECUTION_MODE", "live").lower() # 'demo' or 'live' (permanently live by default unless user explicitly switches to demo)
+    simulation_mode: bool = (os.getenv("SIMULATION_MODE", "false").lower() in ("true", "1", "yes")) if os.getenv("SIMULATION_MODE") is not None else (os.getenv("EXECUTION_MODE", "live").lower() != "live")
     execution_loop_interval: float = float(os.getenv("EXECUTION_LOOP_INTERVAL", "8.0")) # seconds
     
     # Portfolio & Sizing (Calibrated for £1,000 GBP / ~$1,300 USD account)

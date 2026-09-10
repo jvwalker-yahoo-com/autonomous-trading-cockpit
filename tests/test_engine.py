@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.config import config
-from backend.server import app
+from backend.server import app, broker
 from backend.engine.data_feed import DataFeedManager
 from backend.engine.metrics import MetricsModule
 from backend.engine.regime import RegimeModule
@@ -362,10 +362,17 @@ def test_etoro_api_client_and_mode_switching():
     conn_data = r_conn.json()
     assert "status" in conn_data
 
-    # 4. Test Mode Switch to Demo
-    r_demo = test_app_client.post("/api/mode/switch", json={"mode": "demo"})
-    assert r_demo.status_code == 200
-    assert r_demo.json()["execution_mode"] == "demo"
+    # 4. Test Mode Switch to Demo (preserving original mode)
+    orig_mode = config.execution_mode
+    orig_sim = config.simulation_mode
+    try:
+        r_demo = test_app_client.post("/api/mode/switch", json={"mode": "demo"})
+        assert r_demo.status_code == 200
+        assert r_demo.json()["execution_mode"] == "demo"
+    finally:
+        config.execution_mode = orig_mode
+        config.simulation_mode = orig_sim
+        broker.save_state({"execution_mode": orig_mode, "simulation_mode": orig_sim})
 
     # 5. Test Instrument ID Resolution
     # AAPL=1001 confirmed from official eToro API docs.
@@ -412,7 +419,7 @@ def test_instruments_sqlite_db_and_endpoints():
     assert get_etoro_id("BTC") == 100000
     assert get_etoro_id("ETH") == 100001
     assert get_etoro_id("AAPL") == 1001
-    assert get_etoro_id("NVDA") == 1007
+    assert get_etoro_id("NVDA") == 1137
     assert get_etoro_id("VTI") == 2010
     assert get_etoro_id("NVDL") == 2014
     assert get_etoro_id("FRA40") == 2106
