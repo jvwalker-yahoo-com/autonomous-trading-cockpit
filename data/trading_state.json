@@ -18,6 +18,11 @@
   "total_loss_usd": 0.0,
   "settings": {
     "execution_mode": "live",
-    "simulation_mode": false
+    "simulation_mode": false,
+    "etoro_api_key": "",
+    "etoro_user_key": "",
+    "etoro_base_url": "https://public-api.etoro.com",
+    "finnhub_api_key": "",
+    "min_conviction_score": 0.08
   }
 }

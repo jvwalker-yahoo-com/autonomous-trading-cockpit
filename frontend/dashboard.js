@@ -661,10 +661,16 @@ async function fetchEtoroStatus() {
       const authBanner = document.getElementById("etoroAuthAlertBanner");
       const authMsg = document.getElementById("etoroAuthAlertMsg");
       if (authBanner) {
-        if (data.auth_cooldown || (activeMode === "live" && data.last_auth_error)) {
+        const isInCooldown = Boolean(data.auth_cooldown);
+        const isUnconfigured = activeMode === "live" && !data.is_configured;
+        if (isInCooldown || isUnconfigured) {
           authBanner.classList.remove("hidden");
-          if (authMsg && data.last_auth_error) {
-            authMsg.textContent = `${data.last_auth_error} (Cooldown: ${data.auth_cooldown_remaining_sec || 60}s remaining). Please paste a fresh ETORO_USER_KEY.`;
+          if (authMsg) {
+            if (isInCooldown && data.last_auth_error) {
+              authMsg.textContent = `${data.last_auth_error} (Cooldown: ${data.auth_cooldown_remaining_sec || 60}s remaining). Please paste a fresh ETORO_USER_KEY.`;
+            } else if (isUnconfigured) {
+              authMsg.textContent = "eToro credentials missing in LIVE mode. Please configure ETORO_USER_KEY in Settings.";
+            }
           }
         } else {
           authBanner.classList.add("hidden");
@@ -800,6 +806,9 @@ if (el.btnTestEtoroConn) {
           localStorage.setItem("etoro_user_key", data.user_key);
           if (el.inputEtoroUserKey) el.inputEtoroUserKey.value = data.user_key;
         }
+        const authBanner = document.getElementById("etoroAuthAlertBanner");
+        if (authBanner) authBanner.classList.add("hidden");
+        fetchEtoroStatus();
       } else {
         el.etoroTestStatus.textContent = `✗ ${data.message || 'Authentication failed'}`;
         el.etoroTestStatus.style.color = "#ef4444";
@@ -889,6 +898,9 @@ if (btnHeaderTestEtoro) {
           localStorage.setItem("etoro_user_key", data.user_key);
           if (el.inputEtoroUserKey) el.inputEtoroUserKey.value = data.user_key;
         }
+        const authBanner = document.getElementById("etoroAuthAlertBanner");
+        if (authBanner) authBanner.classList.add("hidden");
+        fetchEtoroStatus();
         alert(`✓ SUCCESS (HTTP ${data.status_code || 200}):\n\n${data.message}\n\nGateway: ${data.base_url}\nStatus: Live Authenticated`);
       } else {
         alert(`✗ Connection Status:\n\n${data.message || 'Authentication failed'}\n\nPlease click ⚙️ CONFIG to verify your ETORO_API_KEY and ETORO_USER_KEY.`);

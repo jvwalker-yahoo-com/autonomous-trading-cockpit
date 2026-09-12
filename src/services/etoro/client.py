@@ -212,6 +212,12 @@ class EToroClient:
         self._last_auth_error = reason
         logger.warning(f"🔒 [eToro Auth Cooldown Activated] Outbound orders paused for {cooldown_sec:.0f}s: {reason}")
 
+    def clear_auth_cooldown(self):
+        """Clears any active auth cooldown and resets last_auth_error upon successful authentication."""
+        self._auth_cooldown_until = 0.0
+        self._last_auth_error = ""
+        logger.info("🔓 [eToro Auth Cooldown Cleared] Credentials verified; live orders unpaused.")
+
     def bootstrap_instrument_ids(self) -> Dict[str, int]:
         """
         Self-discovers real eToro instrument IDs from the authenticated API using GET /api/v1/market-data/instruments.
@@ -454,6 +460,7 @@ class EToroClient:
             real_cid = user_info.get("realCid") or profile_data.get("realCid")
             scopes = user_info.get("scopes") or profile_data.get("scopes") or []
             self._prefer_swapped = False
+            self.clear_auth_cooldown()
             logger.info(f"✓ Authenticated with official eToro MCP Gateway (User: @{username}, Real CID: {real_cid})")
             return {
                 "status": "connected",
@@ -491,6 +498,7 @@ class EToroClient:
                     elif "totalBalance" in data:
                         user_desc = f" (Balance: ${data.get('totalBalance', 0):,.2f})"
 
+                self.clear_auth_cooldown()
                 return {
                     "status": "connected",
                     "connected": True,
@@ -527,6 +535,7 @@ class EToroClient:
                             user_desc = f" (User: @{data['username']})"
                         elif "totalBalance" in data:
                             user_desc = f" (Balance: ${data.get('totalBalance', 0):,.2f})"
+                    self.clear_auth_cooldown()
                     return {
                         "status": "connected",
                         "connected": True,

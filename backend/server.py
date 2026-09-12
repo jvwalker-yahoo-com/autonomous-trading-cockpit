@@ -839,6 +839,8 @@ def update_system_config(req: ConfigUpdateRequest):
     if req.etoro_user_key is not None:
         config.etoro_user_key = req.etoro_user_key.strip()
         etoro_client.user_key = config.etoro_user_key
+    if req.etoro_user_key is not None or req.etoro_api_key is not None:
+        etoro_client.clear_auth_cooldown()
     if req.etoro_base_url is not None:
         raw_b = req.etoro_base_url.strip().rstrip("/")
         if "api.etoro.com" in raw_b and "public-api.etoro.com" not in raw_b:
@@ -934,6 +936,7 @@ def test_etoro_connection():
     """Validates eToro API credentials in read-only mode without placing trades."""
     res = etoro_client.test_connection()
     if res.get("connected"):
+        etoro_client.clear_auth_cooldown()
         config.etoro_api_key = etoro_client.api_key
         config.etoro_user_key = etoro_client.user_key
         broker.save_state({
