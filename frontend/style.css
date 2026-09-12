@@ -825,7 +825,15 @@ body {
   z-index: 1000;
 }
 
-.modal-overlay.hidden { display: none; }
+.hidden,
+.modal-overlay.hidden,
+#etoroAuthAlertBanner.hidden {
+  display: none !important;
+}
+
+#etoroAuthAlertBanner:not(.hidden) {
+  display: flex !important;
+}
 
 .modal-card {
   background: var(--bg-card);

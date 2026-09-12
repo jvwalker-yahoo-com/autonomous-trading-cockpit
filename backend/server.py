@@ -100,11 +100,38 @@ if saved_settings:
     if "min_conviction_score" in saved_settings and saved_settings["min_conviction_score"]:
         config.min_conviction_score = float(saved_settings["min_conviction_score"])
 
+# Cache for full cockpit snapshot to prevent redundant execution cycles on frequent UI polling
+_cockpit_snapshot_cache: Dict[str, Any] = {}
+_last_live_portfolio_sync: float = 0.0
+
+def sync_live_etoro_portfolio_if_live(force: bool = False):
+    """
+    If execution_mode is live and eToro is configured, fetches live portfolio & balances from eToro
+    and synchronizes real-time cash, total equity, and active open positions directly into the broker state.
+    Throttled to run at most once every 8 seconds unless forced.
+    """
+    global _last_live_portfolio_sync
+    if config.execution_mode != "live" or not etoro_client.is_configured() or etoro_client.is_in_auth_cooldown():
+        return
+    now = time.time()
+    if not force and (now - _last_live_portfolio_sync) < 8.0:
+        return
+    _last_live_portfolio_sync = now
+    try:
+        pf_res = etoro_client.get_portfolio(mode="real")
+        if pf_res.get("success") and pf_res.get("data"):
+            broker.sync_live_etoro_portfolio(pf_res["data"])
+            _cockpit_snapshot_cache.clear()
+            logger.info(f"🔄 [eToro Live Portfolio Synced] Cash: ${broker.cash:.2f}, Equity: ${broker.get_equity():.2f}, Positions: {len(broker.positions)}")
+    except Exception as e:
+        logger.warning(f"Notice during live eToro portfolio sync: {e}")
+
 # Ensure live mode does not inherit a stale simulation paper drawdown lockout or phantom paper positions
 if config.execution_mode == "live":
     config.simulation_mode = False
     broker.positions.clear()
-    broker.reset_drawdown()
+    sync_live_etoro_portfolio_if_live(force=True)
+    broker.reset_drawdown(new_equity=broker.get_equity() if broker.get_equity() > 0 else None)
 
 active_symbol = "AAPL"
 is_autonomous_loop_running = True
@@ -161,6 +188,10 @@ async def autonomous_background_worker_loop():
                     "🔑 [ETORO AUTH NOTICE] Live orders paused: eToro returned HTTP 401 Unauthorized. "
                     "Please update your ETORO_USER_KEY in Cockpit Settings (⚙️ CONFIG) or Render Environment Variables."
                 )
+
+            # In live mode, ensure portfolio & active holdings are periodically synced from eToro
+            if config.execution_mode == "live":
+                await asyncio.to_thread(sync_live_etoro_portfolio_if_live)
 
             # Scheduled 10:00 PM UK Time eToro SQLite Database Sync
             # Automatically syncs newly discovered instruments from eToro catalog every night at 22:00 UK time
@@ -489,9 +520,6 @@ async def get_sync_drift():
 # EXTENDED PORTFOLIO & LEARNING ENDPOINTS
 # ==========================================
 
-# Cache for full cockpit snapshot to prevent redundant execution cycles on frequent UI polling
-_cockpit_snapshot_cache: Dict[str, Any] = {}
-
 @app.get("/api/cockpit/snapshot", tags=["Cockpit Extended"])
 async def get_cockpit_full_snapshot(symbol: Optional[str] = None):
     """
@@ -507,6 +535,9 @@ async def get_cockpit_full_snapshot(symbol: Optional[str] = None):
         cached_t, cached_payload = cached
         if (now - cached_t) < 3.0:
             return cached_payload
+
+    if config.execution_mode == "live":
+        await asyncio.to_thread(sync_live_etoro_portfolio_if_live)
 
     analysis = await asyncio.to_thread(run_analysis_cycle, sym)
     portfolio = broker.get_portfolio_summary(active_symbol=sym, simulation_mode=config.simulation_mode)
@@ -546,6 +577,8 @@ async def get_cockpit_full_snapshot(symbol: Optional[str] = None):
 @app.get("/api/portfolio", response_model=PortfolioSummary, tags=["Portfolio"])
 def get_portfolio():
     """Current portfolio metrics, cash, equity, win-rate, and active positions"""
+    if config.execution_mode == "live":
+        sync_live_etoro_portfolio_if_live()
     return broker.get_portfolio_summary(active_symbol=active_symbol, simulation_mode=config.simulation_mode)
 
 @app.get("/api/trades", response_model=Dict[str, Any], tags=["Portfolio"])
@@ -873,6 +906,8 @@ def update_system_config(req: ConfigUpdateRequest):
         "finnhub_api_key": config.finnhub_api_key,
         "min_conviction_score": config.min_conviction_score
     })
+    if config.execution_mode == "live" and etoro_client.is_configured():
+        sync_live_etoro_portfolio_if_live(force=True)
     return {"status": "updated", "config": get_system_config()}
 
 # ==========================================
@@ -945,6 +980,8 @@ def test_etoro_connection():
             "etoro_base_url": etoro_client.base_url
         })
         logger.info(f"✓ Locked in authenticated eToro API Key & User Key orientation (Persisted to disk).")
+        if config.execution_mode == "live":
+            sync_live_etoro_portfolio_if_live(force=True)
     return res
 
 @app.get("/api/etoro/instrument_search", tags=["eToro Live Integration"])
@@ -1053,20 +1090,9 @@ def switch_execution_mode(req: ModeSwitchRequest):
         # Clear previous simulated paper positions so live execution slots are immediately open
         broker.positions.clear()
         
-        # Reset peak equity watermark and unlatch any paper drawdown circuit breaker
-        live_equity = None
-        try:
-            bal_res = etoro_client.get_account_balances()
-            if bal_res.get("success") and bal_res.get("data"):
-                d = bal_res["data"]
-                if isinstance(d, dict):
-                    live_equity = d.get("totalEquity") or d.get("equity") or d.get("cashBalance") or d.get("availableCash")
-                elif isinstance(d, list) and len(d) > 0 and isinstance(d[0], dict):
-                    live_equity = d[0].get("totalEquity") or d[0].get("equity") or d[0].get("cashBalance")
-        except Exception as e:
-            logger.warning(f"Could not query live balance during mode switch: {e}")
-
-        recal_eq = broker.reset_drawdown(new_equity=float(live_equity) if live_equity else None)
+        # Synchronize live portfolio holdings & balances from eToro
+        sync_live_etoro_portfolio_if_live(force=True)
+        recal_eq = broker.reset_drawdown(new_equity=broker.get_equity() if broker.get_equity() > 0 else None)
         logger.info(f"✓ Recalibrated broker equity to ${recal_eq:.2f} (Peak: ${broker.peak_equity:.2f}) and unlatched circuit breaker.")
 
         # Build 5-day historical traded stocks + active watchlist and sync asynchronously in background

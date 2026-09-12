@@ -6,7 +6,7 @@ and persistent ledger storage.
 import json
 import uuid
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone, timedelta
 from .models import Position, TradeRecord, PortfolioSummary, StockPerformanceSummary, MultiDayPerformanceReport
 from .learner import AdaptiveLearner
@@ -20,9 +20,72 @@ class SimulatedBroker:
         self.db_path = db_path
         self.learner = learner or AdaptiveLearner()
         self.peak_equity = initial_capital
-        
-        # Load persisted state if exists
         self.load_state()
+
+    def sync_live_etoro_portfolio(self, portfolio_data: Dict[str, Any]):
+        """
+        Synchronizes real-time live account cash, equity, and active positions
+        directly from the authenticated eToro API into the broker state.
+        """
+        if not isinstance(portfolio_data, dict):
+            return
+        totals = portfolio_data.get("totals", {})
+        holdings = portfolio_data.get("holdings", [])
+        
+        # Real cash & equity
+        if "availableCash" in totals and totals["availableCash"] is not None:
+            self.cash = float(totals["availableCash"])
+        live_equity = float(totals["totalValue"]) if ("totalValue" in totals and totals["totalValue"] is not None) else None
+        if live_equity is not None:
+            if self.peak_equity <= 1300.0 or live_equity > self.peak_equity:
+                self.peak_equity = live_equity
+        if "netDeposit" in totals and totals["netDeposit"] is not None:
+            self.initial_capital = float(totals["netDeposit"])
+        elif self.initial_capital == 1300.0 and live_equity is not None and live_equity > 0:
+            self.initial_capital = round(live_equity, 2)
+                
+        # Synchronize active positions
+        live_positions: Dict[str, Position] = {}
+        for h in holdings:
+            mkt = h.get("market", {})
+            sym = mkt.get("symbol") or h.get("symbol") or mkt.get("instrumentName") or h.get("instrumentName")
+            if not sym:
+                continue
+            sym = str(sym).upper().strip()
+            invested = float(h.get("invested", 0.0))
+            val = float(h.get("value", invested))
+            pnl = float(h.get("pnl", val - invested))
+            pnl_pct = float(h.get("pnlPercent", 0.0))
+            units = float(h.get("units", 0.0))
+            open_rate = float(h.get("avgOpenRate", 0.0))
+            if open_rate <= 0 and units > 0 and invested > 0:
+                open_rate = invested / units
+            cur_rate = float(h.get("currentRate", open_rate))
+            pos_list = h.get("positions", [])
+            first_pos = pos_list[0] if pos_list else {}
+            pos_id = str(first_pos.get("positionId", f"etoro-{sym}"))
+            open_time = str(first_pos.get("openTime", ""))
+            direction = "SHORT" if (first_pos.get("isBuy") is False or str(first_pos.get("direction", "")).upper() == "SHORT") else "LONG"
+            sl = float(first_pos.get("stopLossRate") or first_pos.get("stopLoss") or 0.0)
+            tp = float(first_pos.get("takeProfitRate") or first_pos.get("takeProfit") or 0.0)
+            
+            live_positions[sym] = Position(
+                id=pos_id,
+                symbol=sym,
+                direction=direction,
+                shares=round(units, 6),
+                entry_price=round(open_rate, 2),
+                current_price=round(cur_rate, 2),
+                cost_basis_usd=round(invested, 2),
+                market_value_usd=round(val, 2),
+                unrealized_pnl_usd=round(pnl, 2),
+                unrealized_pnl_pct=round(pnl_pct, 2),
+                stop_loss=sl,
+                take_profit=tp,
+                entry_time=open_time,
+                rationale="Active Live eToro Holding"
+            )
+        self.positions = live_positions
 
     def get_equity(self) -> float:
         """Returns total portfolio equity = Cash + Total Market Value of Positions."""

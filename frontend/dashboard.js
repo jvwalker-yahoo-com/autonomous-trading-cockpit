@@ -665,6 +665,7 @@ async function fetchEtoroStatus() {
         const isUnconfigured = activeMode === "live" && !data.is_configured;
         if (isInCooldown || isUnconfigured) {
           authBanner.classList.remove("hidden");
+          authBanner.style.display = "flex";
           if (authMsg) {
             if (isInCooldown && data.last_auth_error) {
               authMsg.textContent = `${data.last_auth_error} (Cooldown: ${data.auth_cooldown_remaining_sec || 60}s remaining). Please paste a fresh ETORO_USER_KEY.`;
@@ -674,6 +675,7 @@ async function fetchEtoroStatus() {
           }
         } else {
           authBanner.classList.add("hidden");
+          authBanner.style.display = "none";
         }
       }
     }

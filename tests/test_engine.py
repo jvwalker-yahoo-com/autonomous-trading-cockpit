@@ -548,6 +548,100 @@ def test_close_all_trades_and_crypto_deactivation():
         assert item.get("category", "").lower() != "crypto"
 
 
+def test_sync_live_etoro_portfolio():
+    """
+    Verifies that SimulatedBroker.sync_live_etoro_portfolio() seamlessly parses
+    and synchronizes live eToro account cash, equity, and multi-asset holdings.
+    """
+    from backend.server import broker
+
+    mock_etoro_data = {
+        "totals": {
+            "availableCash": 1114.91,
+            "totalValue": 1292.09,
+            "invested": 176.24,
+            "unrealizedPnL": 0.94,
+            "unrealizedPnLPercent": 0.53,
+            "netDeposit": 1291.15
+        },
+        "holdings": [
+            {
+                "market": {"symbol": "AAPL", "instrumentId": 1001},
+                "invested": 48.0,
+                "value": 48.60,
+                "pnl": 0.60,
+                "pnlPercent": 1.25,
+                "units": 0.21,
+                "avgOpenRate": 228.57,
+                "currentRate": 231.42,
+                "positions": [{"positionId": "10001", "openTime": "2026-09-10T14:30:00Z", "isBuy": True}]
+            },
+            {
+                "market": {"symbol": "META", "instrumentId": 1003},
+                "invested": 32.0,
+                "value": 32.60,
+                "pnl": 0.60,
+                "pnlPercent": 1.88,
+                "units": 0.06,
+                "avgOpenRate": 533.33,
+                "currentRate": 543.33,
+                "positions": [{"positionId": "10002", "openTime": "2026-09-10T14:31:00Z", "isBuy": True}]
+            },
+            {
+                "market": {"symbol": "TSLA", "instrumentId": 1111},
+                "invested": 32.0,
+                "value": 31.87,
+                "pnl": -0.13,
+                "pnlPercent": -0.41,
+                "units": 0.14,
+                "avgOpenRate": 228.57,
+                "currentRate": 227.64,
+                "positions": [{"positionId": "10003", "openTime": "2026-09-10T14:32:00Z", "isBuy": True}]
+            },
+            {
+                "market": {"symbol": "PLTR", "instrumentId": 7991},
+                "invested": 32.0,
+                "value": 31.81,
+                "pnl": -0.19,
+                "pnlPercent": -0.59,
+                "units": 0.90,
+                "avgOpenRate": 35.56,
+                "currentRate": 35.34,
+                "positions": [{"positionId": "10004", "openTime": "2026-09-10T14:33:00Z", "isBuy": True}]
+            },
+            {
+                "market": {"symbol": "NVDA", "instrumentId": 1137},
+                "invested": 32.24,
+                "value": 32.30,
+                "pnl": 0.06,
+                "pnlPercent": 0.19,
+                "units": 0.28,
+                "avgOpenRate": 115.14,
+                "currentRate": 115.36,
+                "positions": [{"positionId": "10005", "openTime": "2026-09-10T14:34:00Z", "isBuy": True}]
+            }
+        ]
+    }
+
+    broker.sync_live_etoro_portfolio(mock_etoro_data)
+
+    assert broker.cash == 1114.91
+    assert broker.get_equity() == 1292.09
+    assert len(broker.positions) == 5
+    assert "AAPL" in broker.positions
+    assert "META" in broker.positions
+    assert "TSLA" in broker.positions
+    assert "PLTR" in broker.positions
+    assert "NVDA" in broker.positions
+
+    summary = broker.get_portfolio_summary()
+    assert summary.cash == 1114.91
+    assert summary.equity == 1292.09
+    assert summary.unrealized_pnl_usd == 0.94
+    assert len(summary.open_positions) == 5
+
+
+
 
 
 
