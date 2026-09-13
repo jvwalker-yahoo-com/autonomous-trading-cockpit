@@ -602,9 +602,59 @@ class EToroClient:
     def get_portfolio(self, mode: str = "real") -> Dict[str, Any]:
         """Fetches active open positions and portfolio details via official MCP gateway or fallback."""
         account = "real" if mode.lower() in ("real", "live") else "demo"
+        
+        # 1. Try MCP tool get-my-portfolio-summary (full)
         mcp_res = self.call_mcp_tool("get-my-portfolio-summary", {"account": account, "includePositions": True})
-        if mcp_res.get("success"):
+        if mcp_res.get("success") and isinstance(mcp_res.get("data"), dict) and not mcp_res.get("data", {}).get("error"):
             return {"success": True, "status_code": 200, "data": mcp_res.get("data")}
+
+        # 1b. Try MCP tool get-my-portfolio-summary (summary only, no subcalls)
+        mcp_summary = self.call_mcp_tool("get-my-portfolio-summary", {"account": account, "includePositions": False, "includeOrders": False, "includeCopiedTraders": False})
+        if mcp_summary.get("success") and isinstance(mcp_summary.get("data"), dict) and not mcp_summary.get("data", {}).get("error"):
+            return {"success": True, "status_code": 200, "data": mcp_summary.get("data")}
+
+        # 2. Try MCP tool get-my-positions-and-orders
+        pos_res = self.call_mcp_tool("get-my-positions-and-orders", {"account": account})
+        if pos_res.get("success") and isinstance(pos_res.get("data"), dict) and not pos_res.get("data", {}).get("error"):
+            data = pos_res["data"]
+            direct_positions = data.get("direct", {}).get("positions", [])
+            holdings = []
+            for p in direct_positions:
+                sym = str(p.get("symbol") or p.get("instrumentName") or "").upper().strip()
+                if sym:
+                    holdings.append({
+                        "market": {"symbol": sym, "instrumentId": p.get("instrumentId")},
+                        "invested": float(p.get("investment", p.get("costBasis", 0.0))),
+                        "value": float(p.get("currentValue", p.get("value", 0.0))),
+                        "pnl": float(p.get("pnl", 0.0)),
+                        "pnlPercent": float(p.get("pnlPercent", 0.0)),
+                        "units": float(p.get("units", 0.0)),
+                        "avgOpenRate": float(p.get("openRate", 0.0)),
+                        "currentRate": float(p.get("currentRate", 0.0)),
+                        "positions": [p]
+                    })
+            bal_res = self.get_account_balances()
+            bal_data = bal_res.get("data", {}) if bal_res.get("success") else {}
+            avail_cash = 0.0
+            tot_value = 0.0
+            if isinstance(bal_data, dict):
+                avail_cash = float(bal_data.get("availableCash") or bal_data.get("cashBalance") or 0.0)
+                tot_value = float(bal_data.get("totalEquity") or bal_data.get("totalValue") or avail_cash)
+            return {
+                "success": True,
+                "status_code": 200,
+                "data": {
+                    "totals": {
+                        "availableCash": avail_cash,
+                        "totalValue": tot_value,
+                        "invested": sum(h["invested"] for h in holdings),
+                        "unrealizedPnL": sum(h["pnl"] for h in holdings)
+                    },
+                    "holdings": holdings
+                }
+            }
+
+        # 3. Direct REST Endpoints Fallback
         is_demo = mode.lower() == "demo"
         endpoints = [
             f"/api/v1/trading/info/{'demo/' if is_demo else ''}portfolio",
@@ -614,10 +664,10 @@ class EToroClient:
             "/api/v1/trading/info/real/pnl"
         ]
         for ep in endpoints:
-            success, code, data = self._request("GET", ep)
+            success, code, data = self._request("GET", ep, suppress_error_log=True)
             if success:
                 return {"success": True, "status_code": code, "data": data}
-        return {"success": False, "status_code": code if 'code' in locals() else 404, "data": {}}
+        return {"success": False, "status_code": 404, "data": {}}
 
     def search_instruments(self, query: str) -> List[Dict[str, Any]]:
         """
@@ -1039,7 +1089,8 @@ class EToroClient:
         self,
         tool_name: str,
         arguments: Optional[Dict[str, Any]] = None,
-        timeout: float = 25.0
+        timeout: float = 25.0,
+        trigger_cooldown_on_auth_fail: bool = False
     ) -> Dict[str, Any]:
         """
         Invokes an MCP tool on the official eToro MCP gateway (https://mcp.public-api.etoro.com).
@@ -1152,10 +1203,11 @@ class EToroClient:
                 last_err = f"Exception ({label}): {e}"
                 logger.debug(f"[eToro MCP - {tool_name} - {label}] {e}")
 
-        # If all orientations failed with auth error, enter auth cooldown
-        err_lower = str(last_err).lower()
-        if "401" in err_lower or "unauthorized" in err_lower or "re-authenticate" in err_lower or "not valid" in err_lower or "expired" in err_lower:
-            self.trigger_auth_cooldown(f"MCP credentials rejected: {last_err}")
+        # Only enter auth cooldown if explicitly requested (e.g. order execution)
+        if trigger_cooldown_on_auth_fail:
+            err_lower = str(last_err).lower()
+            if "401" in err_lower or "unauthorized" in err_lower or "re-authenticate" in err_lower or "not valid" in err_lower or "expired" in err_lower:
+                self.trigger_auth_cooldown(f"MCP credentials rejected: {last_err}")
 
         return {"success": False, "error": last_err}
 
