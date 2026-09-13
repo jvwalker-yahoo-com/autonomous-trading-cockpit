@@ -669,6 +669,18 @@ class EToroClient:
                 return {"success": True, "status_code": code, "data": data}
         return {"success": False, "status_code": 404, "data": {}}
 
+    def get_trading_history(self, mode: str = "real", page: int = 1, page_size: int = 100) -> Dict[str, Any]:
+        """Fetches closed trading history from eToro via official MCP gateway or fallback."""
+        account = "real" if mode.lower() in ("real", "live") else "demo"
+        mcp_res = self.call_mcp_tool("get-my-trading-history", {
+            "account": account,
+            "page": page,
+            "pageSize": min(page_size, 200)
+        })
+        if mcp_res.get("success") and isinstance(mcp_res.get("data"), dict):
+            return {"success": True, "status_code": 200, "data": mcp_res.get("data")}
+        return {"success": False, "status_code": mcp_res.get("status_code", 500), "error": mcp_res.get("error", "Failed to fetch trading history")}
+
     def search_instruments(self, query: str) -> List[Dict[str, Any]]:
         """
         Searches eToro market data for an instrument by symbol.

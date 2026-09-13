@@ -105,14 +105,16 @@ if saved_settings:
 # Cache for full cockpit snapshot to prevent redundant execution cycles on frequent UI polling
 _cockpit_snapshot_cache: Dict[str, Any] = {}
 _last_live_portfolio_sync: float = 0.0
+_last_live_history_sync: float = 0.0
 
 def sync_live_etoro_portfolio_if_live(force: bool = False):
     """
     If execution_mode is live and eToro is configured, fetches live portfolio & balances from eToro
-    and synchronizes real-time cash, total equity, and active open positions directly into the broker state.
+    and synchronizes real-time cash, total equity, active open positions, and actual closed trade history
+    directly into the broker state.
     Throttled to run at most once every 8 seconds unless forced.
     """
-    global _last_live_portfolio_sync
+    global _last_live_portfolio_sync, _last_live_history_sync
     if config.execution_mode != "live" or not etoro_client.is_configured() or etoro_client.is_in_auth_cooldown():
         return
     now = time.time()
@@ -127,6 +129,18 @@ def sync_live_etoro_portfolio_if_live(force: bool = False):
             logger.info(f"🔄 [eToro Live Portfolio Synced] Cash: ${broker.cash:.2f}, Equity: ${broker.get_equity():.2f}, Positions: {len(broker.positions)}")
     except Exception as e:
         logger.warning(f"Notice during live eToro portfolio sync: {e}")
+
+    # Synchronize actual closed trading history (every 60s or when force=True)
+    if force or (now - _last_live_history_sync) > 60.0:
+        _last_live_history_sync = now
+        try:
+            hist_res = etoro_client.get_trading_history(mode="real", page_size=100)
+            if hist_res.get("success") and hist_res.get("data"):
+                broker.sync_live_etoro_trading_history(hist_res["data"])
+                summary = broker.get_portfolio_summary()
+                logger.info(f"📜 [eToro Realized Trade History Synced] {len(broker.trade_ledger)} closed trades | Realized PnL: ${summary.total_realized_pnl_usd:+.2f}")
+        except Exception as e:
+            logger.warning(f"Notice during live eToro trading history sync: {e}")
 
 # Ensure live mode does not inherit a stale simulation paper drawdown lockout or phantom paper positions
 if config.execution_mode == "live":

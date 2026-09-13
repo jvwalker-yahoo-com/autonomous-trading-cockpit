@@ -87,6 +87,65 @@ class SimulatedBroker:
             )
         self.positions = live_positions
 
+    def sync_live_etoro_trading_history(self, history_data: Any):
+        """
+        Synchronizes actual closed trade history directly from eToro into the trade ledger.
+        Ensures total_realized_pnl_usd accurately reflects true closed trade performance from eToro.
+        """
+        if not history_data:
+            return
+        raw_trades = []
+        if isinstance(history_data, dict):
+            raw_trades = history_data.get("trades", history_data.get("data", []))
+        elif isinstance(history_data, list):
+            raw_trades = history_data
+
+        if not isinstance(raw_trades, list):
+            return
+
+        synced_ledger: List[TradeRecord] = []
+        for t in raw_trades:
+            if not isinstance(t, dict):
+                continue
+            pos_id = str(t.get("positionId") or uuid.uuid4().hex[:8])
+            sym = str(t.get("market", {}).get("symbol") or t.get("symbol") or "UNKNOWN").upper().strip()
+            direction = str(t.get("direction", "LONG")).upper()
+            shares = float(t.get("units", 0.0))
+            open_rate = float(t.get("openRate", 0.0))
+            close_rate = float(t.get("closeRate", 0.0))
+            investment = float(t.get("investment", t.get("initialInvestment", 0.0)))
+            net_profit = float(t.get("netProfit", 0.0))
+            fees = float(t.get("fees", 0.0))
+            realized_pnl = round(net_profit - fees, 2)
+            exit_value = round(investment + realized_pnl, 2)
+            realized_pct = round((realized_pnl / max(0.01, investment)) * 100.0, 2) if investment > 0 else 0.0
+            open_time = str(t.get("openTime", ""))
+            close_time = str(t.get("closeTime", ""))
+
+            trade_record = TradeRecord(
+                id=f"etoro-{pos_id}",
+                symbol=sym,
+                direction=direction,
+                shares=round(shares, 6),
+                entry_price=round(open_rate, 4),
+                exit_price=round(close_rate, 4),
+                cost_basis_usd=round(investment, 2),
+                exit_value_usd=round(exit_value, 2),
+                realized_pnl_usd=realized_pnl,
+                realized_pnl_pct=realized_pct,
+                win=realized_pnl > 0.0,
+                entry_time=open_time,
+                exit_time=close_time,
+                entry_rationale="eToro Live Closed Position",
+                exit_rationale=f"Closed on eToro (Net: ${realized_pnl:+.2f})",
+                contributing_models={}
+            )
+            synced_ledger.append(trade_record)
+
+        if synced_ledger:
+            self.trade_ledger = synced_ledger
+            self.save_state()
+
     def get_equity(self) -> float:
         """Returns total portfolio equity = Cash + Total Market Value of Positions."""
         equity = self.cash
