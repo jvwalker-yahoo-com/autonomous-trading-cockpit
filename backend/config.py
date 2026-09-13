@@ -35,6 +35,7 @@ class SystemConfig(BaseModel):
     risk_per_trade_pct: float = float(os.getenv("RISK_PER_TRADE_PCT", "0.02")) # 2% max risk per trade ($26 max risk)
     max_portfolio_exposure_pct: float = float(os.getenv("MAX_PORTFOLIO_EXPOSURE_PCT", "0.75")) # Max 75% deployed
     max_drawdown_limit_pct: float = float(os.getenv("MAX_DRAWDOWN_LIMIT_PCT", "0.15")) # 15% circuit breaker
+    max_concurrent_positions: int = int(os.getenv("MAX_CONCURRENT_POSITIONS", "8")) # Max 8 concurrent open positions
     
     # Trading Rules
     default_stop_loss_pct: float = float(os.getenv("DEFAULT_STOP_LOSS_PCT", "0.025")) # 2.5%

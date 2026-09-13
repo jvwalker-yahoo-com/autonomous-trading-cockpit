@@ -99,6 +99,8 @@ if saved_settings:
         data_feed.set_api_key(config.finnhub_api_key)
     if "min_conviction_score" in saved_settings and saved_settings["min_conviction_score"]:
         config.min_conviction_score = float(saved_settings["min_conviction_score"])
+    if "max_concurrent_positions" in saved_settings and saved_settings["max_concurrent_positions"]:
+        config.max_concurrent_positions = int(saved_settings["max_concurrent_positions"])
 
 # Cache for full cockpit snapshot to prevent redundant execution cycles on frequent UI polling
 _cockpit_snapshot_cache: Dict[str, Any] = {}
@@ -255,6 +257,7 @@ class ConfigUpdateRequest(BaseModel):
     etoro_base_url: Optional[str] = None
     execution_mode: Optional[str] = None
     watchlist: Optional[List[str]] = None
+    max_concurrent_positions: Optional[int] = None
 
 class ModeSwitchRequest(BaseModel):
     mode: str # "demo" or "live"
@@ -319,6 +322,7 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
         current_exposure_pct=exposure_pct,
         max_exposure_limit_pct=config.max_portfolio_exposure_pct,
         active_positions_count=len(broker.positions),
+        max_concurrent_positions=getattr(config, "max_concurrent_positions", 8),
         market_open=market_open,
         enforce_market_hours=config.enforce_market_hours
     )
@@ -856,7 +860,8 @@ def get_system_config():
         "initial_capital": config.initial_capital,
         "max_position_size_usd": config.max_position_size_usd,
         "max_drawdown_limit_pct": config.max_drawdown_limit_pct,
-        "min_conviction_score": getattr(config, "min_conviction_score", 0.25)
+        "max_concurrent_positions": getattr(config, "max_concurrent_positions", 8),
+        "min_conviction_score": getattr(config, "min_conviction_score", 0.08)
     }
 
 @app.post("/api/config", tags=["Configuration"])
@@ -892,6 +897,8 @@ def update_system_config(req: ConfigUpdateRequest):
         config.risk_per_trade_pct = req.risk_per_trade_pct
     if req.min_conviction_score is not None:
         config.min_conviction_score = max(0.05, min(0.95, req.min_conviction_score))
+    if req.max_concurrent_positions is not None:
+        config.max_concurrent_positions = max(1, min(25, int(req.max_concurrent_positions)))
     if req.watchlist is not None:
         config.watchlist = [s for s in req.watchlist if s not in CRYPTO_SYMBOLS]
         logger.info(f"Updated watchlist to {len(config.watchlist)} assets (Crypto purged): {config.watchlist[:10]}")
@@ -904,7 +911,8 @@ def update_system_config(req: ConfigUpdateRequest):
         "etoro_user_key": config.etoro_user_key,
         "etoro_base_url": config.etoro_base_url,
         "finnhub_api_key": config.finnhub_api_key,
-        "min_conviction_score": config.min_conviction_score
+        "min_conviction_score": config.min_conviction_score,
+        "max_concurrent_positions": getattr(config, "max_concurrent_positions", 8)
     })
     if config.execution_mode == "live" and etoro_client.is_configured():
         sync_live_etoro_portfolio_if_live(force=True)

@@ -16,7 +16,7 @@ class ArbitrationModule:
         current_exposure_pct: float,
         max_exposure_limit_pct: float,
         active_positions_count: int,
-        max_concurrent_positions: int = 5,
+        max_concurrent_positions: int = 8,
         market_open: bool = True,
         enforce_market_hours: bool = True
     ) -> ArbitrationOutput:
