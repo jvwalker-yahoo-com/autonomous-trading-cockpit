@@ -208,6 +208,10 @@ class SimulatedBroker:
             return closed_trades
 
         pos = self.positions[symbol]
+        # Protect live eToro holdings: live accounts manage SL/TP on eToro's servers, and valuations come from eToro API
+        if pos.rationale == "Active Live eToro Holding":
+            return closed_trades
+
         pos.current_price = round(current_price, 2)
 
         if pos.direction == "LONG":
@@ -215,11 +219,11 @@ class SimulatedBroker:
             pos.unrealized_pnl_usd = round(pos.market_value_usd - pos.cost_basis_usd, 2)
             pos.unrealized_pnl_pct = round((pos.unrealized_pnl_usd / max(0.0001, pos.cost_basis_usd)) * 100.0, 2)
 
-            # Check SL / TP
-            if current_price <= pos.stop_loss:
+            # Check SL / TP (only trigger if target rate > 0.0)
+            if pos.stop_loss > 0.0 and current_price <= pos.stop_loss:
                 trade = self.close_position(symbol, current_price, exit_rationale=f"Stop-Loss hit at {current_price:.2f} (Target SL: {pos.stop_loss:.2f})")
                 if trade: closed_trades.append(trade)
-            elif current_price >= pos.take_profit:
+            elif pos.take_profit > 0.0 and current_price >= pos.take_profit:
                 trade = self.close_position(symbol, current_price, exit_rationale=f"Take-Profit hit at {current_price:.2f} (Target TP: {pos.take_profit:.2f})")
                 if trade: closed_trades.append(trade)
 
@@ -229,11 +233,11 @@ class SimulatedBroker:
             pos.unrealized_pnl_usd = round(pnl, 2)
             pos.unrealized_pnl_pct = round((pos.unrealized_pnl_usd / max(0.0001, pos.cost_basis_usd)) * 100.0, 2)
 
-            # Check SL / TP for Short
-            if current_price >= pos.stop_loss:
+            # Check SL / TP for Short (only trigger if target rate > 0.0)
+            if pos.stop_loss > 0.0 and current_price >= pos.stop_loss:
                 trade = self.close_position(symbol, current_price, exit_rationale=f"Stop-Loss hit on SHORT at {current_price:.2f} (Target SL: {pos.stop_loss:.2f})")
                 if trade: closed_trades.append(trade)
-            elif current_price <= pos.take_profit:
+            elif pos.take_profit > 0.0 and current_price <= pos.take_profit:
                 trade = self.close_position(symbol, current_price, exit_rationale=f"Take-Profit hit on SHORT at {current_price:.2f} (Target TP: {pos.take_profit:.2f})")
                 if trade: closed_trades.append(trade)
 

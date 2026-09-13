@@ -283,8 +283,9 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     indicators = data_feed.get_technical_indicators(symbol)
     sentiment = data_feed.get_news_sentiment(symbol)
     
-    # 2. Check stops on existing open positions
-    broker.update_price_and_check_stops(symbol, quote.price)
+    # 2. Check stops on existing open positions (simulation mode only; live positions are managed by eToro)
+    if config.simulation_mode:
+        broker.update_price_and_check_stops(symbol, quote.price)
 
     # 3. Compute telemetry metrics (Risk, Impact, Slippage, Latency)
     metrics = metrics_module.compute_all(indicators, actual_latency_ms=data_feed.api_latency_ms)
@@ -592,6 +593,19 @@ def get_trades():
         "total_trades": len(broker.trade_ledger),
         "trades": broker.trade_ledger
     }
+
+@app.post("/api/trades/clear", tags=["Portfolio"])
+def clear_trade_ledger():
+    """Clears trade ledger history and resets realized PnL to zero."""
+    broker.trade_ledger.clear()
+    learner.mistake_history.clear()
+    learner.total_trades_evaluated = 0
+    learner.winning_trades_count = 0
+    learner.losing_trades_count = 0
+    learner.total_win_usd = 0.0
+    learner.total_loss_usd = 0.0
+    broker.save_state()
+    return {"status": "success", "message": "Trade ledger cleared and realized PnL reset to zero."}
 
 @app.get("/api/daily_report", tags=["Portfolio"])
 def get_daily_report():
@@ -1319,6 +1333,8 @@ def reset_portfolio():
         "news_sentiment": 0.25
     }
     broker.save_state()
+    if config.execution_mode == "live":
+        sync_live_etoro_portfolio_if_live(force=True)
     return {"status": "reset", "cash": broker.cash}
 
 # ==========================================

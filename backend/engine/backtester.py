@@ -184,17 +184,17 @@ class BacktesterEngine:
                 exit_rationale = ""
 
                 if is_long:
-                    if curr_p <= sl_p:
+                    if sl_p > 0 and curr_p <= sl_p:
                         closed = True
                         exit_rationale = f"Stop-Loss hit at ${curr_p:.2f} (Target SL: ${sl_p:.2f})"
-                    elif curr_p >= tp_p:
+                    elif tp_p > 0 and curr_p >= tp_p:
                         closed = True
                         exit_rationale = f"Take-Profit hit at ${curr_p:.2f} (Target TP: ${tp_p:.2f})"
                 else: # SHORT
-                    if curr_p >= sl_p:
+                    if sl_p > 0 and curr_p >= sl_p:
                         closed = True
                         exit_rationale = f"Stop-Loss hit on SHORT at ${curr_p:.2f} (Target SL: ${sl_p:.2f})"
-                    elif curr_p <= tp_p:
+                    elif tp_p > 0 and curr_p <= tp_p:
                         closed = True
                         exit_rationale = f"Take-Profit hit on SHORT at ${curr_p:.2f} (Target TP: ${tp_p:.2f})"
 
