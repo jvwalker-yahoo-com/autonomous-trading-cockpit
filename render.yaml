@@ -15,3 +15,9 @@ services:
         value: "10000.0"
       - key: FINNHUB_API_KEY
         sync: false
+      - key: MAX_CONCURRENT_POSITIONS
+        value: "15"
+      - key: MAX_PORTFOLIO_EXPOSURE_PCT
+        value: "0.85"
+      - key: MAX_POSITION_SIZE_USD
+        value: "250.0"

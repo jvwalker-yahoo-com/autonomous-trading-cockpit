@@ -358,10 +358,10 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
 
     # Execution if arbitration approved
     if arbitration.approved and signal in ("BUY", "SHORT"):
-        # Position sizing based on confidence & risk budget (capped at $100 for stocks, $100-$200 for indices)
+        # Position sizing based on confidence & risk budget (capped at $150 for stocks, $150-$250 for indices)
         is_index = symbol in ("UK100", "GER40", "FRA40", "SPX500", "NSDQ100", "DJ30")
         min_alloc = 100.0 if is_index else 20.0
-        max_alloc = min(config.max_position_size_usd, min(200.0 if is_index else 100.0, max(min_alloc, equity * 0.15)))
+        max_alloc = min(config.max_position_size_usd, min(250.0 if is_index else 150.0, max(min_alloc, equity * 0.20)))
         alloc_base = max_alloc * confidence
         allocated_usd = max(min_alloc, min(max_alloc, alloc_base))
         target_shares = round(allocated_usd / max(0.00000001, quote.price), 4)
