@@ -390,7 +390,8 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
         max_spread_pct_day_trade=config.max_spread_pct_day_trade,
         active_day_trades=active_day_trades,
         max_active_day_trades=config.day_trade_max_active,
-        day_trading_enabled=config.enable_day_trading
+        day_trading_enabled=config.enable_day_trading,
+        regime_trend=regime.trend
     )
 
     # 9. Decision Engine & Autonomous Execution
@@ -401,7 +402,7 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     rationale = f"Ensemble score: {federation.federated_score:+.2f} | Winning model: {federation.federation}"
 
     # Determine directional signal
-    conv_thresh = getattr(config, "min_conviction_score", 0.08)
+    conv_thresh = getattr(config, "min_conviction_score", 0.60)
     if federation.federated_score >= conv_thresh:
         signal = "BUY"
     elif federation.federated_score <= -conv_thresh:
@@ -433,7 +434,13 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
         is_index = symbol in ("UK100", "GER40", "FRA40", "SPX500", "NSDQ100", "DJ30")
         min_alloc = 100.0 if is_index else 20.0
         max_alloc = min(config.max_position_size_usd, min(250.0 if is_index else 150.0, max(min_alloc, equity * 0.20)))
-        alloc_base = max_alloc * confidence
+        # JEV Fractional Kelly Sizing: f = 0.25 × max(0, 2p-1) applied to max_alloc
+        # Falls back to confidence-scaled sizing if Kelly fraction is zero (no statistical edge)
+        kelly_f = getattr(federation, 'kelly_fraction', None)
+        if kelly_f and kelly_f > 0.0:
+            alloc_base = max_alloc * (kelly_f / 0.25)  # normalise: kelly_f=0.25 → 100% of max_alloc
+        else:
+            alloc_base = max_alloc * confidence
 
         # ATR Volatility-Adjusted Sizing
         if config.atr_volatility_sizing_enabled:

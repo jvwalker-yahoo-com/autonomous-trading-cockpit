@@ -28,7 +28,8 @@ class ArbitrationModule:
         max_spread_pct_day_trade: float = 0.0015,
         active_day_trades: int = 0,
         max_active_day_trades: int = 4,
-        day_trading_enabled: bool = True
+        day_trading_enabled: bool = True,
+        regime_trend: str = "CHOPPY"
     ) -> ArbitrationOutput:
         """
         Arbitrates final execution mode and trade clearance based on risk gates,
@@ -65,6 +66,11 @@ class ArbitrationModule:
             final_mode = "WARN" if not circuit_breaker else "HALTED"
             if anomaly_detected:
                 reasons.append("CRITICAL quadrant anomaly active: Execution restricted to defensive/exit orders only")
+
+        # 3b. JEV CRISIS Regime Gate: block new entries during crisis/turbulence
+        if regime_trend == "CRISIS":
+            approved = False
+            reasons.append("JEV CRISIS regime detected: all new entries blocked (hold & re-evaluate)")
 
         # 4. Portfolio Exposure Gate
         exposure_ok = current_exposure_pct < max_exposure_limit_pct

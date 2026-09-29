@@ -16,7 +16,7 @@ class RegimeState(BaseModel):
     latency: float = Field(..., description="Latency metric in ms")
     score: float = Field(..., description="Combined regime score (risk+impact+slippage)/3")
     mode: str = Field(..., description="OK, WARN, or CRITICAL")
-    trend: str = Field("CHOPPY", description="BULL_TREND, BEAR_TREND, or CHOPPY")
+    trend: str = Field("CHOPPY", description="BULL_TREND, BEAR_TREND, MEAN_REVERSION, VOL_EXPANSION, VOL_CONTRACTION, CRISIS, or CHOPPY")
     events: List[str] = Field(default_factory=list, description="Recent state events")
     timestamp: str = Field(default_factory=utc_now_str)
 
@@ -33,6 +33,8 @@ class FederationOutput(BaseModel):
     federation: str = Field(..., description="Aggregated winning model / strategy name")
     federated_score: float = Field(..., description="Weighted ensemble score (-1 to 1)")
     model_details: List[ModelSignal] = Field(default_factory=list)
+    calibrated_prob: Optional[float] = None   # JEV-style calibrated probability [0,1]
+    kelly_fraction: Optional[float] = None    # Fractional Kelly position size fraction
     timestamp: str = Field(default_factory=utc_now_str)
 
 class ArbitrationOutput(BaseModel):

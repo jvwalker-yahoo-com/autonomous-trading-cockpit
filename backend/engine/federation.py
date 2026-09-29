@@ -196,22 +196,59 @@ class FederationModule:
             "pattern_recognition": s_pat
         }
 
-        # Dynamic Regime-Aware Strategy Calibration:
+        # JEV Regime-Aware Strategy Calibration (6 regimes)
         if trend in ("BULL_TREND", "BEAR_TREND"):
+            # Strong directional trend: momentum dominates
             regime_priors = {
-                "momentum_trend": 0.35,
+                "momentum_trend": 0.40,
                 "pattern_recognition": 0.25,
-                "volatility_breakout": 0.20,
-                "news_sentiment": 0.12,
-                "mean_reversion": 0.08
+                "volatility_breakout": 0.18,
+                "news_sentiment": 0.10,
+                "mean_reversion": 0.07
             }
-        else:  # CHOPPY / Range-Bound
+        elif trend == "MEAN_REVERSION":
+            # RSI extremes without trend: mean reversion dominates
             regime_priors = {
-                "mean_reversion": 0.40,
+                "mean_reversion": 0.45,
                 "pattern_recognition": 0.25,
+                "volatility_breakout": 0.12,
+                "news_sentiment": 0.10,
+                "momentum_trend": 0.08
+            }
+        elif trend == "VOL_EXPANSION":
+            # Expanding volatility: breakouts and patterns dominate
+            regime_priors = {
+                "volatility_breakout": 0.40,
+                "pattern_recognition": 0.30,
+                "momentum_trend": 0.15,
+                "news_sentiment": 0.10,
+                "mean_reversion": 0.05
+            }
+        elif trend == "VOL_CONTRACTION":
+            # Tight range: pattern breakout setup, reduce momentum
+            regime_priors = {
+                "pattern_recognition": 0.35,
+                "mean_reversion": 0.30,
+                "volatility_breakout": 0.20,
+                "news_sentiment": 0.10,
+                "momentum_trend": 0.05
+            }
+        elif trend == "CRISIS":
+            # Crisis: news sentiment and anomaly detection most important; reduce all else
+            regime_priors = {
+                "news_sentiment": 0.45,
+                "mean_reversion": 0.25,
+                "pattern_recognition": 0.15,
+                "volatility_breakout": 0.10,
+                "momentum_trend": 0.05
+            }
+        else:  # CHOPPY
+            regime_priors = {
+                "mean_reversion": 0.35,
+                "pattern_recognition": 0.28,
                 "volatility_breakout": 0.15,
                 "news_sentiment": 0.12,
-                "momentum_trend": 0.08
+                "momentum_trend": 0.10
             }
 
         # Blend regime prior with adaptive learner weights
@@ -243,10 +280,23 @@ class FederationModule:
             ModelSignal(name="News Sentiment (Finnhub)", signal=sig_sent, score=s_sent, weight=round(normalized_weights["news_sentiment"], 3), rationale=rat_sent),
         ]
 
+        # JEV Calibration: convert raw score to calibrated probability p ∈ [0,1]
+        # Uses logistic mapping: p = 1 / (1 + exp(-k * score)) with k=4
+        # Neutral score (0.0) → p=0.5; strong score (±0.75) → p≈0.95/0.05
+        import math
+        k = 4.0
+        calibrated_prob = 1.0 / (1.0 + math.exp(-k * weighted_score))
+
+        # Fractional Kelly Criterion: f = 0.25 × max(0, 2p - 1)
+        # Maps p=0.50 → f=0.0 (no edge), p=0.75 → f=0.125, p=1.0 → f=0.25
+        kelly_fraction = 0.25 * max(0.0, 2.0 * calibrated_prob - 1.0)
+
         return FederationOutput(
             outputs=scores_map,
             weights={k: round(v, 3) for k, v in normalized_weights.items()},
             federation=dominant_model,
             federated_score=round(weighted_score, 4),
-            model_details=model_details
+            model_details=model_details,
+            calibrated_prob=round(calibrated_prob, 4),
+            kelly_fraction=round(kelly_fraction, 4)
         )
