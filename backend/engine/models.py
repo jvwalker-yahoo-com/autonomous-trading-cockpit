@@ -43,12 +43,17 @@ class ArbitrationOutput(BaseModel):
     drawdown_ok: bool = True
     exposure_ok: bool = True
     circuit_breaker_active: bool = False
+    daily_loss_circuit_breaker_active: bool = False
+    spread_filter_passed: bool = True
+    day_trade_approved: bool = True
     reasons: List[str] = Field(default_factory=list)
     timestamp: str = Field(default_factory=utc_now_str)
 
 class DecisionOutput(BaseModel):
     symbol: str
     signal: str # "BUY", "SELL", "SHORT", "HOLD"
+    horizon: str = "swing" # "day" or "swing"
+    pattern_detected: Optional[str] = None # e.g. "Double Bottom Reversal", "Volume Surge Breakout"
     main_mode: str
     finalMode: str
     target_shares: float # fractional shares
@@ -95,6 +100,7 @@ class Position(BaseModel):
     id: str
     symbol: str
     direction: str # "LONG" or "SHORT"
+    horizon: str = "swing" # "day" (intraday, EOD auto-flatten) or "swing" (multi-day)
     shares: float # Fractional share count (e.g. 0.354 shares)
     entry_price: float
     current_price: float
@@ -105,6 +111,7 @@ class Position(BaseModel):
     stop_loss: float
     take_profit: float
     entry_time: str
+    max_hold_until: Optional[str] = None # EOD expiration for day trades
     rationale: str
     contributing_models: Dict[str, float] = Field(default_factory=dict)
 
@@ -112,6 +119,7 @@ class TradeRecord(BaseModel):
     id: str
     symbol: str
     direction: str # "LONG" or "SHORT"
+    horizon: str = "swing" # "day" or "swing"
     shares: float # Fractional shares
     entry_price: float
     exit_price: float
@@ -164,6 +172,12 @@ class PortfolioSummary(BaseModel):
     open_positions: List[Position]
     active_symbol: str
     simulation_mode: bool
+    day_trades_count: int = 0
+    day_trades_win_rate_pct: float = 0.0
+    day_trades_realized_pnl_usd: float = 0.0
+    daily_drawdown_usd: float = 0.0
+    daily_loss_limit_hit: bool = False
+    day_trading_enabled: bool = True
 
 class StockPerformanceSummary(BaseModel):
     symbol: str

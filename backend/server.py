@@ -227,6 +227,28 @@ async def autonomous_background_worker_loop():
                 await asyncio.sleep(config.execution_loop_interval * 3)
                 continue
 
+            # Autonomous End-of-Day (EOD) Auto-Flatten Routine for Day Trades:
+            # Day trades must NEVER be held overnight to avoid overnight gap risk and CFD financing fees.
+            # Flattens active day trades within buffer before market close (e.g. 15 mins before 20:00 UTC / 21:00 UK)
+            # OR if an individual day trade has exceeded max_hold_hours (e.g. 4.0 hours).
+            if config.enable_day_trading:
+                mins_to_close = (config.market_close_hour_utc * 60 + config.market_close_minute_utc) - (now_utc.hour * 60 + now_utc.minute)
+                should_eod_flatten = (0 <= mins_to_close <= config.day_trade_eod_flatten_minutes_before_close)
+                
+                # Check individual position expiration
+                has_expired_day_trades = False
+                now_iso = now_utc.isoformat()
+                for p in broker.positions.values():
+                    if getattr(p, "horizon", "swing") == "day" and p.max_hold_until and now_iso >= p.max_hold_until:
+                        has_expired_day_trades = True
+                        break
+
+                if should_eod_flatten or has_expired_day_trades:
+                    reason = "EOD Auto-Flatten: Approaching market close" if should_eod_flatten else "Day Trade Max Hold Duration Expired"
+                    flattened = await asyncio.to_thread(broker.auto_flatten_day_trades, None, reason, data_feed)
+                    if flattened:
+                        logger.info(f"☀️ [EOD AUTO-FLATTEN] Liquidated {len(flattened)} intraday day trades ({[t.symbol for t in flattened]}). Long-term holdings preserved.")
+
             # Dynamic multi-asset discovery across tradable US Equities (Crypto & structural non-tradables excluded)
             if config.auto_rotate_universe and (now - last_universe_scan > config.universe_scan_interval_sec):
                 last_universe_scan = now
@@ -272,6 +294,13 @@ class ConfigUpdateRequest(BaseModel):
     execution_mode: Optional[str] = None
     watchlist: Optional[List[str]] = None
     max_concurrent_positions: Optional[int] = None
+    enable_day_trading: Optional[bool] = None
+    day_trade_allocation_pct: Optional[float] = None
+    day_trade_max_active: Optional[int] = None
+    day_trade_stop_loss_pct: Optional[float] = None
+    day_trade_take_profit_pct: Optional[float] = None
+    day_trade_max_hold_hours: Optional[float] = None
+    max_daily_loss_usd: Optional[float] = None
 
 class ModeSwitchRequest(BaseModel):
     mode: str # "demo" or "live"
@@ -280,6 +309,7 @@ class ManualTradeRequest(BaseModel):
     symbol: str
     action: str # "BUY", "SHORT", "CLOSE"
     amount_usd: Optional[float] = 100.0
+    horizon: Optional[str] = "swing" # "day" or "swing"
 
 def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     """
@@ -328,6 +358,18 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     exposure_pct = total_invested / max(1.0, equity)
     market_open, session_msg = telemetry_module.is_etoro_uk_market_open(symbol)
     
+    # 8. Arbitration & Risk Gates (including eToro UK Market Hours gate, Daily Drawdown & Spread Filter)
+    equity = broker.get_equity()
+    peak = max(broker.peak_equity, equity)
+    drawdown_pct = (peak - equity) / max(1.0, peak)
+    total_invested = sum(p.market_value_usd for p in broker.positions.values())
+    exposure_pct = total_invested / max(1.0, equity)
+    market_open, session_msg = telemetry_module.is_etoro_uk_market_open(symbol)
+    
+    daily_drawdown_usd, daily_drawdown_pct = broker.get_daily_drawdown()
+    active_day_trades = len([p for p in broker.positions.values() if getattr(p, "horizon", "swing") == "day"])
+    estimated_spread_pct = getattr(config, "spread_pct", 0.0005)
+
     arbitration = arbitration_module.arbitration(
         main_mode=regime.mode,
         quadrant=quadrant.quadrant,
@@ -339,7 +381,16 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
         active_positions_count=len(broker.positions),
         max_concurrent_positions=getattr(config, "max_concurrent_positions", 8),
         market_open=market_open,
-        enforce_market_hours=config.enforce_market_hours
+        enforce_market_hours=config.enforce_market_hours,
+        daily_drawdown_usd=daily_drawdown_usd,
+        max_daily_loss_usd=config.max_daily_loss_usd,
+        daily_drawdown_pct=daily_drawdown_pct,
+        max_daily_loss_pct=config.max_daily_loss_pct,
+        estimated_spread_pct=estimated_spread_pct,
+        max_spread_pct_day_trade=config.max_spread_pct_day_trade,
+        active_day_trades=active_day_trades,
+        max_active_day_trades=config.day_trade_max_active,
+        day_trading_enabled=config.enable_day_trading
     )
 
     # 9. Decision Engine & Autonomous Execution
@@ -356,13 +407,41 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     elif federation.federated_score <= -conv_thresh:
         signal = "SHORT"
 
+    # Evaluate Trade Horizon (Day Trading vs Long-Term / Swing)
+    vol_surge = float(indicators.get("volume_surge", 1.0))
+    breakout = str(indicators.get("breakout_type", "NONE"))
+    db_det = float(indicators.get("double_bottom_detected", 0.0)) > 0
+    dt_det = float(indicators.get("double_top_detected", 0.0)) > 0
+    adx_val = float(indicators.get("adx", 20.0))
+    pattern_desc = "Double Bottom" if db_det else ("Double Top" if dt_det else (breakout if breakout != "NONE" else None))
+
+    is_day_setup = (vol_surge >= 1.25 or breakout != "NONE" or db_det or dt_det or (adx_val >= 28.0 and confidence >= 0.15))
+    can_day_trade = config.enable_day_trading and arbitration.day_trade_approved and is_day_setup
+
+    trade_horizon = "day" if can_day_trade else "swing"
+    
+    if trade_horizon == "day":
+        sl_pct = config.day_trade_stop_loss_pct
+        tp_pct = config.day_trade_take_profit_pct
+    else:
+        sl_pct = config.default_stop_loss_pct
+        tp_pct = config.default_take_profit_pct
+
     # Execution if arbitration approved
     if arbitration.approved and signal in ("BUY", "SHORT"):
-        # Position sizing based on confidence & risk budget (capped at $150 for stocks, $150-$250 for indices)
+        # Position sizing based on confidence, ATR volatility adjustment, and risk budget
         is_index = symbol in ("UK100", "GER40", "FRA40", "SPX500", "NSDQ100", "DJ30")
         min_alloc = 100.0 if is_index else 20.0
         max_alloc = min(config.max_position_size_usd, min(250.0 if is_index else 150.0, max(min_alloc, equity * 0.20)))
         alloc_base = max_alloc * confidence
+
+        # ATR Volatility-Adjusted Sizing
+        if config.atr_volatility_sizing_enabled:
+            atr = float(indicators.get("atr", quote.price * 0.015))
+            norm_atr = max(0.005, min(0.05, atr / max(0.01, quote.price)))
+            vol_scaler = 0.015 / norm_atr
+            alloc_base = alloc_base * vol_scaler
+
         allocated_usd = max(min_alloc, min(max_alloc, alloc_base))
         target_shares = round(allocated_usd / max(0.00000001, quote.price), 4)
 
@@ -384,11 +463,11 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
                     inst_id = etoro_client.resolve_instrument_id(symbol)
                     is_short = (trade_dir == "SHORT")
                     sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
-                    sl_rate = round(quote.price * (1.0 + config.default_stop_loss_pct if is_short else 1.0 - config.default_stop_loss_pct), sl_prec)
-                    tp_rate = round(quote.price * (1.0 - config.default_take_profit_pct if is_short else 1.0 + config.default_take_profit_pct), sl_prec)
+                    sl_rate = round(quote.price * (1.0 + sl_pct if is_short else 1.0 - sl_pct), sl_prec)
+                    tp_rate = round(quote.price * (1.0 - tp_pct if is_short else 1.0 + tp_pct), sl_prec)
 
                     id_desc = f"ID: {inst_id}" if inst_id else "symbol-only"
-                    logger.info(f"⚡ [LIVE ETORO ORDER] Dispatching {trade_dir} on {symbol} ({id_desc}) for ${allocated_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
+                    logger.info(f"⚡ [LIVE ETORO ORDER] Dispatching [{trade_horizon.upper()}] {trade_dir} on {symbol} ({id_desc}) for ${allocated_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
                     try:
                         order_res = etoro_client.create_order(
                             instrument_id=inst_id,
@@ -397,7 +476,7 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
                             stop_loss_rate=sl_rate,
                             take_profit_rate=tp_rate,
                             mode="real",
-                            symbol=symbol
+                            symbol=None if inst_id else symbol
                         )
                         if order_res.get("success"):
                             logger.info(f"✅ [LIVE ETORO SUCCESS] Order filled for {symbol}: {order_res}")
@@ -428,23 +507,27 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
                     direction=trade_dir,
                     allocated_usd=allocated_usd,
                     current_price=quote.price,
-                    stop_loss_pct=config.default_stop_loss_pct,
-                    take_profit_pct=config.default_take_profit_pct,
-                    rationale=f"Autonomous {trade_dir} entry on {symbol}. {rationale}. Dominant: {federation.federation}",
-                    contributing_models=federation.outputs
+                    stop_loss_pct=sl_pct,
+                    take_profit_pct=tp_pct,
+                    rationale=f"Autonomous [{trade_horizon.upper()}] {trade_dir} entry on {symbol}. {rationale}. Dominant: {federation.federation}",
+                    contributing_models=federation.outputs,
+                    horizon=trade_horizon,
+                    max_hold_hours=config.day_trade_max_hold_hours
                 )
 
     decision = DecisionOutput(
         symbol=symbol,
         signal=signal,
+        horizon=trade_horizon,
+        pattern_detected=pattern_desc,
         main_mode=regime.mode,
         finalMode=arbitration.final_mode,
         target_shares=target_shares,
         allocated_usd=round(allocated_usd, 2),
         confidence=round(confidence, 2),
         current_price=quote.price,
-        stop_loss=round(quote.price * (0.975 if signal == "BUY" else 1.025), 2) if signal != "HOLD" else None,
-        take_profit=round(quote.price * (1.05 if signal == "BUY" else 0.95), 2) if signal != "HOLD" else None,
+        stop_loss=round(quote.price * ((1.0 - sl_pct) if signal == "BUY" else (1.0 + sl_pct)), 2) if signal != "HOLD" else None,
+        take_profit=round(quote.price * ((1.0 + tp_pct) if signal == "BUY" else (1.0 - tp_pct)), 2) if signal != "HOLD" else None,
         rationale=rationale
     )
 
@@ -841,7 +924,7 @@ def execute_manual_action(req: ManualTradeRequest):
         tp_rate = round(quote.price * (1.0 - config.default_take_profit_pct if is_short else 1.0 + config.default_take_profit_pct), sl_prec)
 
         id_desc = f"ID: {inst_id}" if inst_id else "symbol-only"
-        logger.info(f"⚡ [MANUAL LIVE ETORO ORDER] {direction} on {req.symbol} ({id_desc}) for ${alloc_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
+        logger.info(f"⚡ [MANUAL LIVE ETORO ORDER] [{req.horizon.upper()}] {direction} on {req.symbol} ({id_desc}) for ${alloc_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
         try:
             etoro_res = etoro_client.create_order(
                 instrument_id=inst_id,
@@ -850,18 +933,25 @@ def execute_manual_action(req: ManualTradeRequest):
                 stop_loss_rate=sl_rate,
                 take_profit_rate=tp_rate,
                 mode="real",
-                symbol=req.symbol
+                symbol=None if inst_id else req.symbol
             )
         except Exception as e:
             logger.error(f"eToro manual live order exception: {e}")
             etoro_res = {"success": False, "error": str(e)}
+
+    manual_sl = config.day_trade_stop_loss_pct if req.horizon == "day" else config.default_stop_loss_pct
+    manual_tp = config.day_trade_take_profit_pct if req.horizon == "day" else config.default_take_profit_pct
 
     pos = broker.execute_order(
         symbol=req.symbol,
         direction=direction,
         allocated_usd=alloc_usd,
         current_price=quote.price,
-        rationale=f"Manual user execution of {direction} on {req.symbol}"
+        stop_loss_pct=manual_sl,
+        take_profit_pct=manual_tp,
+        rationale=f"Manual user execution of [{req.horizon.upper()}] {direction} on {req.symbol}",
+        horizon=req.horizon or "swing",
+        max_hold_hours=config.day_trade_max_hold_hours
     )
     if not pos:
         raise HTTPException(status_code=400, detail="Insufficient capital or invalid order parameters")
@@ -889,7 +979,14 @@ def get_system_config():
         "max_position_size_usd": config.max_position_size_usd,
         "max_drawdown_limit_pct": config.max_drawdown_limit_pct,
         "max_concurrent_positions": getattr(config, "max_concurrent_positions", 8),
-        "min_conviction_score": getattr(config, "min_conviction_score", 0.08)
+        "min_conviction_score": getattr(config, "min_conviction_score", 0.08),
+        "enable_day_trading": config.enable_day_trading,
+        "day_trade_allocation_pct": config.day_trade_allocation_pct,
+        "day_trade_max_active": config.day_trade_max_active,
+        "day_trade_stop_loss_pct": config.day_trade_stop_loss_pct,
+        "day_trade_take_profit_pct": config.day_trade_take_profit_pct,
+        "day_trade_max_hold_hours": config.day_trade_max_hold_hours,
+        "max_daily_loss_usd": config.max_daily_loss_usd
     }
 
 @app.post("/api/config", tags=["Configuration"])
@@ -927,6 +1024,20 @@ def update_system_config(req: ConfigUpdateRequest):
         config.min_conviction_score = max(0.05, min(0.95, req.min_conviction_score))
     if req.max_concurrent_positions is not None:
         config.max_concurrent_positions = max(1, min(25, int(req.max_concurrent_positions)))
+    if req.enable_day_trading is not None:
+        config.enable_day_trading = bool(req.enable_day_trading)
+    if req.day_trade_allocation_pct is not None:
+        config.day_trade_allocation_pct = req.day_trade_allocation_pct
+    if req.day_trade_max_active is not None:
+        config.day_trade_max_active = int(req.day_trade_max_active)
+    if req.day_trade_stop_loss_pct is not None:
+        config.day_trade_stop_loss_pct = req.day_trade_stop_loss_pct
+    if req.day_trade_take_profit_pct is not None:
+        config.day_trade_take_profit_pct = req.day_trade_take_profit_pct
+    if req.day_trade_max_hold_hours is not None:
+        config.day_trade_max_hold_hours = req.day_trade_max_hold_hours
+    if req.max_daily_loss_usd is not None:
+        config.max_daily_loss_usd = req.max_daily_loss_usd
     if req.watchlist is not None:
         config.watchlist = [s for s in req.watchlist if s not in CRYPTO_SYMBOLS]
         logger.info(f"Updated watchlist to {len(config.watchlist)} assets (Crypto purged): {config.watchlist[:10]}")
@@ -940,11 +1051,73 @@ def update_system_config(req: ConfigUpdateRequest):
         "etoro_base_url": config.etoro_base_url,
         "finnhub_api_key": config.finnhub_api_key,
         "min_conviction_score": config.min_conviction_score,
-        "max_concurrent_positions": getattr(config, "max_concurrent_positions", 8)
+        "max_concurrent_positions": getattr(config, "max_concurrent_positions", 8),
+        "enable_day_trading": config.enable_day_trading,
+        "day_trade_max_active": config.day_trade_max_active,
+        "day_trade_stop_loss_pct": config.day_trade_stop_loss_pct,
+        "day_trade_take_profit_pct": config.day_trade_take_profit_pct,
+        "max_daily_loss_usd": config.max_daily_loss_usd
     })
     if config.execution_mode == "live" and etoro_client.is_configured():
         sync_live_etoro_portfolio_if_live(force=True)
     return {"status": "updated", "config": get_system_config()}
+
+@app.get("/api/day_trading/status", tags=["Day Trading"])
+def get_day_trading_status():
+    """Returns real-time Day Trading status, daily drawdown, active day trades, and EOD auto-flatten timers."""
+    now_utc = datetime.now(timezone.utc)
+    daily_loss_usd, daily_loss_pct = broker.get_daily_drawdown()
+    day_positions = [p for p in broker.positions.values() if getattr(p, "horizon", "swing") == "day"]
+    
+    # Calculate minutes until EOD auto-flatten (e.g. 15 mins before 20:00 UTC)
+    flatten_hour = config.market_close_hour_utc
+    flatten_min = config.market_close_minute_utc - config.day_trade_eod_flatten_minutes_before_close
+    if flatten_min < 0:
+        flatten_hour -= 1
+        flatten_min += 60
+    
+    mins_now = now_utc.hour * 60 + now_utc.minute
+    mins_flatten = flatten_hour * 60 + flatten_min
+    mins_remaining = max(0, mins_flatten - mins_now) if mins_now < mins_flatten else 0
+
+    return {
+        "status": "success",
+        "enabled": config.enable_day_trading,
+        "active_day_trades_count": len(day_positions),
+        "max_active_day_trades": config.day_trade_max_active,
+        "daily_loss_usd": daily_loss_usd,
+        "daily_loss_limit_usd": config.max_daily_loss_usd,
+        "daily_loss_pct": round(daily_loss_pct * 100.0, 2),
+        "daily_loss_circuit_breaker_active": (daily_loss_usd >= config.max_daily_loss_usd),
+        "eod_flatten_target_time_utc": f"{flatten_hour:02d}:{flatten_min:02d} UTC",
+        "minutes_until_eod_flatten": mins_remaining,
+        "open_day_positions": [p.model_dump() for p in day_positions]
+    }
+
+@app.post("/api/day_trading/toggle", tags=["Day Trading"])
+def toggle_day_trading():
+    """Toggles Day Trading mode on or off."""
+    config.enable_day_trading = not config.enable_day_trading
+    broker.save_state({"enable_day_trading": config.enable_day_trading})
+    return {
+        "status": "success",
+        "enabled": config.enable_day_trading,
+        "message": f"Day Trading mode {'ENABLED' if config.enable_day_trading else 'DISABLED'}."
+    }
+
+@app.post("/api/day_trading/flatten", tags=["Day Trading"])
+def manual_flatten_day_trades():
+    """Manually triggers immediate EOD liquidation of all active day trades, preserving swing positions."""
+    flattened = broker.auto_flatten_day_trades(
+        exit_rationale="User manually triggered Day Trades Flatten",
+        data_feed=data_feed
+    )
+    return {
+        "status": "success",
+        "flattened_count": len(flattened),
+        "flattened_symbols": [t.symbol for t in flattened],
+        "message": f"Successfully liquidated {len(flattened)} day trades. Long-term positions preserved."
+    }
 
 # ==========================================
 # ETORO LIVE INTEGRATION & MODE SWITCH APIS

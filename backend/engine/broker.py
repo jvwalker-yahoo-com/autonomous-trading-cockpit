@@ -6,7 +6,7 @@ and persistent ledger storage.
 import json
 import uuid
 import os
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timezone, timedelta
 from .models import Position, TradeRecord, PortfolioSummary, StockPerformanceSummary, MultiDayPerformanceReport
 from .learner import AdaptiveLearner
@@ -172,6 +172,13 @@ class SimulatedBroker:
         
         unrealized = sum(p.unrealized_pnl_usd for p in self.positions.values())
 
+        # Day Trading performance breakdown
+        day_trades = [t for t in self.trade_ledger if getattr(t, "horizon", "swing") == "day"]
+        day_wins = [t for t in day_trades if t.win]
+        day_trades_pnl = sum(t.realized_pnl_usd for t in day_trades)
+        day_win_rate = (len(day_wins) / max(1, len(day_trades))) * 100.0 if day_trades else 0.0
+        daily_loss_usd, daily_loss_pct = self.get_daily_drawdown()
+
         return PortfolioSummary(
             cash=round(self.cash, 2),
             equity=round(equity, 2),
@@ -187,8 +194,80 @@ class SimulatedBroker:
             max_drawdown_pct=round(drawdown_pct * 100.0, 2),
             open_positions=list(self.positions.values()),
             active_symbol=active_symbol,
-            simulation_mode=simulation_mode
+            simulation_mode=simulation_mode,
+            day_trades_count=len(day_trades),
+            day_trades_win_rate_pct=round(day_win_rate, 1),
+            day_trades_realized_pnl_usd=round(day_trades_pnl, 2),
+            daily_drawdown_usd=daily_loss_usd,
+            daily_loss_limit_hit=(daily_loss_usd >= 35.0),
+            day_trading_enabled=True
         )
+
+    def get_daily_drawdown(self) -> Tuple[float, float]:
+        """
+        Calculates today's total intraday loss (Realized Losses + Active Day Trade Unrealized Losses).
+        Returns: (daily_loss_usd, daily_loss_pct)
+        """
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        
+        # Realized losses closed today
+        today_closed = [
+            t for t in self.trade_ledger 
+            if t.exit_time.startswith(today_str) and t.realized_pnl_usd < 0
+        ]
+        realized_loss_today = sum(abs(t.realized_pnl_usd) for t in today_closed)
+        
+        # Negative unrealized on active day trades
+        day_unrealized_loss = sum(
+            abs(p.unrealized_pnl_usd) for p in self.positions.values() 
+            if getattr(p, "horizon", "swing") == "day" and p.unrealized_pnl_usd < 0
+        )
+        
+        total_daily_loss = realized_loss_today + day_unrealized_loss
+        pct = (total_daily_loss / max(1.0, self.initial_capital)) if self.initial_capital > 0 else 0.0
+        return round(total_daily_loss, 2), round(pct, 4)
+
+    def auto_flatten_day_trades(
+        self,
+        current_prices: Optional[Dict[str, float]] = None,
+        exit_rationale: str = "EOD Auto-Flatten: Closing intraday day trade before market close",
+        data_feed = None
+    ) -> List[TradeRecord]:
+        """
+        Auto-liquidates all active positions with horizon == 'day' before market close.
+        Crucially:
+        - NEVER closes long-term / swing positions (horizon == 'swing').
+        - NEVER closes core manual holdings (AAPL, NVDA).
+        """
+        closed_trades = []
+        # Find all day trade symbols
+        day_symbols = [
+            sym for sym, pos in list(self.positions.items())
+            if getattr(pos, "horizon", "swing") == "day"
+            and sym not in ("AAPL", "NVDA") # Core holdings permanent safeguard
+        ]
+
+        for sym in day_symbols:
+            pos = self.positions.get(sym)
+            if not pos:
+                continue
+            price = pos.current_price
+            if current_prices and sym in current_prices:
+                price = current_prices[sym]
+            elif data_feed is not None:
+                try:
+                    quote = data_feed.get_latest_quote(sym)
+                    if quote and quote.price > 0:
+                        price = quote.price
+                except Exception:
+                    pass
+            tr = self.close_position(sym, price, exit_rationale=exit_rationale)
+            if tr:
+                closed_trades.append(tr)
+
+        if closed_trades:
+            self.save_state()
+        return closed_trades
 
     def execute_order(
         self,
@@ -199,10 +278,12 @@ class SimulatedBroker:
         stop_loss_pct: float = 0.025,
         take_profit_pct: float = 0.050,
         rationale: str = "",
-        contributing_models: Optional[Dict[str, float]] = None
+        contributing_models: Optional[Dict[str, float]] = None,
+        horizon: str = "swing", # "day" or "swing"
+        max_hold_hours: float = 4.0
     ) -> Optional[Position]:
         """
-        Executes a fractional share market order (Long or Short CFD).
+        Executes a fractional share market order (Long or Short CFD) with horizon tagging.
         """
         if allocated_usd > self.cash:
             allocated_usd = self.cash * 0.95 # Cap to available cash
@@ -236,10 +317,14 @@ class SimulatedBroker:
             tp_price = round(effective_price * (1.0 - take_profit_pct), sl_prec)
 
         pos_id = f"pos_{uuid.uuid4().hex[:8]}"
+        now_dt = datetime.now(timezone.utc)
+        max_hold_until = (now_dt + timedelta(hours=max_hold_hours)).isoformat() if horizon == "day" else None
+
         position = Position(
             id=pos_id,
             symbol=symbol,
             direction=direction,
+            horizon=horizon,
             shares=fractional_shares,
             entry_price=round(effective_price, sl_prec),
             current_price=round(current_price, sl_prec),
@@ -249,7 +334,8 @@ class SimulatedBroker:
             unrealized_pnl_pct=0.0,
             stop_loss=sl_price,
             take_profit=tp_price,
-            entry_time=datetime.now(timezone.utc).isoformat(),
+            entry_time=now_dt.isoformat(),
+            max_hold_until=max_hold_until,
             rationale=rationale,
             contributing_models=contributing_models or {}
         )
@@ -330,6 +416,7 @@ class SimulatedBroker:
             id=f"tr_{uuid.uuid4().hex[:8]}",
             symbol=symbol,
             direction=pos.direction,
+            horizon=getattr(pos, "horizon", "swing"),
             shares=pos.shares,
             entry_price=pos.entry_price,
             exit_price=round(current_price, 2),

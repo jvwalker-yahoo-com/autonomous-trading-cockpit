@@ -70,6 +70,10 @@
         <span class="pill-label">REGIME</span>
         <span class="pill-val mode-badge-ok" id="pillRegime">OK</span>
       </div>
+      <div class="telemetry-pill" id="pillDayTradingWrapper" title="Day Trading Mode & End-of-Day (EOD) Auto-Flatten Status">
+        <span class="pill-label">DAY TRADES</span>
+        <span class="pill-val mode-badge-ok" id="pillDayTrading" style="color: #f59e0b;">☀️ ACTIVE</span>
+      </div>
 
       <div class="action-btn-group">
         <button id="btnModeToggle" class="btn btn-outline" style="border-color: #10b981; color: #10b981; font-weight: bold; font-size: 11px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px;" title="Click to switch between Demo / Learning and Live eToro Trading">
@@ -363,7 +367,14 @@
     <article class="panel panel-positions">
       <div class="panel-header">
         <h3><span class="panel-num">07</span> ACTIVE POSITIONS (FRACTIONAL)</h3>
-        <div style="display: flex; gap: 8px; align-items: center;">
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <!-- Horizon Filters -->
+          <div style="display: flex; gap: 4px; background: rgba(255,255,255,0.05); padding: 2px; border-radius: 4px; border: 1px solid var(--border-color);">
+            <button id="filterHorizonAll" class="btn btn-horizon-filter active" data-horizon="all" style="padding: 2px 8px; font-size: 10px; background: var(--accent-cyan); color: #000; font-weight: bold; border-radius: 3px; cursor: pointer; border: none;">ALL</button>
+            <button id="filterHorizonDay" class="btn btn-horizon-filter" data-horizon="day" style="padding: 2px 8px; font-size: 10px; background: transparent; color: #fbbf24; font-weight: bold; border-radius: 3px; cursor: pointer; border: none;">☀️ DAY</button>
+            <button id="filterHorizonSwing" class="btn btn-horizon-filter" data-horizon="swing" style="padding: 2px 8px; font-size: 10px; background: transparent; color: #38bdf8; font-weight: bold; border-radius: 3px; cursor: pointer; border: none;">🌙 SWING</button>
+          </div>
+          <button id="btnFlattenDayTrades" class="btn" style="padding: 3px 10px; font-size: 11px; background: linear-gradient(135deg, #f59e0b, #d97706); border: 1px solid #f59e0b; color: #fff; border-radius: 4px; font-weight: 600; cursor: pointer;" title="Auto-liquidate open Day Trades immediately (protects long-term swing holdings and core AAPL/NVDA)">⚡ FLATTEN DAY TRADES</button>
           <button id="btnCloseAllPositions" class="btn" style="padding: 3px 10px; font-size: 11px; background: #dc2626; border: 1px solid #ef4444; color: #fff; border-radius: 4px; font-weight: 600; cursor: pointer;">🚨 CLOSE ALL TRADES</button>
           <span class="badge" id="posCountBadge">0 OPEN</span>
         </div>
@@ -373,6 +384,7 @@
           <thead>
             <tr>
               <th>SYMBOL</th>
+              <th>HORIZON</th>
               <th>TYPE</th>
               <th>SHARES</th>
               <th>ENTRY</th>
@@ -384,7 +396,7 @@
             </tr>
           </thead>
           <tbody id="positionsTableBody">
-            <tr><td colspan="9" class="text-center text-muted">No active open positions. Autonomous scanner active.</td></tr>
+            <tr><td colspan="10" class="text-center text-muted">No active open positions. Autonomous scanner active.</td></tr>
           </tbody>
         </table>
       </div>
@@ -609,6 +621,50 @@
           </div>
         </div>
 
+        <!-- Day Trading & Intraday Risk Management Section -->
+        <div style="background: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 14px;">
+          <h4 style="color: #f59e0b; margin: 0 0 10px 0; font-size: 13px; display: flex; align-items: center; justify-content: space-between;">
+            <span>☀️ DAY TRADING & INTRADAY RISK ENGINE</span>
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; text-transform: none;">
+              <input type="checkbox" id="inputEnableDayTrading" checked style="accent-color: #f59e0b;">
+              <span style="color: #fbbf24; font-weight: bold;">ENABLE DAY TRADING</span>
+            </label>
+          </h4>
+          <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.4;">
+            Operates alongside long-term trades. Day trades are automatically tagged, monitored against tight intraday SL/TP limits, and auto-liquidated before market close to avoid overnight CFD rollover fees. Core holdings (AAPL, NVDA) are permanently shielded.
+          </p>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+            <div class="form-group">
+              <label for="inputDayTradeAllocPct" style="font-size: 10px; color: var(--text-color);">Day Trade Capital Allocation (%):</label>
+              <input type="number" id="inputDayTradeAllocPct" class="cyber-input" step="5" min="10" max="80" value="35">
+            </div>
+            <div class="form-group">
+              <label for="inputDayTradeMaxActive" style="font-size: 10px; color: var(--text-color);">Max Concurrent Day Trades:</label>
+              <input type="number" id="inputDayTradeMaxActive" class="cyber-input" step="1" min="1" max="10" value="4">
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+            <div class="form-group">
+              <label for="inputDayTradeSlPct" style="font-size: 10px; color: var(--text-color);">Intraday Stop-Loss (%):</label>
+              <input type="number" id="inputDayTradeSlPct" class="cyber-input" step="0.1" min="0.5" max="5.0" value="1.2">
+            </div>
+            <div class="form-group">
+              <label for="inputDayTradeTpPct" style="font-size: 10px; color: var(--text-color);">Intraday Take-Profit (%):</label>
+              <input type="number" id="inputDayTradeTpPct" class="cyber-input" step="0.2" min="1.0" max="10.0" value="2.4">
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div class="form-group">
+              <label for="inputMaxDailyLossUsd" style="font-size: 10px; color: var(--text-color);">Daily Loss Limit ($ Circuit Breaker):</label>
+              <input type="number" id="inputMaxDailyLossUsd" class="cyber-input" step="5" min="10" max="250" value="35.0">
+            </div>
+            <div class="form-group">
+              <label for="inputDayTradeEodFlattenMins" style="font-size: 10px; color: var(--text-color);">EOD Flatten (Mins Before Close):</label>
+              <input type="number" id="inputDayTradeEodFlattenMins" class="cyber-input" step="5" min="5" max="60" value="15">
+            </div>
+          </div>
+        </div>
+
         <!-- Trading & Finnhub Config -->
         <div class="form-group">
           <label for="selectSimMode">Default Execution Mode:</label>
@@ -807,7 +863,7 @@
   <div id="screenerModal" class="modal-overlay hidden">
     <div class="modal-card" style="max-width: 1050px; max-height: 90vh; display: flex; flex-direction: column;">
       <div class="modal-header">
-        <h3>🔍 MARKET SCREENER & UNIVERSAL STOCK UNIVERSE (100+ ASSETS)</h3>
+        <h3>🔍 MARKET SCREENER & STOCK UNIVERSE (100+ ASSETS)</h3>
         <button id="btnCloseScreenerModal" class="btn-close">&times;</button>
       </div>
       <div class="modal-body" style="overflow-y: auto; gap: 14px;">
@@ -815,15 +871,15 @@
         <!-- Quick Add Any Stock / Asset Bar -->
         <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
           <div style="flex: 1; min-width: 250px;">
-            <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 4px;">ADD ANY CRYPTO / COMMODITY / INDEX / ETF / STOCK TICKER:</label>
+            <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 4px;">ADD ANY US STOCK / INDEX / COMMODITY / ETF TICKER:</label>
             <div style="display: flex; gap: 8px;">
-              <input type="text" id="inputCustomTicker" class="cyber-input" placeholder="e.g. BTC, ETH, GOLD, OIL, SPX500, TSLA, PLTR, QQQ..." style="flex: 1; text-transform: uppercase;">
+              <input type="text" id="inputCustomTicker" class="cyber-input" placeholder="e.g. AAPL, NVDA, TSLA, PLTR, QQQ, SPX500, GOLD, OIL..." style="flex: 1; text-transform: uppercase;">
               <button id="btnAddCustomTicker" class="btn btn-primary" style="font-weight: bold;">➕ ADD TO BOT</button>
             </div>
           </div>
           <div style="border-left: 1px solid var(--border-color); padding-left: 10px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
-            <span style="font-size: 10px; color: var(--text-muted); width: 100%;">1-CLICK MULTI-ASSET PRESETS:</span>
-            <button class="btn btn-secondary btn-preset-wl" data-preset="crypto_top_coins" style="font-size: 11px;">🪙 Top Crypto (24/7)</button>
+            <span style="font-size: 10px; color: var(--text-muted); width: 100%;">1-CLICK ASSET PRESETS:</span>
+            <button class="btn btn-primary btn-preset-wl" data-preset="day_trade_movers" style="font-size: 11px; background: linear-gradient(135deg, #f59e0b, #d97706); border-color: #f59e0b; color: #fff;">⚡ Day Trading Movers</button>
             <button class="btn btn-secondary btn-preset-wl" data-preset="commodities_metals_energy" style="font-size: 11px;">🛢️ Commodities</button>
             <button class="btn btn-secondary btn-preset-wl" data-preset="global_indices" style="font-size: 11px;">📈 Global Indices</button>
             <button class="btn btn-secondary btn-preset-wl" data-preset="top_etfs" style="font-size: 11px;">🌐 Top ETFs</button>
@@ -851,8 +907,8 @@
         <div>
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
             <div style="display: flex; gap: 6px; flex-wrap: wrap;" id="screenerCategoryTabs">
-              <button class="btn btn-primary btn-cat-tab active" data-cat="all" style="font-size: 11px; padding: 4px 10px;">🌟 All Multi-Assets</button>
-              <button class="btn btn-secondary btn-cat-tab" data-cat="Crypto" style="font-size: 11px; padding: 4px 10px;">🪙 Crypto (24/7)</button>
+              <button class="btn btn-primary btn-cat-tab active" data-cat="all" style="font-size: 11px; padding: 4px 10px;">🌟 All Assets</button>
+              <button class="btn btn-secondary btn-cat-tab" data-cat="DayTrade" style="font-size: 11px; padding: 4px 10px; color: #fbbf24;">⚡ Day Trade Setups</button>
               <button class="btn btn-secondary btn-cat-tab" data-cat="Commodities" style="font-size: 11px; padding: 4px 10px;">🛢️ Commodities</button>
               <button class="btn btn-secondary btn-cat-tab" data-cat="Indices" style="font-size: 11px; padding: 4px 10px;">📈 Indices</button>
               <button class="btn btn-secondary btn-cat-tab" data-cat="ETFs" style="font-size: 11px; padding: 4px 10px;">🌐 ETFs</button>
@@ -877,7 +933,7 @@
                 </tr>
               </thead>
               <tbody id="screenerTableBody">
-                <tr><td colspan="10" class="text-center text-muted">Scanning multi-asset universe...</td></tr>
+                <tr><td colspan="10" class="text-center text-muted">Scanning universe...</td></tr>
               </tbody>
             </table>
           </div>
@@ -885,7 +941,7 @@
 
       </div>
       <div class="modal-footer" style="justify-content: space-between;">
-        <span id="screenerStatusMsg" class="text-muted" style="font-size: 11px;">Universe: 100+ verified multi-asset eToro instruments loaded (Crypto, Commodities, Indices, ETFs, Stocks).</span>
+        <span id="screenerStatusMsg" class="text-muted" style="font-size: 11px;">Universe: Verified multi-asset eToro instruments loaded (Commodities, Indices, ETFs, Stocks). Zero Crypto Policy.</span>
         <button id="btnCloseScreenerFooter" class="btn btn-secondary">CLOSE</button>
       </div>
     </div>

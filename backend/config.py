@@ -37,12 +37,25 @@ class SystemConfig(BaseModel):
     max_drawdown_limit_pct: float = float(os.getenv("MAX_DRAWDOWN_LIMIT_PCT", "0.15")) # 15% circuit breaker
     max_concurrent_positions: int = int(os.getenv("MAX_CONCURRENT_POSITIONS", "15")) # Max 15 concurrent open positions
     
-    # Trading Rules
+    # Trading Rules (Long-Term / Swing Trades)
     default_stop_loss_pct: float = float(os.getenv("DEFAULT_STOP_LOSS_PCT", "0.025")) # 2.5%
     default_take_profit_pct: float = float(os.getenv("DEFAULT_TAKE_PROFIT_PCT", "0.050")) # 5.0%
     min_conviction_score: float = float(os.getenv("MIN_CONVICTION_SCORE", "0.08")) # Conviction score required to trigger BUY/SHORT
     slippage_bps: float = float(os.getenv("SIM_SLIPPAGE_BPS", "5.0")) # 5 bps simulated slippage
     spread_pct: float = float(os.getenv("SIM_SPREAD_PCT", "0.0005")) # 0.05% eToro spread simulation
+    
+    # Day Trading & Intraday Execution Options (Integrated alongside Long-Term Trades)
+    enable_day_trading: bool = os.getenv("ENABLE_DAY_TRADING", "true").lower() in ("true", "1", "yes")
+    day_trade_allocation_pct: float = float(os.getenv("DAY_TRADE_ALLOCATION_PCT", "0.35")) # Max 35% of capital for day trades
+    day_trade_max_active: int = int(os.getenv("DAY_TRADE_MAX_ACTIVE", "4")) # Max 4 simultaneous active day trades
+    day_trade_stop_loss_pct: float = float(os.getenv("DAY_TRADE_STOP_LOSS_PCT", "0.012")) # 1.2% tighter stop for day trades
+    day_trade_take_profit_pct: float = float(os.getenv("DAY_TRADE_TAKE_PROFIT_PCT", "0.024")) # 2.4% take profit for 2:1 R:R
+    day_trade_max_hold_hours: float = float(os.getenv("DAY_TRADE_MAX_HOLD_HOURS", "4.0")) # Max 4 hours holding time
+    day_trade_eod_flatten_minutes_before_close: int = int(os.getenv("DAY_TRADE_EOD_FLATTEN_MINS", "15")) # 15 mins before market close
+    max_daily_loss_usd: float = float(os.getenv("MAX_DAILY_LOSS_USD", "35.0")) # $35.00 daily loss limit on £1,000/$1,300 account
+    max_daily_loss_pct: float = float(os.getenv("MAX_DAILY_LOSS_PCT", "0.025")) # 2.5% daily drawdown circuit breaker
+    max_spread_pct_day_trade: float = float(os.getenv("MAX_SPREAD_PCT_DAY_TRADE", "0.0015")) # 0.15% (15 bps) spread threshold
+    atr_volatility_sizing_enabled: bool = os.getenv("ATR_VOLATILITY_SIZING", "true").lower() in ("true", "1", "yes")
     
     # eToro UK Trading Hours Restriction (14:30 to 21:00 UK Time / 09:30 - 16:00 US EST, Monday - Friday)
     enforce_market_hours: bool = os.getenv("ENFORCE_MARKET_HOURS", "true").lower() in ("true", "1", "yes")

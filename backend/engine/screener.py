@@ -157,6 +157,10 @@ PRESET_WATCHLISTS = {
     "custom_13": {
         "title": "🎯 Classic Default Watchlist (13 Assets)",
         "symbols": ["MARA", "IREN", "SOXL", "TQQQ", "MSFT", "META", "APLD", "SPY", "QQQ", "BULL", "URA", "HOOD", "SOFI"]
+    },
+    "day_trade_movers": {
+        "title": "⚡ Day Trading Movers (High-Beta Intraday Runners)",
+        "symbols": ["NVDA", "TSLA", "PLTR", "ARM", "SMCI", "AMD", "META", "MSFT", "HOOD", "MARA", "COIN", "IREN", "MSTR"]
     }
 }
 
@@ -180,13 +184,15 @@ class MarketScreener:
     """Scans all multi-asset instruments across Commodities, Indices, ETFs, and Equities (Crypto Deactivated)."""
 
     @staticmethod
-    def scan_universe(data_feed_manager=None, category_filter: Optional[str] = None, top_n: int = 35, tradable_only: bool = False) -> List[Dict[str, Any]]:
+    def scan_universe(data_feed_manager=None, category_filter: Optional[str] = None, top_n: int = 35, tradable_only: bool = False, day_trade_only: bool = False) -> List[Dict[str, Any]]:
         """
         Scans multi-asset instruments and ranks by quantitative opportunity score.
         Evaluates:
         - Trend Strength (ADX >= 25)
         - SuperTrend Alignment (BULL vs BEAR)
         - RSI Momentum & Breakout confirmation
+        - Pattern Recognition (Double Bottom, Double Top, Range Breakout)
+        - Volume Surge Factor (Ratio > 1.2)
         - 24h Absolute Price Change %
         """
         if data_feed_manager is None:
@@ -201,11 +207,11 @@ class MarketScreener:
                 continue
 
             # When screening for autonomous trading, exclude commodities ($1,000 margin) and PRIIPs ETFs
-            if tradable_only or (category_filter and category_filter.lower() == "stock"):
+            if tradable_only or day_trade_only or (category_filter and category_filter.lower() in ("stock", "daytrade", "day_trade")):
                 if symbol in UNTRADABLE_RETAIL_SYMBOLS or info.get("asset_class", "").lower() != "stock":
                     continue
 
-            if category_filter and category_filter.lower() != "all" and category_filter.lower() != "stock":
+            if category_filter and category_filter.lower() not in ("all", "stock", "daytrade", "day_trade"):
                 if info.get("category", "").lower() != category_filter.lower() and info.get("asset_class", "").lower() != category_filter.lower():
                     continue
 
@@ -213,11 +219,15 @@ class MarketScreener:
             ind = data_feed_manager.get_technical_indicators(symbol)
 
             adx = ind.get("adx", 20.0)
-            supertrend_dir = ind.get("supertrend_direction", 1.0)
-            rsi = ind.get("rsi", 50.0)
+            supertrend_dir = ind.get("supertrend_direction", ind.get("supertrend_dir", 1.0))
+            rsi = ind.get("rsi_14", ind.get("rsi", 50.0))
             vwap = ind.get("vwap", quote.price)
             mfi = ind.get("mfi", 50.0)
             chg_pct = quote.change_pct
+            vol_surge = ind.get("volume_surge", 1.0)
+            breakout = ind.get("breakout_type", "NONE")
+            db_det = ind.get("double_bottom_detected", 0.0) > 0
+            dt_det = ind.get("double_top_detected", 0.0) > 0
 
             # Calculate Quantitative Score (0 to 100)
             score = 50.0
@@ -242,6 +252,27 @@ class MarketScreener:
                 if rsi < 50 and rsi > 30:
                     score += 10.0
 
+            # Pattern recognition bonuses
+            if db_det:
+                signal = "BUY (DOUBLE BOTTOM)"
+                score += 16.0
+            elif dt_det:
+                signal = "SHORT (DOUBLE TOP)"
+                score += 16.0
+
+            if breakout == "BULL_BREAKOUT":
+                signal = "BUY (RANGE BREAKOUT)"
+                score += 14.0
+            elif breakout == "BEAR_BREAKDOWN":
+                signal = "SHORT (RANGE BREAKDOWN)"
+                score += 14.0
+
+            # Volume surge confirmation bonus
+            if vol_surge >= 1.5:
+                score += 12.0
+            elif vol_surge >= 1.2:
+                score += 6.0
+
             # Extreme Mean-Reversion Bonus
             if rsi < 30 or mfi < 25:
                 signal = "BUY (OVERSOLD REBOUND)"
@@ -253,6 +284,15 @@ class MarketScreener:
             # Volatility bonus
             score += min(15.0, abs(chg_pct) * 2.0)
             final_score = min(99.0, max(10.0, round(score, 1)))
+
+            # Horizon classification
+            is_day_setup = (vol_surge >= 1.25 or breakout != "NONE" or db_det or dt_det or adx >= 26)
+            rec_horizon = "DAY" if is_day_setup else "LONG-TERM"
+
+            if (day_trade_only or (category_filter and category_filter.lower() in ("daytrade", "day_trade"))) and not is_day_setup:
+                continue
+
+            pattern_desc = "Double Bottom" if db_det else ("Double Top" if dt_det else (breakout if breakout != "NONE" else "Trend Continuation"))
 
             results.append({
                 "symbol": symbol,
@@ -267,6 +307,9 @@ class MarketScreener:
                 "supertrend": "BULLISH" if supertrend_dir > 0 else "BEARISH",
                 "rsi": round(rsi, 1),
                 "mfi": round(mfi, 1),
+                "volume_surge": round(vol_surge, 1),
+                "pattern": pattern_desc,
+                "recommended_horizon": rec_horizon,
                 "signal": signal,
                 "opportunity_score": final_score
             })

@@ -13,6 +13,8 @@ let activeSymbol = "AAPL";
 let currentSymbol = "AAPL";
 let isPolling = true;
 let pollTimer = null;
+let currentHorizonFilter = "all";
+let lastOpenPositions = [];
 
 // DOM Elements Cache
 const assetSelect = document.getElementById("symbolSelect");
@@ -92,6 +94,21 @@ const el = {
   // Panel 7: Positions
   posCountBadge: document.getElementById("posCountBadge"),
   positionsTableBody: document.getElementById("positionsTableBody"),
+  btnFlattenDayTrades: document.getElementById("btnFlattenDayTrades"),
+  filterHorizonAll: document.getElementById("filterHorizonAll"),
+  filterHorizonDay: document.getElementById("filterHorizonDay"),
+  filterHorizonSwing: document.getElementById("filterHorizonSwing"),
+
+  // Day Trading Status Pill & Config
+  pillDayTrading: document.getElementById("pillDayTrading"),
+  pillDayTradingWrapper: document.getElementById("pillDayTradingWrapper"),
+  inputEnableDayTrading: document.getElementById("inputEnableDayTrading"),
+  inputDayTradeAllocPct: document.getElementById("inputDayTradeAllocPct"),
+  inputDayTradeMaxActive: document.getElementById("inputDayTradeMaxActive"),
+  inputDayTradeSlPct: document.getElementById("inputDayTradeSlPct"),
+  inputDayTradeTpPct: document.getElementById("inputDayTradeTpPct"),
+  inputMaxDailyLossUsd: document.getElementById("inputMaxDailyLossUsd"),
+  inputDayTradeEodFlattenMins: document.getElementById("inputDayTradeEodFlattenMins"),
 
   // Panel 8: Learning & Mistakes
   learningRateBadge: document.getElementById("learningRateBadge"),
@@ -150,6 +167,7 @@ async function fetchCockpitData() {
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const data = await res.json();
     renderCockpit(data);
+    fetchDayTradingStatus();
   } catch (err) {
     console.warn("Cockpit telemetry poll error:", err);
     if (el.pillSyncDrift) {
@@ -336,28 +354,8 @@ function renderCockpit(data) {
 
   // 9. Panel 7: Positions Table
   if (portfolio && portfolio.open_positions) {
-    el.posCountBadge.textContent = `${portfolio.open_positions.length} OPEN`;
-    if (portfolio.open_positions.length === 0) {
-      el.positionsTableBody.innerHTML = `<tr><td colspan="9" class="text-center text-muted">No active open positions. Autonomous scanner analyzing opportunities...</td></tr>`;
-    } else {
-      el.positionsTableBody.innerHTML = portfolio.open_positions.map(p => {
-        const isLong = p.direction === "LONG";
-        const pnlColor = p.unrealized_pnl_usd >= 0 ? "color-success" : "color-danger";
-        return `
-          <tr>
-            <td><strong>${p.symbol}</strong></td>
-            <td><span class="badge ${isLong ? 'badge-ok' : 'badge-critical'}">${p.direction}</span></td>
-            <td>${p.shares.toFixed(4)}</td>
-            <td>$${p.entry_price.toFixed(2)}</td>
-            <td>$${p.current_price.toFixed(2)}</td>
-            <td>$${p.market_value_usd.toFixed(2)}</td>
-            <td class="${pnlColor}"><strong>${p.unrealized_pnl_usd >= 0 ? '+' : ''}$${p.unrealized_pnl_usd.toFixed(2)} (${p.unrealized_pnl_pct.toFixed(2)}%)</strong></td>
-            <td><small>SL: $${p.stop_loss.toFixed(2)}<br>TP: $${p.take_profit.toFixed(2)}</small></td>
-            <td><button class="btn btn-danger" style="padding: 2px 6px; font-size: 10px;" onclick="closePositionSymbol('${p.symbol}')">CLOSE</button></td>
-          </tr>
-        `;
-      }).join("");
-    }
+    lastOpenPositions = portfolio.open_positions || [];
+    renderPositionsTable();
   }
 
   // 10. Panel 8: Adaptive Learning & Mistakes
@@ -421,6 +419,126 @@ function updateGateItem(element, isPassed, label) {
 function setFlagActive(element, isActive) {
   if (isActive) element.classList.add("flag-active");
   else element.classList.remove("flag-active");
+}
+
+function renderPositionsTable() {
+  if (!el.positionsTableBody) return;
+  const filtered = lastOpenPositions.filter(p => {
+    if (currentHorizonFilter === "day") return p.horizon === "day";
+    if (currentHorizonFilter === "swing") return p.horizon !== "day";
+    return true;
+  });
+
+  const totalOpen = lastOpenPositions.length;
+  const dayCount = lastOpenPositions.filter(p => p.horizon === "day").length;
+  const swingCount = totalOpen - dayCount;
+
+  if (el.posCountBadge) {
+    el.posCountBadge.textContent = `${totalOpen} OPEN (${dayCount} DAY / ${swingCount} SWING)`;
+  }
+
+  if (filtered.length === 0) {
+    const filterMsg = currentHorizonFilter === "all"
+      ? "No active open positions. Autonomous scanner analyzing opportunities..."
+      : `No open ${currentHorizonFilter === "day" ? "Day Trades" : "Swing Trades"} currently active.`;
+    el.positionsTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted">${filterMsg}</td></tr>`;
+  } else {
+    el.positionsTableBody.innerHTML = filtered.map(p => {
+      const isLong = p.direction === "LONG";
+      const pnlColor = p.unrealized_pnl_usd >= 0 ? "color-success" : "color-danger";
+      const isDayTrade = p.horizon === "day";
+      const horizonBadge = isDayTrade
+        ? `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b; font-size: 10px; font-weight: bold;">☀️ DAY</span>`
+        : `<span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid #0284c7; font-size: 10px; font-weight: bold;">🌙 SWING</span>`;
+
+      return `
+        <tr>
+          <td><strong>${p.symbol}</strong></td>
+          <td>${horizonBadge}</td>
+          <td><span class="badge ${isLong ? 'badge-ok' : 'badge-critical'}">${p.direction}</span></td>
+          <td>${p.shares.toFixed(4)}</td>
+          <td>$${p.entry_price.toFixed(2)}</td>
+          <td>$${p.current_price.toFixed(2)}</td>
+          <td>$${p.market_value_usd.toFixed(2)}</td>
+          <td class="${pnlColor}"><strong>${p.unrealized_pnl_usd >= 0 ? '+' : ''}$${p.unrealized_pnl_usd.toFixed(2)} (${p.unrealized_pnl_pct.toFixed(2)}%)</strong></td>
+          <td><small>SL: $${p.stop_loss.toFixed(2)}<br>TP: $${p.take_profit.toFixed(2)}</small></td>
+          <td><button class="btn btn-danger" style="padding: 2px 6px; font-size: 10px;" onclick="closePositionSymbol('${p.symbol}')">CLOSE</button></td>
+        </tr>
+      `;
+    }).join("");
+  }
+}
+
+function setHorizonFilter(filter) {
+  currentHorizonFilter = filter;
+  [
+    { btn: el.filterHorizonAll, key: "all" },
+    { btn: el.filterHorizonDay, key: "day" },
+    { btn: el.filterHorizonSwing, key: "swing" }
+  ].forEach(item => {
+    if (!item.btn) return;
+    if (item.key === filter) {
+      item.btn.classList.add("active");
+      item.btn.style.background = filter === "day" ? "#f59e0b" : (filter === "swing" ? "#0284c7" : "var(--accent-cyan)");
+      item.btn.style.color = "#000";
+    } else {
+      item.btn.classList.remove("active");
+      item.btn.style.background = "transparent";
+      item.btn.style.color = item.key === "day" ? "#fbbf24" : (item.key === "swing" ? "#38bdf8" : "var(--text-muted)");
+    }
+  });
+  renderPositionsTable();
+}
+
+if (el.filterHorizonAll) el.filterHorizonAll.addEventListener("click", () => setHorizonFilter("all"));
+if (el.filterHorizonDay) el.filterHorizonDay.addEventListener("click", () => setHorizonFilter("day"));
+if (el.filterHorizonSwing) el.filterHorizonSwing.addEventListener("click", () => setHorizonFilter("swing"));
+
+async function fetchDayTradingStatus() {
+  if (!el.pillDayTrading) return;
+  try {
+    const res = await fetch(`${BASE_URL}/api/day_trading/status`);
+    if (res.ok) {
+      const data = await res.json();
+      if (!data.enabled) {
+        el.pillDayTrading.textContent = "⏸️ PAUSED";
+        el.pillDayTrading.style.color = "#94a3b8";
+        if (el.pillDayTradingWrapper) {
+          el.pillDayTradingWrapper.title = "Day Trading is paused. Click to toggle or configure.";
+        }
+      } else if (data.daily_loss_circuit_breaker_active) {
+        el.pillDayTrading.textContent = "🛑 CB TRIPPED";
+        el.pillDayTrading.style.color = "#ef4444";
+        if (el.pillDayTradingWrapper) {
+          el.pillDayTradingWrapper.title = `Daily loss limit reached ($${(data.daily_loss_usd || 0).toFixed(2)} / $${data.daily_loss_limit_usd}). Day trades halted until reset.`;
+        }
+      } else {
+        el.pillDayTrading.textContent = `☀️ ${data.active_day_trades_count}/${data.max_active_day_trades} ACTIVE`;
+        el.pillDayTrading.style.color = "#fbbf24";
+        if (el.pillDayTradingWrapper) {
+          el.pillDayTradingWrapper.title = `Day Trading Active: ${data.active_day_trades_count} open day positions (Max: ${data.max_active_day_trades}). Daily Drawdown: $${(data.daily_loss_usd || 0).toFixed(2)} / $${data.daily_loss_limit_usd}. EOD auto-flatten in effect (${data.minutes_until_eod_flatten}m to ${data.eod_flatten_target_time_utc}).`;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Error fetching day trading status:", err);
+  }
+}
+
+if (el.pillDayTradingWrapper) {
+  el.pillDayTradingWrapper.style.cursor = "pointer";
+  el.pillDayTradingWrapper.addEventListener("click", async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/day_trading/toggle`, { method: "POST" });
+      if (res.ok) {
+        const d = await res.json();
+        alert(`Day Trading mode is now ${d.enabled ? "ENABLED ☀️" : "PAUSED ⏸️"}.`);
+        fetchDayTradingStatus();
+      }
+    } catch (e) {
+      console.error("Error toggling day trading:", e);
+    }
+  });
 }
 
 // ==========================================
@@ -536,6 +654,36 @@ if (el.btnCloseAllPositions) {
     } catch (err) {
       alert("Failed to close all positions: " + err.message);
       el.btnCloseAllPositions.textContent = "🚨 CLOSE ALL TRADES";
+    }
+  });
+}
+
+if (el.btnFlattenDayTrades) {
+  el.btnFlattenDayTrades.addEventListener("click", async () => {
+    if (!confirm("⚡ Auto-flatten all open Day Trades right now?\n\nThis will safely liquidate active day trading positions before market close while leaving long-term swing holdings and manual AAPL/NVDA untouched.")) {
+      return;
+    }
+    const origText = el.btnFlattenDayTrades.textContent;
+    el.btnFlattenDayTrades.textContent = "⏳ FLATTENING...";
+    el.btnFlattenDayTrades.disabled = true;
+    try {
+      const res = await fetch(`${BASE_URL}/api/day_trading/flatten`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      el.btnFlattenDayTrades.textContent = "✓ FLATTENED";
+      alert(`⚡ DAY TRADES FLATTENED!\n\n${data.message}\nPositions Closed: ${data.flattened_count}`);
+      await fetchCockpitData();
+      await fetchDayTradingStatus();
+      setTimeout(() => {
+        if (el.btnFlattenDayTrades) {
+          el.btnFlattenDayTrades.textContent = origText;
+          el.btnFlattenDayTrades.disabled = false;
+        }
+      }, 3000);
+    } catch (err) {
+      alert("Failed to flatten day trades: " + err.message);
+      el.btnFlattenDayTrades.textContent = origText;
+      el.btnFlattenDayTrades.disabled = false;
     }
   });
 }
@@ -975,6 +1123,14 @@ if (el.btnSettings) {
         if (el.selectSimMode) el.selectSimMode.value = localStorage.getItem("execution_mode") || cfg.execution_mode || "live";
         if (el.inputRiskPct) el.inputRiskPct.value = ((cfg.risk_per_trade_pct || 0.02) * 100).toFixed(1);
         if (el.inputEtoroBaseUrl) el.inputEtoroBaseUrl.value = cfg.etoro_base_url || "https://public-api.etoro.com";
+
+        if (el.inputEnableDayTrading) el.inputEnableDayTrading.checked = cfg.enable_day_trading !== false;
+        if (el.inputDayTradeAllocPct) el.inputDayTradeAllocPct.value = Math.round((cfg.day_trade_allocation_pct || 0.35) * 100);
+        if (el.inputDayTradeMaxActive) el.inputDayTradeMaxActive.value = cfg.day_trade_max_active || 4;
+        if (el.inputDayTradeSlPct) el.inputDayTradeSlPct.value = ((cfg.day_trade_stop_loss_pct || 0.012) * 100).toFixed(1);
+        if (el.inputDayTradeTpPct) el.inputDayTradeTpPct.value = ((cfg.day_trade_take_profit_pct || 0.024) * 100).toFixed(1);
+        if (el.inputMaxDailyLossUsd) el.inputMaxDailyLossUsd.value = (cfg.max_daily_loss_usd || 35.0).toFixed(1);
+        if (el.inputDayTradeEodFlattenMins) el.inputDayTradeEodFlattenMins.value = cfg.day_trade_eod_flatten_minutes_before_close || 15;
       }
       if (etoroRes.ok) {
         const et = await etoroRes.json();
@@ -1005,18 +1161,33 @@ if (el.btnSaveConfig) {
     const etoroUserKey = el.inputEtoroUserKey ? el.inputEtoroUserKey.value.trim() : "";
     const etoroBaseUrl = el.inputEtoroBaseUrl ? el.inputEtoroBaseUrl.value.trim() || "https://public-api.etoro.com" : "https://public-api.etoro.com";
 
+    const enableDayTrading = el.inputEnableDayTrading ? el.inputEnableDayTrading.checked : true;
+    const dayTradeAllocPct = el.inputDayTradeAllocPct ? parseFloat(el.inputDayTradeAllocPct.value) / 100.0 : 0.35;
+    const dayTradeMaxActive = el.inputDayTradeMaxActive ? parseInt(el.inputDayTradeMaxActive.value) : 4;
+    const dayTradeSlPct = el.inputDayTradeSlPct ? parseFloat(el.inputDayTradeSlPct.value) / 100.0 : 0.012;
+    const dayTradeTpPct = el.inputDayTradeTpPct ? parseFloat(el.inputDayTradeTpPct.value) / 100.0 : 0.024;
+    const maxDailyLossUsd = el.inputMaxDailyLossUsd ? parseFloat(el.inputMaxDailyLossUsd.value) : 35.0;
+    const dayTradeEodFlattenMins = el.inputDayTradeEodFlattenMins ? parseInt(el.inputDayTradeEodFlattenMins.value) : 15;
+
     await fetch(`${BASE_URL}/api/config`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      finnhub_api_key: finnhubKey || null,
-      execution_mode: execMode,
-      risk_per_trade_pct: riskPct,
-      etoro_api_key: etoroApiKey || null,
-      etoro_user_key: etoroUserKey || null,
-      etoro_base_url: etoroBaseUrl
-    })
-  });
+      body: JSON.stringify({
+        finnhub_api_key: finnhubKey || null,
+        execution_mode: execMode,
+        risk_per_trade_pct: riskPct,
+        etoro_api_key: etoroApiKey || null,
+        etoro_user_key: etoroUserKey || null,
+        etoro_base_url: etoroBaseUrl,
+        enable_day_trading: enableDayTrading,
+        day_trade_allocation_pct: dayTradeAllocPct,
+        day_trade_max_active: dayTradeMaxActive,
+        day_trade_stop_loss_pct: dayTradeSlPct,
+        day_trade_take_profit_pct: dayTradeTpPct,
+        max_daily_loss_usd: maxDailyLossUsd,
+        day_trade_eod_flatten_minutes_before_close: dayTradeEodFlattenMins
+      })
+    });
 
   if (etoroApiKey) localStorage.setItem("etoro_api_key", etoroApiKey);
   if (etoroUserKey) localStorage.setItem("etoro_user_key", etoroUserKey);
@@ -1770,6 +1941,11 @@ async function loadScreenerScan(category = "all") {
           <td>
             <strong>${s.symbol}</strong>
             <span style="display: block; font-size: 10px; color: var(--text-muted);">${s.name}</span>
+            <div style="display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap;">
+              ${s.recommended_horizon === 'DAY' ? '<span class="badge" style="background: rgba(245,158,11,0.2); color:#fbbf24; border:1px solid #f59e0b; font-size:9px; padding: 1px 4px;">☀️ DAY</span>' : '<span class="badge" style="background: rgba(56,189,248,0.2); color:#38bdf8; border:1px solid #0284c7; font-size:9px; padding: 1px 4px;">🌙 SWING</span>'}
+              ${s.pattern_detected && s.pattern_detected !== "Trend Continuation" ? `<span class="badge" style="background: rgba(168,85,247,0.2); color:#c084fc; border:1px solid #a855f7; font-size:9px; padding: 1px 4px;">📐 ${s.pattern_detected}</span>` : ''}
+              ${s.vol_surge >= 1.25 ? `<span class="badge" style="background: rgba(16,185,129,0.2); color:#34d399; border:1px solid #10b981; font-size:9px; padding: 1px 4px;">⚡ ${s.vol_surge.toFixed(1)}x VOL</span>` : ''}
+            </div>
           </td>
           <td>
             <span class="badge badge-normal" style="font-size: 10px;">${s.asset_class || s.category}</span>
@@ -1939,6 +2115,12 @@ try {
   updateWatchlistUI();
 } catch (e) {
   console.error("updateWatchlistUI error on boot:", e);
+}
+
+try {
+  fetchDayTradingStatus();
+} catch (e) {
+  console.error("fetchDayTradingStatus error on boot:", e);
 }
 
 try {

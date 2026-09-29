@@ -5,7 +5,7 @@ Provides ADX (Trend Strength), SuperTrend, VWAP, MFI (Money Flow Index),
 Keltner Channels, Stochastic Oscillator, RSI, MACD, EMA, and ATR.
 """
 import numpy as np
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 
 class TechnicalIndicators:
     @staticmethod
@@ -170,3 +170,151 @@ class TechnicalIndicators:
         upper = mid + (multiplier * atr)
         lower = mid - (multiplier * atr)
         return round(upper, 2), round(mid, 2), round(lower, 2)
+
+    @staticmethod
+    def calc_volume_surge(volumes: np.ndarray, period: int = 20) -> float:
+        """
+        Volume Surge Factor from myhhub/stock:
+        Calculates ratio of latest volume to the rolling N-period volume moving average.
+        Ratio > 1.5 indicates institutional volume surge/breakout momentum.
+        """
+        if len(volumes) < 3:
+            return 1.0
+        n = min(len(volumes) - 1, period)
+        prev_vols = volumes[-n-1:-1]
+        baseline = float(np.mean(prev_vols)) if len(prev_vols) > 0 else float(volumes[-1])
+        if baseline <= 0:
+            return 1.0
+        return round(float(volumes[-1] / baseline), 2)
+
+    @staticmethod
+    def detect_range_breakout(prices: np.ndarray, highs: np.ndarray, lows: np.ndarray, period: int = 20) -> Tuple[str, float]:
+        """
+        Consolidation Range Breakout Engine from myhhub/stock.
+        Identifies price expansion outside of recent trading range.
+        Returns: (breakout_type: 'BULL_BREAKOUT' | 'BEAR_BREAKDOWN' | 'NONE', breakout_level)
+        """
+        if len(prices) < period + 1 or len(highs) < period + 1 or len(lows) < period + 1:
+            return "NONE", 0.0
+
+        n = min(len(prices) - 1, period)
+        range_high = float(np.max(highs[-n-1:-1]))
+        range_low = float(np.min(lows[-n-1:-1]))
+        current_price = float(prices[-1])
+
+        if current_price > range_high:
+            return "BULL_BREAKOUT", round(range_high, 2)
+        elif current_price < range_low:
+            return "BEAR_BREAKDOWN", round(range_low, 2)
+        return "NONE", 0.0
+
+    @staticmethod
+    def detect_double_bottom(prices: np.ndarray, threshold_pct: float = 0.018) -> Tuple[bool, float, float]:
+        """
+        Double Bottom ('W' Reversal Pattern) Detection from myhhub/stock.
+        Identifies two swing lows within threshold % separated by an intermediate peak (neckline).
+        Returns: (is_detected, neckline_price, pattern_confidence)
+        """
+        if len(prices) < 20:
+            return False, 0.0, 0.0
+
+        window = prices[-30:] if len(prices) >= 30 else prices
+        n = len(window)
+        # Find local troughs
+        troughs = []
+        for i in range(2, n - 2):
+            if window[i] <= window[i-1] and window[i] <= window[i-2] and window[i] <= window[i+1] and window[i] <= window[i+2]:
+                troughs.append((i, window[i]))
+
+        if len(troughs) < 2:
+            return False, 0.0, 0.0
+
+        # Check last two troughs
+        idx1, p1 = troughs[-2]
+        idx2, p2 = troughs[-1]
+
+        # Separation must be at least 4 bars
+        if (idx2 - idx1) < 4:
+            return False, 0.0, 0.0
+
+        # Lows must be within threshold_pct of each other
+        diff_pct = abs(p1 - p2) / max(0.01, min(p1, p2))
+        if diff_pct <= threshold_pct:
+            # Neckline is the peak between the two troughs
+            neckline = float(np.max(window[idx1:idx2+1]))
+            current_p = window[-1]
+            # Pattern valid if current price is recovering toward or above neckline
+            if current_p >= min(p1, p2) * 1.005:
+                confidence = round(max(0.4, min(0.95, 1.0 - diff_pct * 25.0)), 2)
+                return True, round(neckline, 2), confidence
+
+        return False, 0.0, 0.0
+
+    @staticmethod
+    def detect_double_top(prices: np.ndarray, threshold_pct: float = 0.018) -> Tuple[bool, float, float]:
+        """
+        Double Top ('M' Reversal Pattern) Detection from myhhub/stock.
+        Identifies two swing highs within threshold % separated by an intermediate valley (neckline).
+        Returns: (is_detected, neckline_price, pattern_confidence)
+        """
+        if len(prices) < 20:
+            return False, 0.0, 0.0
+
+        window = prices[-30:] if len(prices) >= 30 else prices
+        n = len(window)
+        peaks = []
+        for i in range(2, n - 2):
+            if window[i] >= window[i-1] and window[i] >= window[i-2] and window[i] >= window[i+1] and window[i] >= window[i+2]:
+                peaks.append((i, window[i]))
+
+        if len(peaks) < 2:
+            return False, 0.0, 0.0
+
+        idx1, p1 = peaks[-2]
+        idx2, p2 = peaks[-1]
+
+        if (idx2 - idx1) < 4:
+            return False, 0.0, 0.0
+
+        diff_pct = abs(p1 - p2) / max(0.01, max(p1, p2))
+        if diff_pct <= threshold_pct:
+            neckline = float(np.min(window[idx1:idx2+1]))
+            current_p = window[-1]
+            if current_p <= max(p1, p2) * 0.995:
+                confidence = round(max(0.4, min(0.95, 1.0 - diff_pct * 25.0)), 2)
+                return True, round(neckline, 2), confidence
+
+        return False, 0.0, 0.0
+
+    @staticmethod
+    def calc_chip_distribution_density(prices: np.ndarray, volumes: np.ndarray, num_bins: int = 10) -> Dict[str, Any]:
+        """
+        Volume Chip Distribution (筹码分布) algorithm from myhhub/stock:
+        Calculates the cost density distribution of market participants to locate
+        major support/resistance zones.
+        """
+        if len(prices) < 10 or len(volumes) < 10:
+            return {"chip_support": float(prices[-1]) * 0.98 if len(prices) > 0 else 0.0, "chip_resistance": float(prices[-1]) * 1.02 if len(prices) > 0 else 0.0}
+
+        min_p = float(np.min(prices))
+        max_p = float(np.max(prices))
+        if min_p == max_p:
+            return {"chip_support": round(min_p * 0.98, 2), "chip_resistance": round(max_p * 1.02, 2)}
+
+        bins = np.linspace(min_p, max_p, num_bins + 1)
+        bin_volumes = np.zeros(num_bins)
+
+        for p, v in zip(prices, volumes):
+            idx = min(num_bins - 1, int((p - min_p) / (max_p - min_p) * num_bins))
+            bin_volumes[idx] += v
+
+        max_bin_idx = int(np.argmax(bin_volumes))
+        chip_core_price = (bins[max_bin_idx] + bins[max_bin_idx + 1]) / 2.0
+        cur_p = float(prices[-1])
+
+        return {
+            "chip_core_price": round(chip_core_price, 2),
+            "chip_support": round(chip_core_price if cur_p >= chip_core_price else min_p, 2),
+            "chip_resistance": round(chip_core_price if cur_p < chip_core_price else max_p, 2),
+            "current_above_chip_core": cur_p >= chip_core_price
+        }

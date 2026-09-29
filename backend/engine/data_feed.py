@@ -269,6 +269,19 @@ class DataFeedManager:
         # 9. cinar/indicator: Keltner Channels
         k_upper, k_mid, k_lower = TechnicalIndicators.calc_keltner_channel(highs, lows, prices, 20, 10, 2.0)
 
+        # 10. myhhub/stock: Volume Surge Factor
+        vol_surge = TechnicalIndicators.calc_volume_surge(volumes, 20)
+
+        # 11. myhhub/stock: Range Breakout Detection
+        breakout_type, breakout_level = TechnicalIndicators.detect_range_breakout(prices, highs, lows, 20)
+
+        # 12. myhhub/stock: Candlestick Pattern Recognition (Double Bottom & Double Top)
+        db_det, db_neck, db_conf = TechnicalIndicators.detect_double_bottom(prices)
+        dt_det, dt_neck, dt_conf = TechnicalIndicators.detect_double_top(prices)
+
+        # 13. myhhub/stock: Volume Chip Distribution (Cost Density)
+        chips = TechnicalIndicators.calc_chip_distribution_density(prices, volumes)
+
         return {
             "ema_9": round(ema_9, 2),
             "ema_21": round(ema_21, 2),
@@ -289,7 +302,18 @@ class DataFeedManager:
             "mfi": round(mfi, 2),
             "keltner_upper": round(k_upper, 2),
             "keltner_mid": round(k_mid, 2),
-            "keltner_lower": round(k_lower, 2)
+            "keltner_lower": round(k_lower, 2),
+            "volume_surge": round(vol_surge, 2),
+            "breakout_type": breakout_type,
+            "breakout_level": round(breakout_level, 2),
+            "double_bottom_detected": 1.0 if db_det else 0.0,
+            "double_bottom_neckline": round(db_neck, 2),
+            "double_bottom_conf": round(db_conf, 2),
+            "double_top_detected": 1.0 if dt_det else 0.0,
+            "double_top_neckline": round(dt_neck, 2),
+            "double_top_conf": round(dt_conf, 2),
+            "chip_support": round(chips.get("chip_support", 0.0), 2),
+            "chip_resistance": round(chips.get("chip_resistance", 0.0), 2)
         }
 
     def get_news_sentiment(self, symbol: str) -> float:

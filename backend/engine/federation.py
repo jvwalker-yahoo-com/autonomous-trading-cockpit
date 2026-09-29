@@ -2,7 +2,7 @@
 FederationModule managing multi-model scoring, strategy weighting, and ensemble consensus.
 Evaluates Trend Following (Momentum), Mean Reversion, Volatility Breakout, and Sentiment models.
 """
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any, Optional
 from .models import FederationOutput, ModelSignal
 
 class FederationModule:
@@ -103,9 +103,68 @@ class FederationModule:
             rationale = f"Neutral market sentiment coverage ({score:+.2f})"
         return round(score, 3), sig, rationale
 
+    def score_pattern_recognition(self, indicators: Dict[str, Any], price: float) -> Tuple[float, str, str]:
+        """
+        Technical Pattern Recognition Model from myhhub/stock:
+        Evaluates Double Bottom (W-reversal), Double Top (M-reversal),
+        Consolidation Range Breakouts, and Volume Surge factors.
+        """
+        score = 0.0
+        signals = []
+        vol_surge = float(indicators.get("volume_surge", 1.0))
+        breakout = str(indicators.get("breakout_type", "NONE"))
+        db_det = float(indicators.get("double_bottom_detected", 0.0)) > 0
+        dt_det = float(indicators.get("double_top_detected", 0.0)) > 0
+
+        # Double bottom bullish reversal
+        if db_det:
+            conf = float(indicators.get("double_bottom_conf", 0.7))
+            score += 0.50 * conf
+            neck = float(indicators.get("double_bottom_neckline", price))
+            signals.append(f"Double Bottom pattern detected (Neckline: ${neck:.2f})")
+
+        # Double top bearish reversal
+        if dt_det:
+            conf = float(indicators.get("double_top_conf", 0.7))
+            score -= 0.50 * conf
+            neck = float(indicators.get("double_top_neckline", price))
+            signals.append(f"Double Top pattern detected (Neckline: ${neck:.2f})")
+
+        # Range breakout
+        if breakout == "BULL_BREAKOUT":
+            lvl = float(indicators.get("breakout_level", price))
+            score += 0.45
+            signals.append(f"Bullish Range Breakout above ${lvl:.2f}")
+        elif breakout == "BEAR_BREAKDOWN":
+            lvl = float(indicators.get("breakout_level", price))
+            score -= 0.45
+            signals.append(f"Bearish Range Breakdown below ${lvl:.2f}")
+
+        # Volume Surge confirmation booster
+        if vol_surge >= 1.5:
+            if score > 0:
+                score = min(1.0, score * 1.3)
+                signals.append(f"Volume Surge {vol_surge:.1f}x confirms bullish flow")
+            elif score < 0:
+                score = max(-1.0, score * 1.3)
+                signals.append(f"Volume Surge {vol_surge:.1f}x confirms bearish selling")
+
+        score = max(-1.0, min(1.0, score))
+        if score >= 0.20:
+            sig = "BUY"
+            rat = "; ".join(signals) if signals else "Bullish pattern confirmation"
+        elif score <= -0.20:
+            sig = "SHORT"
+            rat = "; ".join(signals) if signals else "Bearish pattern confirmation"
+        else:
+            sig = "NEUTRAL"
+            rat = "No active reversal or breakout patterns detected"
+
+        return round(score, 3), sig, rat
+
     def model_federation(
         self,
-        indicators: Dict[str, float],
+        indicators: Dict[str, Any],
         price: float,
         sentiment_val: float,
         current_weights: Dict[str, float],
@@ -119,52 +178,59 @@ class FederationModule:
         s_mr, sig_mr, rat_mr = self.score_mean_reversion(indicators, price)
         s_bo, sig_bo, rat_bo = self.score_volatility_breakout(indicators, price)
         s_sent, sig_sent, rat_sent = self.score_news_sentiment(sentiment_val)
+        s_pat, sig_pat, rat_pat = self.score_pattern_recognition(indicators, price)
+
+        strat_names = [
+            "momentum_trend",
+            "mean_reversion",
+            "volatility_breakout",
+            "news_sentiment",
+            "pattern_recognition"
+        ]
 
         scores_map = {
             "momentum_trend": s_mom,
             "mean_reversion": s_mr,
             "volatility_breakout": s_bo,
-            "news_sentiment": s_sent
+            "news_sentiment": s_sent,
+            "pattern_recognition": s_pat
         }
 
         # Dynamic Regime-Aware Strategy Calibration:
-        # In trending regimes, Trend Following and Breakouts dominate, and Mean Reversion
-        # is suppressed so it doesn't fight the trend.
-        # In range-bound/choppy regimes, Mean Reversion dominates.
         if trend in ("BULL_TREND", "BEAR_TREND"):
             regime_priors = {
-                "momentum_trend": 0.45,
-                "volatility_breakout": 0.30,
-                "news_sentiment": 0.15,
-                "mean_reversion": 0.10
+                "momentum_trend": 0.35,
+                "pattern_recognition": 0.25,
+                "volatility_breakout": 0.20,
+                "news_sentiment": 0.12,
+                "mean_reversion": 0.08
             }
         else:  # CHOPPY / Range-Bound
             regime_priors = {
-                "mean_reversion": 0.50,
-                "volatility_breakout": 0.20,
-                "news_sentiment": 0.20,
-                "momentum_trend": 0.10
+                "mean_reversion": 0.40,
+                "pattern_recognition": 0.25,
+                "volatility_breakout": 0.15,
+                "news_sentiment": 0.12,
+                "momentum_trend": 0.08
             }
 
         # Blend regime prior with adaptive learner weights
         blended_weights = {}
-        for k in self.strategy_names:
-            learner_w = current_weights.get(k, 0.25)
-            prior_w = regime_priors.get(k, 0.25)
+        for k in strat_names:
+            learner_w = current_weights.get(k, 0.20)
+            prior_w = regime_priors.get(k, 0.20)
             blended_weights[k] = prior_w * 0.7 + learner_w * 0.3
 
         total_w = sum(blended_weights.values())
         if total_w <= 0:
             total_w = 1.0
-        normalized_weights = {k: blended_weights[k] / total_w for k in self.strategy_names}
+        normalized_weights = {k: blended_weights[k] / total_w for k in strat_names}
 
         # Calculate weighted consensus score
-        weighted_score = sum(scores_map[k] * normalized_weights[k] for k in self.strategy_names)
+        weighted_score = sum(scores_map[k] * normalized_weights[k] for k in strat_names)
 
-        # Dominant Model Confirmation:
-        # If the leading model in its natural regime has high conviction,
-        # ensure its directional strength is appropriately captured rather than overly diluted.
-        dominant_model = max(self.strategy_names, key=lambda k: abs(scores_map[k]) * normalized_weights[k])
+        # Dominant Model Confirmation
+        dominant_model = max(strat_names, key=lambda k: abs(scores_map[k]) * normalized_weights[k])
         dom_score = scores_map[dominant_model]
         if abs(dom_score) >= 0.40 and (dom_score * weighted_score >= 0):
             weighted_score = weighted_score * 0.6 + (dom_score * 0.4)
@@ -173,6 +239,7 @@ class FederationModule:
             ModelSignal(name="Momentum Trend (EMA/MACD)", signal=sig_mom, score=s_mom, weight=round(normalized_weights["momentum_trend"], 3), rationale=rat_mom),
             ModelSignal(name="Mean Reversion (RSI/BB)", signal=sig_mr, score=s_mr, weight=round(normalized_weights["mean_reversion"], 3), rationale=rat_mr),
             ModelSignal(name="Volatility Breakout", signal=sig_bo, score=s_bo, weight=round(normalized_weights["volatility_breakout"], 3), rationale=rat_bo),
+            ModelSignal(name="Pattern Recognition (Breakout/W-M)", signal=sig_pat, score=s_pat, weight=round(normalized_weights["pattern_recognition"], 3), rationale=rat_pat),
             ModelSignal(name="News Sentiment (Finnhub)", signal=sig_sent, score=s_sent, weight=round(normalized_weights["news_sentiment"], 3), rationale=rat_sent),
         ]
 

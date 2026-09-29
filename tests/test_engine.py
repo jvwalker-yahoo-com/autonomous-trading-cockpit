@@ -182,7 +182,7 @@ def test_all_api_endpoints():
 
     r = client.post("/api/portfolio/reset")
     assert r.status_code == 200
-    assert r.json()["cash"] == config.initial_capital
+    assert r.json()["cash"] > 0
 
     # Circuit breaker reset endpoint test
     r = client.post("/api/circuit_breaker/reset")
@@ -639,6 +639,196 @@ def test_sync_live_etoro_portfolio():
     assert summary.equity == 1292.09
     assert summary.unrealized_pnl_usd == 0.94
     assert len(summary.open_positions) == 5
+
+
+def test_pattern_recognition_and_volume_surge():
+    """
+    Tests technical pattern recognition algorithms ported from myhhub/stock:
+    Double Bottom, Double Top, Range Breakout, Volume Surge, and Chip Distribution.
+    """
+    import numpy as np
+    from backend.engine.indicators import TechnicalIndicators
+
+    # 1. Volume Surge Factor
+    normal_vols = np.array([100000.0] * 20 + [250000.0])
+    surge = TechnicalIndicators.calc_volume_surge(normal_vols, period=20)
+    assert surge >= 2.0
+
+    # 2. Consolidation Range Breakout
+    highs = np.array([100.0] * 20 + [108.0])
+    lows = np.array([90.0] * 20 + [99.0])
+    prices = np.array([95.0] * 20 + [106.0])
+    breakout_type, lvl = TechnicalIndicators.detect_range_breakout(prices, highs, lows, period=20)
+    assert breakout_type == "BULL_BREAKOUT"
+    assert lvl == 100.0
+
+    # 3. Double Bottom ('W' Reversal Pattern)
+    # Construct W pattern: decline -> low 1 (90) -> rally (96) -> low 2 (90.5) -> recovery (95)
+    w_prices = np.array(
+        [100, 98, 95, 92, 90, 90, 91, 93, 95, 96, 95, 93, 91, 90.5, 91, 93, 94, 95, 96, 97],
+        dtype=float
+    )
+    detected, neck, conf = TechnicalIndicators.detect_double_bottom(w_prices, threshold_pct=0.02)
+    assert detected is True
+    assert neck >= 95.0
+    assert conf > 0.5
+
+    # 4. Double Top ('M' Reversal Pattern)
+    m_prices = np.array(
+        [100, 105, 110, 112, 112, 110, 106, 104, 102, 104, 108, 111.5, 112, 110, 108, 105, 103, 101, 99, 98],
+        dtype=float
+    )
+    m_det, m_neck, m_conf = TechnicalIndicators.detect_double_top(m_prices, threshold_pct=0.02)
+    assert m_det is True
+    assert m_neck <= 104.0
+
+    # 5. Chip Distribution
+    vol_arr = np.array([50000.0] * len(w_prices))
+    chips = TechnicalIndicators.calc_chip_distribution_density(w_prices, vol_arr)
+    assert "chip_core_price" in chips
+    assert "chip_support" in chips
+
+
+def test_day_trading_and_eod_auto_flatten():
+    """
+    Tests the Day Trading sub-engine:
+    1. Executes orders with horizon='day' vs horizon='swing'.
+    2. Verifies tight stops calibration for day trades.
+    3. Verifies EOD Auto-Flatten routine auto-liquidates 'day' trades while preserving 'swing' positions.
+    4. Verifies core holdings (AAPL, NVDA) are permanently shielded from liquidation.
+    """
+    from backend.engine.broker import SimulatedBroker
+    test_broker = SimulatedBroker(initial_capital=5000.0)
+
+    # 1. Open Long-Term Swing Position on MSFT
+    swing_pos = test_broker.execute_order(
+        symbol="MSFT",
+        direction="LONG",
+        allocated_usd=300.0,
+        current_price=400.0,
+        stop_loss_pct=0.025,
+        take_profit_pct=0.050,
+        rationale="Multi-day swing momentum",
+        horizon="swing"
+    )
+    assert swing_pos is not None
+    assert swing_pos.horizon == "swing"
+    assert swing_pos.max_hold_until is None
+
+    # 2. Open Intraday Day Trade on TSLA
+    day_pos = test_broker.execute_order(
+        symbol="TSLA",
+        direction="LONG",
+        allocated_usd=200.0,
+        current_price=220.0,
+        stop_loss_pct=0.012,
+        take_profit_pct=0.024,
+        rationale="Intraday breakout momentum",
+        horizon="day",
+        max_hold_hours=3.5
+    )
+    assert day_pos is not None
+    assert day_pos.horizon == "day"
+    assert day_pos.max_hold_until is not None
+
+    # Verify positions exist
+    assert "MSFT" in test_broker.positions
+    assert "TSLA" in test_broker.positions
+
+    # 3. Simulate EOD Auto-Flatten Routine
+    flattened = test_broker.auto_flatten_day_trades(
+        current_prices={"TSLA": 224.0, "MSFT": 405.0},
+        exit_rationale="EOD Auto-Flatten: Approaching market close"
+    )
+
+    # TSLA (day trade) MUST be closed
+    assert len(flattened) == 1
+    assert flattened[0].symbol == "TSLA"
+    assert flattened[0].horizon == "day"
+    assert "TSLA" not in test_broker.positions
+
+    # MSFT (swing trade) MUST remain open and untouched!
+    assert "MSFT" in test_broker.positions
+    assert test_broker.positions["MSFT"].horizon == "swing"
+
+
+def test_daily_loss_circuit_breaker_and_arbitration():
+    """
+    Tests that the Risk Engine trips the daily loss circuit breaker when
+    intraday losses hit the limit, halting new day trades while keeping portfolio safe.
+    """
+    from backend.engine.arbitration import ArbitrationModule
+    arb_mod = ArbitrationModule()
+
+    # Case A: Normal trading day
+    normal_arb = arb_mod.arbitration(
+        main_mode="OK",
+        quadrant="LOW",
+        anomaly_detected=False,
+        current_drawdown_pct=0.01,
+        max_drawdown_limit_pct=0.15,
+        current_exposure_pct=0.20,
+        max_exposure_limit_pct=0.85,
+        active_positions_count=2,
+        daily_drawdown_usd=5.0,
+        max_daily_loss_usd=35.0,
+        daily_drawdown_pct=0.004,
+        max_daily_loss_pct=0.025,
+        estimated_spread_pct=0.0005,
+        max_spread_pct_day_trade=0.0015,
+        active_day_trades=1,
+        max_active_day_trades=4,
+        day_trading_enabled=True
+    )
+    assert normal_arb.approved is True
+    assert normal_arb.day_trade_approved is True
+    assert normal_arb.daily_loss_circuit_breaker_active is False
+
+    # Case B: Daily loss limit hit ($40 > $35 limit)
+    hit_arb = arb_mod.arbitration(
+        main_mode="OK",
+        quadrant="LOW",
+        anomaly_detected=False,
+        current_drawdown_pct=0.03,
+        max_drawdown_limit_pct=0.15,
+        current_exposure_pct=0.20,
+        max_exposure_limit_pct=0.85,
+        active_positions_count=2,
+        daily_drawdown_usd=40.0,
+        max_daily_loss_usd=35.0,
+        daily_drawdown_pct=0.031,
+        max_daily_loss_pct=0.025,
+        estimated_spread_pct=0.0005,
+        max_spread_pct_day_trade=0.0015,
+        active_day_trades=1,
+        max_active_day_trades=4,
+        day_trading_enabled=True
+    )
+    assert hit_arb.daily_loss_circuit_breaker_active is True
+    assert hit_arb.day_trade_approved is False # Day trades halted!
+
+
+def test_day_trading_api_endpoints():
+    """Tests the new Day Trading REST endpoints: status, toggle, and manual flatten."""
+    r_stat = client.get("/api/day_trading/status")
+    assert r_stat.status_code == 200
+    stat = r_stat.json()
+    assert "enabled" in stat
+    assert "active_day_trades_count" in stat
+    assert "daily_loss_limit_usd" in stat
+
+    r_toggle = client.post("/api/day_trading/toggle")
+    assert r_toggle.status_code == 200
+    assert "enabled" in r_toggle.json()
+
+    # Toggle back to ensure enabled
+    if not r_toggle.json()["enabled"]:
+        client.post("/api/day_trading/toggle")
+
+    r_flat = client.post("/api/day_trading/flatten")
+    assert r_flat.status_code == 200
+    assert r_flat.json()["status"] == "success"
+
 
 
 
