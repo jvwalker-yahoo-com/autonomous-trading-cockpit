@@ -1142,13 +1142,32 @@ if (el.btnSettings) {
     } catch (e) {
       console.error("Error loading config:", e);
     }
-    if (el.settingsModal) el.settingsModal.classList.remove("hidden");
+    if (el.settingsModal) {
+      document.body.style.overflow = "hidden";
+      el.settingsModal.classList.remove("hidden");
+      el.settingsModal.scrollTop = 0;
+      const mBody = el.settingsModal.querySelector(".modal-body");
+      if (mBody) mBody.scrollTop = 0;
+      if (el.inputEtoroUserKey) {
+        setTimeout(() => el.inputEtoroUserKey.focus(), 150);
+      }
+    }
   });
 }
 
 if (el.btnCloseModal) {
   el.btnCloseModal.addEventListener("click", () => {
+    document.body.style.overflow = "";
     if (el.settingsModal) el.settingsModal.classList.add("hidden");
+  });
+}
+
+if (el.settingsModal) {
+  el.settingsModal.addEventListener("click", (e) => {
+    if (e.target === el.settingsModal) {
+      document.body.style.overflow = "";
+      el.settingsModal.classList.add("hidden");
+    }
   });
 }
 
@@ -1195,6 +1214,7 @@ if (el.btnSaveConfig) {
   if (execMode) localStorage.setItem("execution_mode", execMode);
 
   updateExecutionModeUI(execMode);
+  document.body.style.overflow = "";
   if (el.settingsModal) el.settingsModal.classList.add("hidden");
   alert("✓ Configuration and eToro API settings saved successfully (Persisted to disk & browser)!");
   fetchCockpitData();

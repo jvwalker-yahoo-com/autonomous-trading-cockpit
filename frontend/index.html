@@ -574,12 +574,12 @@
 
   <!-- CONFIGURATION MODAL -->
   <div id="settingsModal" class="modal-overlay hidden">
-    <div class="modal-card" style="max-width: 580px;">
+    <div class="modal-card" style="max-width: 600px; max-height: 90vh; display: flex; flex-direction: column;">
       <div class="modal-header">
         <h3>⚙️ SYSTEM SETTINGS & ETORO API KEYS</h3>
         <button id="btnCloseModal" class="btn-close">&times;</button>
       </div>
-      <div class="modal-body" style="gap: 16px;">
+      <div class="modal-body" style="overflow-y: auto; gap: 16px; flex: 1 1 auto;">
         
         <!-- eToro Live Integration Section -->
         <div style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 14px;">
@@ -692,12 +692,12 @@
 
   <!-- LIVE TRADING MODE SWITCH CONFIRMATION MODAL -->
   <div id="modeSwitchModal" class="modal-overlay hidden">
-    <div class="modal-card" style="max-width: 520px;">
+    <div class="modal-card" style="max-width: 520px; max-height: 90vh; display: flex; flex-direction: column;">
       <div class="modal-header" style="border-bottom-color: #ef4444;">
         <h3 style="color: #ef4444;">⚠️ ENGAGE LIVE ETORO REAL TRADING</h3>
         <button id="btnCloseModeModal" class="btn-close">&times;</button>
       </div>
-      <div class="modal-body" style="gap: 14px;">
+      <div class="modal-body" style="overflow-y: auto; gap: 14px; flex: 1 1 auto;">
         <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; border-radius: 6px; padding: 12px; font-size: 13px;">
           <strong style="color: #ef4444; display: block; margin-bottom: 6px;">SAFETY CONFIRMATION REQUIRED:</strong>
           You are about to switch the autonomous trading engine from <strong>Demo/Learning Simulation</strong> to <strong>LIVE REAL-MONEY TRADING</strong> on your connected eToro account.

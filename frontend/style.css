@@ -823,6 +823,9 @@ body {
   justify-content: center;
   align-items: center;
   z-index: 1000;
+  padding: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .hidden,
@@ -839,10 +842,14 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border-highlight);
   border-radius: 8px;
-  width: 90%;
-  max-width: 480px;
+  width: 95%;
+  max-width: 580px;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 10px 30px rgba(0,0,0,0.5);
   overflow: hidden;
+  margin: auto;
 }
 
 .modal-header {
@@ -852,13 +859,37 @@ body {
   justify-content: space-between;
   align-items: center;
   border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 
 .modal-header h3 { font-family: var(--font-display); font-size: 13px; color: var(--accent-cyan); }
 .btn-close { background: none; border: none; font-size: 20px; color: var(--text-muted); cursor: pointer; }
 .btn-close:hover { color: var(--accent-red); }
 
-.modal-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.modal-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.modal-body::-webkit-scrollbar {
+  width: 6px;
+}
+.modal-body::-webkit-scrollbar-track {
+  background: var(--bg-card-header);
+}
+.modal-body::-webkit-scrollbar-thumb {
+  background: var(--border-highlight);
+  border-radius: 3px;
+}
+.modal-body::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-cyan);
+}
 .form-group { display: flex; flex-direction: column; gap: 4px; }
 .form-group label { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
 .form-hint { font-size: 10px; color: var(--text-muted); }
