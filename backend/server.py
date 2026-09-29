@@ -584,12 +584,12 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
 
 @app.api_route("/", methods=["GET", "HEAD"], tags=["Cockpit Core"])
 def root_health(request: Request):
-    """Health check endpoint: {status: 'ok'} or serve Cockpit HTML if accessed via browser."""
-    accept = request.headers.get("accept", "")
-    if "text/html" in accept:
-        index_file = FRONTEND_DIR / "index.html"
-        if index_file.exists():
-            return FileResponse(index_file)
+    """Health check endpoint: serve Cockpit HTML for all GET requests; 200 OK for HEAD/health."""
+    if request.method == "HEAD":
+        return Response(status_code=200)
+    index_file = FRONTEND_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
     return {"status": "ok"}
 
 @app.get("/state", response_model=RegimeState, tags=["Cockpit Core"])
