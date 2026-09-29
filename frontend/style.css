@@ -915,4 +915,26 @@ body {
   display: flex;
   justify-content: flex-end;
   border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
+
+/* Landscape Settings Layout */
+.settings-landscape-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.settings-col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+@media (max-width: 860px) {
+  .settings-landscape-grid {
+    grid-template-columns: 1fr;
+  }
+}
+

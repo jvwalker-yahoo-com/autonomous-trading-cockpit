@@ -1221,6 +1221,16 @@ if (el.btnSaveConfig) {
   });
 }
 
+const btnSaveConfigTop = document.getElementById("btnSaveConfigTop");
+if (btnSaveConfigTop && el.btnSaveConfig) {
+  btnSaveConfigTop.addEventListener("click", () => el.btnSaveConfig.click());
+}
+
+const btnCancelConfig = document.getElementById("btnCancelConfig");
+if (btnCancelConfig && el.btnCloseModal) {
+  btnCancelConfig.addEventListener("click", () => el.btnCloseModal.click());
+}
+
 // Daily & 5-Day Report Modal
 const btnDailyReport = document.getElementById("btnDailyReport");
 const dailyReportModal = document.getElementById("dailyReportModal");

@@ -572,120 +572,142 @@
     </div>
   </div>
 
-  <!-- CONFIGURATION MODAL -->
+  <!-- CONFIGURATION MODAL (LANDSCAPE 2-COLUMN LAYOUT) -->
   <div id="settingsModal" class="modal-overlay hidden">
-    <div class="modal-card" style="max-width: 600px; max-height: 90vh; display: flex; flex-direction: column;">
+    <div class="modal-card" style="max-width: 1100px; width: 95%; max-height: 90vh; display: flex; flex-direction: column;">
       <div class="modal-header">
-        <h3>⚙️ SYSTEM SETTINGS & ETORO API KEYS</h3>
-        <button id="btnCloseModal" class="btn-close">&times;</button>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <h3>⚙️ SYSTEM SETTINGS & ETORO API KEYS</h3>
+          <span class="badge badge-normal" style="font-size: 10px; padding: 2px 8px;">LANDSCAPE VIEW</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <button id="btnSaveConfigTop" class="btn btn-primary" style="font-size: 11px; padding: 5px 14px; background: linear-gradient(135deg, #0284c7, #024e86); font-weight: bold;">💾 SAVE CONFIG</button>
+          <button id="btnCloseModal" class="btn-close">&times;</button>
+        </div>
       </div>
-      <div class="modal-body" style="overflow-y: auto; gap: 16px; flex: 1 1 auto;">
+      <div class="modal-body" style="overflow-y: auto; padding: 18px; flex: 1 1 auto;">
         
-        <!-- eToro Live Integration Section -->
-        <div style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 14px;">
-          <h4 style="color: #10b981; margin: 0 0 10px 0; font-size: 13px; display: flex; align-items: center; gap: 6px;">
-            <span>🟢 OFFICIAL ETORO API CREDENTIALS</span>
-          </h4>
-          <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.4;">
-            To connect to your live or demo eToro account, provide your credentials below. (Headers <code>x-api-key</code>, <code>x-user-key</code>, and dynamic <code>x-request-id</code> UUID v4 are injected automatically on every request).
-          </p>
-          <div class="form-group" style="margin-bottom: 10px;">
-            <label for="inputEtoroApiKey" style="font-size: 11px; color: var(--text-color);">ETORO_API_KEY (Public Key):</label>
-            <input type="text" id="inputEtoroApiKey" class="cyber-input" placeholder="e.g. pub_live_xxxxxxxxxxxx">
-          </div>
-          <div class="form-group" style="margin-bottom: 10px;">
-            <label for="inputEtoroUserKey" style="font-size: 11px; color: var(--text-color);">ETORO_USER_KEY (Private Key / JWT):</label>
-            <input type="password" id="inputEtoroUserKey" class="cyber-input" placeholder="e.g. eyJhbGciOi...">
-            <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; line-height: 1.3;">
-              Generate a fresh key at <a href="https://api-portal.etoro.com" target="_blank" style="color: #38bdf8; text-decoration: underline;">api-portal.etoro.com</a> (starts with <code>ey...</code>). Expired tokens cause HTTP 401 Unauthorized.
+        <div class="settings-landscape-grid">
+          
+          <!-- LEFT COLUMN: eToro Live Integration & Execution Controls -->
+          <div class="settings-col">
+            <div style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 14px;">
+              <h4 style="color: #10b981; margin: 0 0 10px 0; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+                <span>🟢 OFFICIAL ETORO API CREDENTIALS</span>
+              </h4>
+              <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.4;">
+                Connects directly to your eToro account. Headers <code>x-api-key</code>, <code>x-user-key</code>, and dynamic <code>x-request-id</code> are injected on every trade order.
+              </p>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label for="inputEtoroApiKey" style="font-size: 11px; color: var(--text-color);">ETORO_API_KEY (Public Key):</label>
+                <input type="text" id="inputEtoroApiKey" class="cyber-input" placeholder="e.g. pub_live_xxxxxxxxxxxx">
+              </div>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label for="inputEtoroUserKey" style="font-size: 11px; color: var(--text-color);">ETORO_USER_KEY (Private Key / JWT):</label>
+                <input type="password" id="inputEtoroUserKey" class="cyber-input" placeholder="e.g. eyJhbGciOi...">
+                <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; line-height: 1.3;">
+                  Generate a fresh key at <a href="https://api-portal.etoro.com" target="_blank" style="color: #38bdf8; text-decoration: underline;">api-portal.etoro.com</a> (starts with <code>ey...</code>). Expired tokens cause HTTP 401.
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label for="inputEtoroBaseUrl" style="font-size: 11px; color: var(--text-color);">ETORO_BASE_URL:</label>
+                <input type="text" id="inputEtoroBaseUrl" class="cyber-input" value="https://public-api.etoro.com" placeholder="https://public-api.etoro.com">
+              </div>
+              <div style="display: flex; align-items: center; justify-content: flex-start; gap: 8px; flex-wrap: wrap;">
+                <button id="btnTestEtoroConn" class="btn btn-outline" style="border-color: #10b981; color: #10b981; font-size: 11px;" type="button">
+                  🧪 TEST REST API
+                </button>
+                <button id="btnTestEtoroWs" class="btn btn-outline" style="border-color: #38bdf8; color: #38bdf8; font-size: 11px;" type="button">
+                  ⚡ TEST WEBSOCKET
+                </button>
+                <button id="btnTestEtoroMcp" class="btn btn-outline" style="border-color: #a855f7; color: #a855f7; font-size: 11px;" type="button">
+                  🤖 TEST MCP GATEWAY
+                </button>
+                <button id="btnSync5DayToEtoro" class="btn btn-secondary" style="font-size: 11px;" type="button">
+                  🔄 SYNC WATCHLIST
+                </button>
+                <span id="etoroTestStatus" style="font-size: 11px; color: var(--text-muted); width: 100%;">Not tested</span>
+              </div>
+            </div>
+
+            <!-- Execution & Data Feed Configuration -->
+            <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px;">
+              <h4 style="color: var(--accent-cyan); margin: 0 0 10px 0; font-size: 12px;">
+                ⚙️ EXECUTION MODE & MARKET DATA
+              </h4>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label for="selectSimMode">Default Execution Mode:</label>
+                <select id="selectSimMode" class="cyber-select">
+                  <option value="live" selected>⚡ Live eToro Account (Real Orders)</option>
+                  <option value="demo">🛡️ Demo / Simulation Mode (Virtual & Learning)</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label for="inputFinnhubKey">Finnhub Market Data Key (Optional):</label>
+                <input type="password" id="inputFinnhubKey" class="cyber-input" placeholder="Enter Finnhub API Key for real-time fallback">
+              </div>
+              <div class="form-group">
+                <label for="inputRiskPct">Risk Per Trade (% of Capital):</label>
+                <input type="number" id="inputRiskPct" class="cyber-input" step="0.5" min="0.5" max="10" value="2.0">
+              </div>
             </div>
           </div>
-          <div class="form-group" style="margin-bottom: 12px;">
-            <label for="inputEtoroBaseUrl" style="font-size: 11px; color: var(--text-color);">ETORO_BASE_URL:</label>
-            <input type="text" id="inputEtoroBaseUrl" class="cyber-input" value="https://public-api.etoro.com" placeholder="https://public-api.etoro.com">
+
+          <!-- RIGHT COLUMN: Day Trading & Intraday Risk Management -->
+          <div class="settings-col">
+            <div style="background: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 14px;">
+              <h4 style="color: #f59e0b; margin: 0 0 10px 0; font-size: 13px; display: flex; align-items: center; justify-content: space-between;">
+                <span>☀️ DAY TRADING & INTRADAY RISK ENGINE</span>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; text-transform: none;">
+                  <input type="checkbox" id="inputEnableDayTrading" checked style="accent-color: #f59e0b;">
+                  <span style="color: #fbbf24; font-weight: bold;">ENABLE DAY TRADING</span>
+                </label>
+              </h4>
+              <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.4;">
+                Operates alongside long-term trades. Day trades are automatically tagged, monitored against tight intraday SL/TP limits, and auto-liquidated before market close to avoid overnight CFD rollover fees. Core holdings (AAPL, NVDA) are permanently shielded.
+              </p>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                <div class="form-group">
+                  <label for="inputDayTradeAllocPct" style="font-size: 10px; color: var(--text-color);">Day Trade Capital Allocation (%):</label>
+                  <input type="number" id="inputDayTradeAllocPct" class="cyber-input" step="5" min="10" max="80" value="50">
+                </div>
+                <div class="form-group">
+                  <label for="inputDayTradeMaxActive" style="font-size: 10px; color: var(--text-color);">Max Concurrent Day Trades:</label>
+                  <input type="number" id="inputDayTradeMaxActive" class="cyber-input" step="1" min="1" max="15" value="8">
+                </div>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                <div class="form-group">
+                  <label for="inputDayTradeSlPct" style="font-size: 10px; color: var(--text-color);">Intraday Stop-Loss (%):</label>
+                  <input type="number" id="inputDayTradeSlPct" class="cyber-input" step="0.1" min="0.5" max="5.0" value="1.2">
+                </div>
+                <div class="form-group">
+                  <label for="inputDayTradeTpPct" style="font-size: 10px; color: var(--text-color);">Intraday Take-Profit (%):</label>
+                  <input type="number" id="inputDayTradeTpPct" class="cyber-input" step="0.2" min="1.0" max="10.0" value="2.4">
+                </div>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div class="form-group">
+                  <label for="inputMaxDailyLossUsd" style="font-size: 10px; color: var(--text-color);">Daily Loss Limit ($ Circuit Breaker):</label>
+                  <input type="number" id="inputMaxDailyLossUsd" class="cyber-input" step="5" min="10" max="250" value="35.0">
+                </div>
+                <div class="form-group">
+                  <label for="inputDayTradeEodFlattenMins" style="font-size: 10px; color: var(--text-color);">EOD Flatten (Mins Before Close):</label>
+                  <input type="number" id="inputDayTradeEodFlattenMins" class="cyber-input" step="5" min="5" max="60" value="15">
+                </div>
+              </div>
+            </div>
           </div>
-          <div style="display: flex; align-items: center; justify-content: flex-start; gap: 8px; flex-wrap: wrap;">
-            <button id="btnTestEtoroConn" class="btn btn-outline" style="border-color: #10b981; color: #10b981; font-size: 11px;" type="button">
-              🧪 TEST REST API
-            </button>
-            <button id="btnTestEtoroWs" class="btn btn-outline" style="border-color: #38bdf8; color: #38bdf8; font-size: 11px;" type="button">
-              ⚡ TEST WEBSOCKET
-            </button>
-            <button id="btnTestEtoroMcp" class="btn btn-outline" style="border-color: #a855f7; color: #a855f7; font-size: 11px;" type="button">
-              🤖 TEST MCP GATEWAY
-            </button>
-            <button id="btnSync5DayToEtoro" class="btn btn-secondary" style="font-size: 11px;" type="button">
-              🔄 SYNC WATCHLIST
-            </button>
-            <span id="etoroTestStatus" style="font-size: 11px; color: var(--text-muted); width: 100%;">Not tested</span>
-          </div>
+
         </div>
 
-        <!-- Day Trading & Intraday Risk Management Section -->
-        <div style="background: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 14px;">
-          <h4 style="color: #f59e0b; margin: 0 0 10px 0; font-size: 13px; display: flex; align-items: center; justify-content: space-between;">
-            <span>☀️ DAY TRADING & INTRADAY RISK ENGINE</span>
-            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; text-transform: none;">
-              <input type="checkbox" id="inputEnableDayTrading" checked style="accent-color: #f59e0b;">
-              <span style="color: #fbbf24; font-weight: bold;">ENABLE DAY TRADING</span>
-            </label>
-          </h4>
-          <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.4;">
-            Operates alongside long-term trades. Day trades are automatically tagged, monitored against tight intraday SL/TP limits, and auto-liquidated before market close to avoid overnight CFD rollover fees. Core holdings (AAPL, NVDA) are permanently shielded.
-          </p>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
-            <div class="form-group">
-              <label for="inputDayTradeAllocPct" style="font-size: 10px; color: var(--text-color);">Day Trade Capital Allocation (%):</label>
-              <input type="number" id="inputDayTradeAllocPct" class="cyber-input" step="5" min="10" max="80" value="35">
-            </div>
-            <div class="form-group">
-              <label for="inputDayTradeMaxActive" style="font-size: 10px; color: var(--text-color);">Max Concurrent Day Trades:</label>
-              <input type="number" id="inputDayTradeMaxActive" class="cyber-input" step="1" min="1" max="10" value="4">
-            </div>
-          </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
-            <div class="form-group">
-              <label for="inputDayTradeSlPct" style="font-size: 10px; color: var(--text-color);">Intraday Stop-Loss (%):</label>
-              <input type="number" id="inputDayTradeSlPct" class="cyber-input" step="0.1" min="0.5" max="5.0" value="1.2">
-            </div>
-            <div class="form-group">
-              <label for="inputDayTradeTpPct" style="font-size: 10px; color: var(--text-color);">Intraday Take-Profit (%):</label>
-              <input type="number" id="inputDayTradeTpPct" class="cyber-input" step="0.2" min="1.0" max="10.0" value="2.4">
-            </div>
-          </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-            <div class="form-group">
-              <label for="inputMaxDailyLossUsd" style="font-size: 10px; color: var(--text-color);">Daily Loss Limit ($ Circuit Breaker):</label>
-              <input type="number" id="inputMaxDailyLossUsd" class="cyber-input" step="5" min="10" max="250" value="35.0">
-            </div>
-            <div class="form-group">
-              <label for="inputDayTradeEodFlattenMins" style="font-size: 10px; color: var(--text-color);">EOD Flatten (Mins Before Close):</label>
-              <input type="number" id="inputDayTradeEodFlattenMins" class="cyber-input" step="5" min="5" max="60" value="15">
-            </div>
-          </div>
-        </div>
-
-        <!-- Trading & Finnhub Config -->
-        <div class="form-group">
-          <label for="selectSimMode">Default Execution Mode:</label>
-          <select id="selectSimMode" class="cyber-select">
-            <option value="live" selected>⚡ Live eToro Account (Real Orders)</option>
-            <option value="demo">🛡️ Demo / Simulation Mode (Virtual & Learning)</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label for="inputFinnhubKey">Finnhub Market Data Key (Optional):</label>
-          <input type="password" id="inputFinnhubKey" class="cyber-input" placeholder="Enter Finnhub API Key for real-time fallback">
-        </div>
-
-        <div class="form-group">
-          <label for="inputRiskPct">Risk Per Trade (% of Capital):</label>
-          <input type="number" id="inputRiskPct" class="cyber-input" step="0.5" min="0.5" max="10" value="2.0">
-        </div>
       </div>
-      <div class="modal-footer">
-        <button id="btnSaveConfig" class="btn btn-primary">💾 SAVE CONFIG</button>
+      <div class="modal-footer" style="justify-content: space-between; align-items: center;">
+        <span class="text-muted" style="font-size: 11px;">⚙️ All parameters update immediately and persist on server reload</span>
+        <div style="display: flex; gap: 10px;">
+          <button id="btnCancelConfig" class="btn btn-secondary">CANCEL</button>
+          <button id="btnSaveConfig" class="btn btn-primary" style="padding: 8px 20px; font-weight: bold; background: linear-gradient(135deg, #0284c7, #024e86);">💾 SAVE CONFIG</button>
+        </div>
       </div>
     </div>
   </div>
