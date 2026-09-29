@@ -21,3 +21,9 @@ services:
         value: "0.85"
       - key: MAX_POSITION_SIZE_USD
         value: "250.0"
+      - key: ENABLE_DAY_TRADING
+        value: "true"
+      - key: DAY_TRADE_MAX_ACTIVE
+        value: "8"
+      - key: EXECUTION_LOOP_INTERVAL
+        value: "5.0"

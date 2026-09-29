@@ -33,6 +33,7 @@ from .engine.screener import MarketScreener, MASTER_STOCK_UNIVERSE, PRESET_WATCH
 from .engine.etoro_client import EToroClient
 from .engine.instruments_db import get_instruments_db, get_etoro_id
 from .engine.data_feed import BASE_PRICES
+from .engine.news_intel import NewsIntelligenceEngine
 from .engine.models import (
     RegimeState, FederationOutput, ArbitrationOutput,
     DecisionOutput, AnomalyDetectorOutput, QuadrantOutput,
@@ -76,6 +77,7 @@ learner = AdaptiveLearner()
 broker = SimulatedBroker(initial_capital=config.initial_capital, db_path=config.db_path, learner=learner)
 backtester = BacktesterEngine()
 screener = MarketScreener()
+news_intel = NewsIntelligenceEngine(finnhub_api_key=config.finnhub_api_key)
 
 # Restore persisted system settings from disk
 saved_settings = broker.load_state()
@@ -184,6 +186,7 @@ async def autonomous_background_worker_loop():
     # Startup grace period: allows Uvicorn to bind port 0.0.0.0:$PORT and pass Render health checks
     await asyncio.sleep(4.0)
     last_universe_scan = 0.0
+    last_news_refresh = 0.0
     last_nightly_sync_date = ""
     last_auth_warn = 0.0
 
@@ -208,6 +211,15 @@ async def autonomous_background_worker_loop():
             # In live mode, ensure portfolio & active holdings are periodically synced from eToro
             if config.execution_mode == "live":
                 await asyncio.to_thread(sync_live_etoro_portfolio_if_live)
+
+            # News Intelligence Refresh (every 10 minutes)
+            if (now - last_news_refresh) >= 600.0:
+                last_news_refresh = now
+                try:
+                    news_intel.set_finnhub_key(config.finnhub_api_key)
+                    await asyncio.to_thread(news_intel.refresh_all, list(config.watchlist))
+                except Exception as ne:
+                    logger.warning(f"News intel refresh error: {ne}")
 
             # Scheduled 10:00 PM UK Time eToro SQLite Database Sync
             # Automatically syncs newly discovered instruments from eToro catalog every night at 22:00 UK time
@@ -325,7 +337,15 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     # 1. Fetch live or high-fidelity simulated quote & indicators
     quote = data_feed.get_latest_quote(symbol)
     indicators = data_feed.get_technical_indicators(symbol)
-    sentiment = data_feed.get_news_sentiment(symbol)
+    
+    # Blend DataFeed sentiment with NewsIntel catalyst score (60/40 weighted)
+    base_sentiment = data_feed.get_news_sentiment(symbol)
+    catalyst_score = news_intel.get_catalyst_score(symbol)
+    sentiment = round(base_sentiment * 0.60 + catalyst_score * 0.40, 3)
+    
+    # Log significant catalysts
+    if abs(catalyst_score) >= 0.30:
+        logger.info(f"🔥 [CATALYST ALERT] {symbol}: catalyst_score={catalyst_score:+.2f} (EDGAR+RSS+Finnhub) | blended_sentiment={sentiment:+.2f}")
     
     # 2. Check stops on existing open positions (simulation mode only; live positions are managed by eToro)
     if config.simulation_mode:
@@ -416,7 +436,16 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     adx_val = float(indicators.get("adx", 20.0))
     pattern_desc = "Double Bottom" if db_det else ("Double Top" if dt_det else (breakout if breakout != "NONE" else None))
 
-    is_day_setup = (vol_surge >= 1.25 or breakout != "NONE" or db_det or dt_det or (adx_val >= 28.0 and confidence >= 0.15))
+    # Day Trading as PRIMARY mode: prefer intraday unless market conditions suggest swing
+    # Day setup: volume surge OR breakout OR pattern OR strong trend OR significant news catalyst
+    catalyst_score = news_intel.get_catalyst_score(symbol)
+    is_day_setup = (
+        vol_surge >= 1.15              # Lower vol threshold (was 1.25)
+        or breakout != "NONE"          # Any range breakout
+        or db_det or dt_det            # Pattern recognition
+        or (adx_val >= 25.0 and confidence >= 0.10)  # Strong trend + conviction
+        or abs(catalyst_score) >= 0.25  # Significant news catalyst
+    )
     can_day_trade = config.enable_day_trading and arbitration.day_trade_approved and is_day_setup
 
     trade_horizon = "day" if can_day_trade else "swing"
@@ -993,7 +1022,8 @@ def get_system_config():
         "day_trade_stop_loss_pct": config.day_trade_stop_loss_pct,
         "day_trade_take_profit_pct": config.day_trade_take_profit_pct,
         "day_trade_max_hold_hours": config.day_trade_max_hold_hours,
-        "max_daily_loss_usd": config.max_daily_loss_usd
+        "max_daily_loss_usd": config.max_daily_loss_usd,
+        "news_intel_last_refresh": news_intel._last_refresh
     }
 
 @app.post("/api/config", tags=["Configuration"])
@@ -1634,6 +1664,26 @@ def trigger_instruments_sync_endpoint():
     """
     result = instruments_db.sync_from_etoro(etoro_client)
     return result
+
+
+@app.get("/api/news", tags=["Intelligence"])
+def get_news_feed(symbol: Optional[str] = None):
+    """Returns latest news headlines, catalyst scores, and SEC EDGAR filings."""
+    if symbol:
+        symbol = symbol.upper().strip()
+        return {
+            "symbol": symbol,
+            "catalyst_score": news_intel.get_catalyst_score(symbol),
+            "headlines": news_intel.get_symbol_news(symbol),
+            "edgar_filings": news_intel.get_edgar_filings(symbol),
+            "earnings_alert": news_intel.get_earnings_alert(symbol),
+            "last_refresh": news_intel._last_refresh,
+        }
+    return {
+        "all_catalyst_scores": news_intel.get_all_scores(),
+        "global_headlines": news_intel.get_global_headlines(),
+        "last_refresh": news_intel._last_refresh,
+    }
 
 
 # ==========================================
