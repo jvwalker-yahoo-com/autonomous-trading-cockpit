@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>eToro ReAuth - Cockpit Mobile Companion</title>
+  <style>
+    :root {
+      --bg: #07090e;
+      --card: #0e1420;
+      --card-border: #1f2b42;
+      --card-highlight: #2f4366;
+      --primary: #0284c7;
+      --primary-hover: #0369a1;
+      --success: #10b981;
+      --danger: #ef4444;
+      --warn: #f59e0b;
+      --text: #e6edf3;
+      --muted: #8b9bb4;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      line-height: 1.5;
+      padding: 12px;
+      padding-bottom: 40px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+    }
+    .brand-title {
+      font-weight: 800;
+      font-size: 14px;
+      color: #38bdf8;
+      letter-spacing: 0.5px;
+    }
+    .brand-sub {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+    }
+    .badge-live { background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; }
+    .badge-ok { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; }
+    .badge-warn { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; }
+    
+    .card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .card-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #38bdf8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 9px 14px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      width: 100%;
+      text-align: center;
+      transition: all 0.2s;
+    }
+    .btn-primary { background: linear-gradient(135deg, #0284c7, #0369a1); color: #fff; }
+    .btn-success { background: linear-gradient(135deg, #10b981, #059669); color: #fff; }
+    .btn-secondary { background: #1e293b; border-color: var(--card-highlight); color: #38bdf8; }
+    .btn-outline { background: transparent; border-color: var(--card-border); color: var(--muted); }
+    .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+    
+    .input-group { margin-bottom: 10px; }
+    .input-label { display: block; font-size: 10px; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
+    .input-box {
+      width: 100%;
+      background: #06090e;
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: var(--text);
+      font-family: monospace;
+      font-size: 11px;
+      outline: none;
+    }
+    .input-box:focus { border-color: #38bdf8; }
+    textarea.input-box { height: 90px; resize: vertical; }
+
+    .status-box {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-family: monospace;
+      font-size: 11px;
+      margin-top: 8px;
+      word-break: break-all;
+    }
+    .status-ok { border-color: var(--success); color: var(--success); }
+    .status-err { border-color: var(--danger); color: var(--danger); }
+
+    .kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .kpi-box {
+      background: #07090e;
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 8px 10px;
+    }
+    .kpi-title { font-size: 9px; color: var(--muted); text-transform: uppercase; }
+    .kpi-value { font-size: 14px; font-weight: 800; color: #38bdf8; margin-top: 2px; }
+    .kpi-value.green { color: #10b981; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div>
+      <div class="brand-title">⚡ eToro ReAuth</div>
+      <div class="brand-sub">Cockpit Mobile Companion</div>
+    </div>
+    <div id="badgeMode" class="badge badge-live">LIVE</div>
+  </div>
+
+  <!-- SECTION 01: CURRENT SERVER STATUS -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">01 // Live Server Authentication</span>
+      <button id="btnRefreshStatus" class="btn btn-secondary" style="width: auto; padding: 4px 10px; font-size: 10px;">🔄 Refresh</button>
+    </div>
+    <div class="kpi-grid">
+      <div class="kpi-box">
+        <span class="kpi-title">Connection</span>
+        <div id="statConnection" class="kpi-value">Checking...</div>
+      </div>
+      <div class="kpi-box">
+        <span class="kpi-title">User Account</span>
+        <div id="statUser" class="kpi-value">--</div>
+      </div>
+    </div>
+    <div id="cooldownAlert" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; border-radius: 6px; padding: 8px; margin-top: 8px; font-size: 11px; color: #fca5a5;">
+      ⚠️ Lockout active: <span id="cooldownSeconds">0</span>s remaining. Please wait or push valid keys.
+    </div>
+  </div>
+
+  <!-- SECTION 02: REAUTHORIZE KEYS -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">02 // Update eToro Keys</span>
+      <span id="tokenPill" class="badge badge-warn" style="font-size: 10px;">JWT: Check</span>
+    </div>
+    
+    <div class="input-group">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <label class="input-label" style="margin: 0;">ETORO_USER_KEY (Private JWT Token):</label>
+        <span id="charCount" style="font-size: 10px; color: var(--muted);">0 chars</span>
+      </div>
+      <textarea id="inputUserKey" class="input-box" placeholder="Starts with eyJ... (Copy from api-portal.etoro.com)"></textarea>
+    </div>
+
+    <div class="input-group">
+      <label class="input-label">ETORO_API_KEY (Public Key):</label>
+      <input type="text" id="inputApiKey" class="input-box" placeholder="e.g. sdgdskldFPLGfjHn1421dgnlxdGTbngdflg6290bRjslfihsjhSDsdgGHH25hjf">
+    </div>
+
+    <div class="btn-row" style="margin-bottom: 8px;">
+      <button id="btnPasteClipboard" class="btn btn-secondary">📋 Paste from Clipboard</button>
+      <button id="btnClear" class="btn btn-outline">🗑️ Clear Input</button>
+    </div>
+
+    <button id="btnPushKeys" class="btn btn-success" style="font-size: 13px; padding: 11px;">
+      ⚡ PUSH & REAUTHORIZE ON SERVER
+    </button>
+
+    <div style="margin-top: 8px;">
+      <button id="btnRestoreServerKey" class="btn btn-secondary" style="font-size: 11px; padding: 6px;">
+        📥 Pull Current Working Keys from Server (Undo)
+      </button>
+    </div>
+
+    <div id="actionStatus" class="status-box" style="display: none;"></div>
+  </div>
+
+  <!-- SECTION 03: LIVE PORTFOLIO & TELEMETRY -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">03 // Account Balance & Positions</span>
+      <button id="btnFetchPortfolio" class="btn btn-secondary" style="width: auto; padding: 4px 10px; font-size: 10px;">FETCH</button>
+    </div>
+    <div class="kpi-grid">
+      <div class="kpi-box">
+        <span class="kpi-title">Equity</span>
+        <div id="statEquity" class="kpi-value green">$0.00</div>
+      </div>
+      <div class="kpi-box">
+        <span class="kpi-title">Available Cash</span>
+        <div id="statCash" class="kpi-value">$0.00</div>
+      </div>
+      <div class="kpi-box">
+        <span class="kpi-title">Open Positions</span>
+        <div id="statPositions" class="kpi-value">0</div>
+      </div>
+      <div class="kpi-box">
+        <span class="kpi-title">Realized P&L</span>
+        <div id="statPnl" class="kpi-value">+$0.00</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const BASE = window.location.origin;
+
+    const el = {
+      badgeMode: document.getElementById('badgeMode'),
+      statConnection: document.getElementById('statConnection'),
+      statUser: document.getElementById('statUser'),
+      cooldownAlert: document.getElementById('cooldownAlert'),
+      cooldownSeconds: document.getElementById('cooldownSeconds'),
+      inputUserKey: document.getElementById('inputUserKey'),
+      inputApiKey: document.getElementById('inputApiKey'),
+      charCount: document.getElementById('charCount'),
+      tokenPill: document.getElementById('tokenPill'),
+      btnRefreshStatus: document.getElementById('btnRefreshStatus'),
+      btnPasteClipboard: document.getElementById('btnPasteClipboard'),
+      btnClear: document.getElementById('btnClear'),
+      btnPushKeys: document.getElementById('btnPushKeys'),
+      btnRestoreServerKey: document.getElementById('btnRestoreServerKey'),
+      btnFetchPortfolio: document.getElementById('btnFetchPortfolio'),
+      actionStatus: document.getElementById('actionStatus'),
+      statEquity: document.getElementById('statEquity'),
+      statCash: document.getElementById('statCash'),
+      statPositions: document.getElementById('statPositions'),
+      statPnl: document.getElementById('statPnl')
+    };
+
+    function showStatus(msg, isSuccess = true) {
+      el.actionStatus.style.display = 'block';
+      el.actionStatus.className = 'status-box ' + (isSuccess ? 'status-ok' : 'status-err');
+      el.actionStatus.textContent = msg;
+    }
+
+    function validateUserKey(val) {
+      const clean = val.trim().replace(/^['"]|['"]$/g, '');
+      el.charCount.textContent = `${clean.length} chars`;
+      if (!clean) {
+        el.tokenPill.textContent = 'Empty';
+        el.tokenPill.className = 'badge badge-warn';
+        return;
+      }
+      if (clean.startsWith('ey')) {
+        el.tokenPill.textContent = `✓ JWT (ey...)`;
+        el.tokenPill.className = 'badge badge-ok';
+      } else {
+        el.tokenPill.textContent = `⚠️ Bad Start (${clean.slice(0, 4)}...)`;
+        el.tokenPill.className = 'badge badge-live';
+      }
+    }
+
+    el.inputUserKey.addEventListener('input', (e) => validateUserKey(e.target.value));
+
+    async function fetchServerStatus() {
+      try {
+        const res = await fetch(`${BASE}/api/etoro/status`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const d = await res.json();
+
+        el.badgeMode.textContent = (d.execution_mode || 'live').toUpperCase();
+        el.badgeMode.className = d.execution_mode === 'live' ? 'badge badge-live' : 'badge badge-ok';
+
+        if (d.auth_cooldown) {
+          el.statConnection.textContent = '⚠️ LOCKED';
+          el.statConnection.style.color = '#ef4444';
+          el.cooldownAlert.style.display = 'block';
+          el.cooldownSeconds.textContent = d.auth_cooldown_remaining_sec || 0;
+        } else if (d.is_configured) {
+          el.statConnection.textContent = 'ONLINE';
+          el.statConnection.style.color = '#10b981';
+          el.cooldownAlert.style.display = 'none';
+        } else {
+          el.statConnection.textContent = 'UNSET';
+          el.statConnection.style.color = '#f59e0b';
+          el.cooldownAlert.style.display = 'none';
+        }
+
+        if (d.user_key_application_name) {
+          el.statUser.textContent = d.user_key_application_name;
+        }
+      } catch (err) {
+        el.statConnection.textContent = 'OFFLINE';
+        el.statConnection.style.color = '#ef4444';
+      }
+    }
+
+    async function fetchPortfolio() {
+      try {
+        const res = await fetch(`${BASE}/api/portfolio`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const d = await res.json();
+        el.statEquity.textContent = `$${(d.equity || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+        el.statCash.textContent = `$${(d.cash || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+        el.statPositions.textContent = (d.open_positions || []).length;
+        const pnl = d.total_realized_pnl_usd || 0;
+        el.statPnl.textContent = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
+        el.statPnl.style.color = pnl >= 0 ? '#10b981' : '#ef4444';
+      } catch (err) {
+        console.warn('Portfolio fetch error:', err);
+      }
+    }
+
+    // Pull Current Working Keys from Server
+    async function restoreServerKeys() {
+      showStatus('Fetching active working credentials from server...');
+      try {
+        const res = await fetch(`${BASE}/api/etoro/credentials`);
+        if (res.ok) {
+          const d = await res.json();
+          if (d.user_key) {
+            el.inputUserKey.value = d.user_key;
+            validateUserKey(d.user_key);
+          }
+          if (d.api_key) {
+            el.inputApiKey.value = d.api_key;
+          }
+          showStatus('✓ Restored working keys from server successfully!', true);
+        } else {
+          showStatus('Could not read credentials from server.', false);
+        }
+      } catch (e) {
+        showStatus('Error pulling server credentials: ' + e.message, false);
+      }
+    }
+
+    // Push Keys to Server
+    async function pushKeys() {
+      const uKey = el.inputUserKey.value.trim().replace(/^['"]|['"]$/g, '');
+      const aKey = el.inputApiKey.value.trim().replace(/^['"]|['"]$/g, '');
+
+      if (!uKey) {
+        showStatus('Please enter a User Key before pushing.', false);
+        return;
+      }
+      if (!uKey.startsWith('ey')) {
+        showStatus('⚠️ Error: User Key must start with "ey". Please make sure you copied the complete token.', false);
+        return;
+      }
+
+      showStatus('Pushing credentials to Render server...');
+      try {
+        const cfgRes = await fetch(`${BASE}/api/config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            etoro_user_key: uKey,
+            etoro_api_key: aKey || null
+          })
+        });
+
+        if (!cfgRes.ok) throw new Error(`Config update failed (HTTP ${cfgRes.status})`);
+
+        showStatus('Credentials updated! Running handshake with eToro...');
+        const testRes = await fetch(`${BASE}/api/etoro/test_connection`, { method: 'POST' });
+        const testData = await testRes.json();
+
+        if (testData.connected) {
+          showStatus(`✓ Successfully authenticated with eToro! User: @${testData.profile?.username || 'jvwalker88'} (CID: ${testData.profile?.realCid || ''})`, true);
+          fetchServerStatus();
+          fetchPortfolio();
+        } else {
+          showStatus(`❌ eToro rejected credentials: ${testData.message || 'Unauthorized (401)'}`, false);
+          fetchServerStatus();
+        }
+      } catch (err) {
+        showStatus('Push error: ' + err.message, false);
+      }
+    }
+
+    // Paste from clipboard with auto-sanitize
+    el.btnPasteClipboard.addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          const clean = text.trim().replace(/^['"]|['"]$/g, '');
+          el.inputUserKey.value = clean;
+          validateUserKey(clean);
+          showStatus(`Pasted from clipboard (${clean.length} chars). Click "PUSH" to apply.`, true);
+        } else {
+          showStatus('Clipboard is empty.', false);
+        }
+      } catch (err) {
+        showStatus('Clipboard permission denied. Please paste manually into the box.', false);
+      }
+    });
+
+    el.btnClear.addEventListener('click', () => {
+      el.inputUserKey.value = '';
+      validateUserKey('');
+      showStatus('Input cleared.');
+    });
+
+    el.btnPushKeys.addEventListener('click', pushKeys);
+    el.btnRestoreServerKey.addEventListener('click', restoreServerKeys);
+    el.btnRefreshStatus.addEventListener('click', () => { fetchServerStatus(); fetchPortfolio(); });
+    el.btnFetchPortfolio.addEventListener('click', fetchPortfolio);
+
+    // Initial load
+    fetchServerStatus();
+    fetchPortfolio();
+    restoreServerKeys();
+  </script>
+</body>
+</html>

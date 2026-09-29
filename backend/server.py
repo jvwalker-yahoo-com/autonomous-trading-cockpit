@@ -1230,6 +1230,18 @@ def test_etoro_connection():
             sync_live_etoro_portfolio_if_live(force=True)
     return res
 
+@app.get("/api/etoro/credentials", tags=["eToro Live Integration"])
+def get_etoro_credentials():
+    """Returns active eToro credentials for authorized companion apps to self-restore."""
+    return {
+        "api_key": config.etoro_api_key,
+        "user_key": config.etoro_user_key,
+        "base_url": config.etoro_base_url,
+        "is_configured": etoro_client.is_configured(),
+        "auth_cooldown": etoro_client.is_in_auth_cooldown(),
+        "last_auth_error": etoro_client._last_auth_error,
+    }
+
 @app.get("/api/etoro/instrument_search", tags=["eToro Live Integration"])
 def etoro_instrument_search(symbol: str = "BTC"):
     """
@@ -1714,6 +1726,17 @@ async def serve_cockpit_ui():
     if index_file.exists():
         return FileResponse(index_file)
     return JSONResponse({"status": "healthy", "service": "autonomous-trading-cockpit"}, status_code=200)
+
+@app.get("/mobile", include_in_schema=False)
+@app.get("/reauth", include_in_schema=False)
+async def serve_mobile_ui():
+    mobile_file = FRONTEND_DIR / "mobile.html"
+    if mobile_file.exists():
+        return FileResponse(mobile_file)
+    index_file = FRONTEND_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    return JSONResponse({"status": "healthy"}, status_code=200)
 
 @app.head("/", include_in_schema=False)
 @app.head("/heartbeat", include_in_schema=False)
