@@ -1686,6 +1686,19 @@ def get_news_feed(symbol: Optional[str] = None):
     }
 
 
+@app.post("/api/news/refresh", tags=["Intelligence"])
+def force_news_refresh(background_tasks: BackgroundTasks):
+    """Manually triggers an immediate news intelligence refresh across all sources."""
+    def _do_refresh():
+        try:
+            news_intel.set_finnhub_key(config.finnhub_api_key)
+            news_intel.refresh_all(list(config.watchlist))
+        except Exception as e:
+            logger.warning(f"Manual news refresh error: {e}")
+    background_tasks.add_task(_do_refresh)
+    return {"status": "refresh_triggered", "watchlist_size": len(config.watchlist)}
+
+
 # ==========================================
 # STATIC UI FILE SERVING (For Render & Local)
 # ==========================================

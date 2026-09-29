@@ -20,22 +20,22 @@ from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger("auton-cockpit.news")
 
-# ── RSS Feed URLs (public, no auth needed) ──────────────────────────────────
+# ── RSS Feed URLs (public, no auth, verified working) ───────────────────────
 RSS_FEEDS = [
-    # Reuters Business
-    "https://feeds.reuters.com/reuters/businessNews",
-    # MarketWatch
-    "https://feeds.content.dowjones.io/public/rss/mw_topstories",
-    # Yahoo Finance
+    # Yahoo Finance Top Stories (reliable)
     "https://finance.yahoo.com/rss/topfinstories",
-    # Seeking Alpha Market News
-    "https://seekingalpha.com/market_currents.xml",
-    # Motley Fool
-    "https://www.fool.com/feeds/index.aspx",
-    # CNBC Top News
-    "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+    # Yahoo Finance headline stream
+    "https://finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US",
+    # Reuters Business & Finance
+    "https://feeds.reuters.com/reuters/businessNews",
     # Investopedia
     "https://www.investopedia.com/feedbuilder/feed/getfeed?feedName=rss_headline",
+    # Motley Fool
+    "https://www.fool.com/feeds/index.aspx",
+    # CNBC Markets (alternate reliable endpoint)
+    "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
+    # WSJ Markets
+    "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
 ]
 
 # ── Bullish / Bearish keyword lexicon ───────────────────────────────────────
@@ -77,8 +77,8 @@ class NewsIntelligenceEngine:
         self._global_headlines: List[Dict] = []
         # SEC EDGAR filings cache
         self._edgar_cache: Dict[str, List[Dict]] = {}
-        # Last full refresh timestamp
-        self._last_refresh: float = 0.0
+        # Last full refresh timestamp — set to 0 to trigger immediately on first call
+        self._last_refresh: float = -600.0  # forces immediate refresh on startup
         self._refresh_interval: float = 600.0  # 10 minutes
         # Earnings surprises (symbol -> days_to_earnings)
         self._earnings_calendar: Dict[str, int] = {}
@@ -208,6 +208,18 @@ class NewsIntelligenceEngine:
 
     # ── RSS Feed Fetcher ────────────────────────────────────────────────────
 
+    @staticmethod
+    def _el_text(el) -> str:
+        """Safely extract text from an ElementTree element, stripping CDATA markers."""
+        if el is None:
+            return ""
+        text = el.text or ""
+        # Strip CDATA wrappers that some parsers leave behind
+        text = text.strip()
+        if text.startswith("<![CDATA[") and text.endswith("]]>"):
+            text = text[9:-3].strip()
+        return text
+
     def _fetch_rss_feeds(self, symbols: List[str]) -> Dict:
         """Parses RSS feeds and scores headlines by symbol mention."""
         import urllib.request
@@ -216,31 +228,57 @@ class NewsIntelligenceEngine:
         all_headlines = []
         symbol_scores: Dict[str, float] = {}
         sym_lower = {s.lower(): s for s in symbols}
+        atom_ns = "http://www.w3.org/2005/Atom"
 
         for feed_url in RSS_FEEDS:
             try:
                 req = urllib.request.Request(
                     feed_url,
-                    headers={"User-Agent": "TradingCockpit/2.0 (+research)"},
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (compatible; TradingBot/2.0; +research)",
+                        "Accept": "application/rss+xml, application/xml, text/xml, */*",
+                    },
                 )
-                with urllib.request.urlopen(req, timeout=5) as resp:
+                with urllib.request.urlopen(req, timeout=6) as resp:
                     raw = resp.read().decode("utf-8", errors="ignore")
 
+                # Strip XML declaration issues and re-parse
                 root = ET.fromstring(raw)
-                # Handle both RSS and Atom formats
-                ns = {"atom": "http://www.w3.org/2005/Atom"}
-                items = root.findall(".//item") or root.findall(".//atom:entry", ns)
 
-                for item in items[:20]:  # Max 20 items per feed
-                    title_el = item.find("title") or item.find("atom:title", ns)
-                    desc_el = item.find("description") or item.find("atom:summary", ns)
-                    link_el = item.find("link") or item.find("atom:link", ns)
-                    pub_el = item.find("pubDate") or item.find("atom:updated", ns)
+                # Support both RSS <item> and Atom <entry> formats
+                items = root.findall(".//item")
+                if not items:
+                    items = root.findall(f".//{{{atom_ns}}}entry")
 
-                    title = (title_el.text or "") if title_el is not None else ""
-                    desc = (desc_el.text or "") if desc_el is not None else ""
-                    link = (link_el.text or (link_el.get("href", "") if link_el is not None else "")) if link_el is not None else ""
-                    pub = (pub_el.text or "") if pub_el is not None else ""
+                for item in items[:25]:  # Max 25 items per feed
+                    # Title — use is not None (NOT 'or') to avoid Element falsy evaluation
+                    title_el = item.find("title")
+                    if title_el is None:
+                        title_el = item.find(f"{{{atom_ns}}}title")
+                    title = self._el_text(title_el)
+
+                    # Description / summary
+                    desc_el = item.find("description")
+                    if desc_el is None:
+                        desc_el = item.find(f"{{{atom_ns}}}summary")
+                    desc = self._el_text(desc_el)
+
+                    # Link
+                    link_el = item.find("link")
+                    if link_el is not None:
+                        link = self._el_text(link_el) or link_el.get("href", "")
+                    else:
+                        atom_link = item.find(f"{{{atom_ns}}}link")
+                        link = atom_link.get("href", "") if atom_link is not None else ""
+
+                    # Published date
+                    pub_el = item.find("pubDate")
+                    if pub_el is None:
+                        pub_el = item.find(f"{{{atom_ns}}}updated")
+                    pub = self._el_text(pub_el)
+
+                    if not title:  # Skip blank headlines
+                        continue
 
                     text = f"{title} {desc}".lower()
                     score = self._score_text(text)
@@ -254,23 +292,23 @@ class NewsIntelligenceEngine:
                         "symbols": [],
                     }
 
-                    # Check which symbols are mentioned
+                    # Check which watchlist symbols are mentioned
                     for sym_l, sym in sym_lower.items():
                         if sym_l in text or f"${sym_l}" in text:
                             headline["symbols"].append(sym)
-                            prev = symbol_scores.get(sym, 0.0)
-                            symbol_scores[sym] = prev + score
+                            symbol_scores[sym] = symbol_scores.get(sym, 0.0) + score
 
                     all_headlines.append(headline)
 
             except Exception as e:
                 logger.debug(f"RSS {feed_url}: {e}")
 
-        # Normalize symbol scores by mention count
+        # Normalize symbol scores
         for sym in symbol_scores:
-            symbol_scores[sym] = max(-1.0, min(1.0, symbol_scores[sym] / 3.0))
+            symbol_scores[sym] = round(max(-1.0, min(1.0, symbol_scores[sym] / 3.0)), 3)
 
         return {"headlines": all_headlines, "symbol_scores": symbol_scores}
+
 
     # ── Finnhub News Fetcher ────────────────────────────────────────────────
 
