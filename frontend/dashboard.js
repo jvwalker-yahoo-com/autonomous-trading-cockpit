@@ -1188,36 +1188,60 @@ if (el.btnSaveConfig) {
     const maxDailyLossUsd = el.inputMaxDailyLossUsd ? parseFloat(el.inputMaxDailyLossUsd.value) : 35.0;
     const dayTradeEodFlattenMins = el.inputDayTradeEodFlattenMins ? parseInt(el.inputDayTradeEodFlattenMins.value) : 15;
 
-    await fetch(`${BASE_URL}/api/config`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        finnhub_api_key: finnhubKey || null,
-        execution_mode: execMode,
-        risk_per_trade_pct: riskPct,
-        etoro_api_key: etoroApiKey || null,
-        etoro_user_key: etoroUserKey || null,
-        etoro_base_url: etoroBaseUrl,
-        enable_day_trading: enableDayTrading,
-        day_trade_allocation_pct: dayTradeAllocPct,
-        day_trade_max_active: dayTradeMaxActive,
-        day_trade_stop_loss_pct: dayTradeSlPct,
-        day_trade_take_profit_pct: dayTradeTpPct,
-        max_daily_loss_usd: maxDailyLossUsd,
-        day_trade_eod_flatten_minutes_before_close: dayTradeEodFlattenMins
-      })
-    });
+    const origText = el.btnSaveConfig.textContent;
+    el.btnSaveConfig.textContent = "⏳ SAVING...";
+    el.btnSaveConfig.disabled = true;
+    const btnTop = document.getElementById("btnSaveConfigTop");
+    if (btnTop) {
+      btnTop.textContent = "⏳ SAVING...";
+      btnTop.disabled = true;
+    }
 
-  if (etoroApiKey) localStorage.setItem("etoro_api_key", etoroApiKey);
-  if (etoroUserKey) localStorage.setItem("etoro_user_key", etoroUserKey);
-  if (etoroBaseUrl) localStorage.setItem("etoro_base_url", etoroBaseUrl);
-  if (execMode) localStorage.setItem("execution_mode", execMode);
+    try {
+      const res = await fetch(`${BASE_URL}/api/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          finnhub_api_key: finnhubKey || null,
+          execution_mode: execMode,
+          risk_per_trade_pct: riskPct,
+          etoro_api_key: etoroApiKey || null,
+          etoro_user_key: etoroUserKey || null,
+          etoro_base_url: etoroBaseUrl,
+          enable_day_trading: enableDayTrading,
+          day_trade_allocation_pct: dayTradeAllocPct,
+          day_trade_max_active: dayTradeMaxActive,
+          day_trade_stop_loss_pct: dayTradeSlPct,
+          day_trade_take_profit_pct: dayTradeTpPct,
+          max_daily_loss_usd: maxDailyLossUsd,
+          day_trade_eod_flatten_minutes_before_close: dayTradeEodFlattenMins
+        })
+      });
 
-  updateExecutionModeUI(execMode);
-  document.body.style.overflow = "";
-  if (el.settingsModal) el.settingsModal.classList.add("hidden");
-  alert("✓ Configuration and eToro API settings saved successfully (Persisted to disk & browser)!");
-  fetchCockpitData();
+      if (!res.ok) {
+        throw new Error(`Server returned HTTP ${res.status}`);
+      }
+
+      if (etoroApiKey) localStorage.setItem("etoro_api_key", etoroApiKey);
+      if (etoroUserKey) localStorage.setItem("etoro_user_key", etoroUserKey);
+      if (etoroBaseUrl) localStorage.setItem("etoro_base_url", etoroBaseUrl);
+      if (execMode) localStorage.setItem("execution_mode", execMode);
+
+      updateExecutionModeUI(execMode);
+      document.body.style.overflow = "";
+      if (el.settingsModal) el.settingsModal.classList.add("hidden");
+      alert("✓ Configuration and eToro API settings saved successfully (Persisted to disk & browser)!");
+      fetchCockpitData();
+    } catch (err) {
+      alert("Failed to update config: " + err.message);
+    } finally {
+      el.btnSaveConfig.textContent = origText;
+      el.btnSaveConfig.disabled = false;
+      if (btnTop) {
+        btnTop.textContent = "💾 SAVE CONFIG";
+        btnTop.disabled = false;
+      }
+    }
   });
 }
 

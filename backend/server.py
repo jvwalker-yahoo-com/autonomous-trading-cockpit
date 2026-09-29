@@ -1027,7 +1027,7 @@ def get_system_config():
     }
 
 @app.post("/api/config", tags=["Configuration"])
-def update_system_config(req: ConfigUpdateRequest):
+def update_system_config(req: ConfigUpdateRequest, background_tasks: BackgroundTasks):
     """Updates API key, active symbol, or trading parameters."""
     global active_symbol
     if req.finnhub_api_key is not None:
@@ -1096,7 +1096,7 @@ def update_system_config(req: ConfigUpdateRequest):
         "max_daily_loss_usd": config.max_daily_loss_usd
     })
     if config.execution_mode == "live" and etoro_client.is_configured():
-        sync_live_etoro_portfolio_if_live(force=True)
+        background_tasks.add_task(sync_live_etoro_portfolio_if_live, force=True)
     return {"status": "updated", "config": get_system_config()}
 
 @app.get("/api/day_trading/status", tags=["Day Trading"])
