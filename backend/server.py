@@ -347,6 +347,8 @@ class ManualTradeRequest(BaseModel):
     amount_usd: Optional[float] = 100.0
     horizon: Optional[str] = "swing" # "day" or "swing"
 
+_last_catalyst_log: Dict[str, float] = {}
+
 def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     """
     Executes one complete analytical and autonomous execution pass for a symbol.
@@ -367,8 +369,10 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     catalyst_score = news_intel.get_catalyst_score(symbol)
     sentiment = round(base_sentiment * 0.60 + catalyst_score * 0.40, 3)
     
-    # Log significant catalysts
-    if abs(catalyst_score) >= 0.30:
+    # Log significant catalysts (throttled to once per 10 minutes per symbol to prevent repetitive spam)
+    now_ts = time.time()
+    if abs(catalyst_score) >= 0.30 and (now_ts - _last_catalyst_log.get(symbol, 0.0) >= 600.0):
+        _last_catalyst_log[symbol] = now_ts
         logger.info(f"🔥 [CATALYST ALERT] {symbol}: catalyst_score={catalyst_score:+.2f} (EDGAR+RSS+Finnhub) | blended_sentiment={sentiment:+.2f}")
     
     # 2. Check stops on existing open positions (simulation mode only; live positions are managed by eToro)
