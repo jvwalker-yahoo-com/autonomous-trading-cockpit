@@ -187,11 +187,25 @@ async def autonomous_background_worker_loop():
     await asyncio.sleep(4.0)
     last_universe_scan = 0.0
     last_news_refresh = 0.0
+    last_tv_scan = 0.0
     last_nightly_sync_date = ""
     last_auth_warn = 0.0
 
     # Ensure core anchor assets are in watchlist on boot (strictly excluding any crypto)
     config.watchlist = [s for s in dict.fromkeys(CORE_ANCHOR_SYMBOLS + config.watchlist) if s not in CRYPTO_SYMBOLS]
+
+    # Immediately trigger initial background warmup for News and TradingView (non-blocking)
+    def _initial_warmup():
+        try:
+            news_intel.set_finnhub_key(config.finnhub_api_key)
+            news_intel.refresh_all(list(config.watchlist))
+            screener.scan_tradingview_volume_breakouts(1.5, 5.0, 25, True)
+            screener.get_tradingview_technical_consensus(list(config.watchlist), True)
+            logger.info("🚀 [WARMUP] Initial news intelligence and TradingView consensus pre-cached successfully.")
+        except Exception as we:
+            logger.warning(f"Initial warmup notice: {we}")
+
+    asyncio.create_task(asyncio.to_thread(_initial_warmup))
 
     while True:
         try:
@@ -220,6 +234,16 @@ async def autonomous_background_worker_loop():
                     await asyncio.to_thread(news_intel.refresh_all, list(config.watchlist))
                 except Exception as ne:
                     logger.warning(f"News intel refresh error: {ne}")
+
+            # TradingView Screener & Volume Breakouts (every 5 minutes / 300s)
+            if (now - last_tv_scan) >= 300.0:
+                last_tv_scan = now
+                try:
+                    await asyncio.to_thread(screener.scan_tradingview_volume_breakouts, 1.5, 5.0, 25, True)
+                    await asyncio.to_thread(screener.get_tradingview_technical_consensus, list(config.watchlist), True)
+                    logger.info("📡 [TRADINGVIEW SCREENER] 5-minute volume breakouts and multi-timeframe consensus updated.")
+                except Exception as tve:
+                    logger.debug(f"TradingView background scan notice: {tve}")
 
             # Scheduled 10:00 PM UK Time eToro SQLite Database Sync
             # Automatically syncs newly discovered instruments from eToro catalog every night at 22:00 UK time
@@ -1709,6 +1733,56 @@ def force_news_refresh(background_tasks: BackgroundTasks):
             logger.warning(f"Manual news refresh error: {e}")
     background_tasks.add_task(_do_refresh)
     return {"status": "refresh_triggered", "watchlist_size": len(config.watchlist)}
+
+
+@app.get("/api/screener/tradingview", tags=["Intelligence"])
+def get_tradingview_breakouts(
+    min_rvol: float = 1.5,
+    min_price: float = 5.0,
+    top_n: int = 25,
+    force_refresh: bool = False
+):
+    """
+    Scans US equities for abnormal relative volume breakouts (RVOL > 1.5)
+    and multi-timeframe technical consensus directly from TradingView's screener backend.
+    Cached for 5 minutes.
+    """
+    results = screener.scan_tradingview_volume_breakouts(
+        min_rvol=min_rvol,
+        min_price=min_price,
+        top_n=top_n,
+        force_refresh=force_refresh
+    )
+    cache_age = round(time.time() - screener._tv_cache_time, 1) if screener._tv_cache_time else None
+    return {
+        "status": "success",
+        "count": len(results),
+        "min_rvol": min_rvol,
+        "min_price": min_price,
+        "results": results,
+        "cache_age_seconds": cache_age
+    }
+
+
+@app.get("/api/screener/tradingview/consensus", tags=["Intelligence"])
+def get_tradingview_consensus(symbols: Optional[str] = None, force_refresh: bool = False):
+    """
+    Returns multi-timeframe technical consensus (15m, 1h, 1D) directly from TradingView
+    for given comma-separated symbols (e.g. NVDA,AAPL,TSLA) or the active watchlist.
+    """
+    if symbols:
+        sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    else:
+        sym_list = list(config.watchlist)
+
+    consensus = screener.get_tradingview_technical_consensus(sym_list, force_refresh=force_refresh)
+    cache_age = round(time.time() - screener._tv_consensus_cache_time, 1) if screener._tv_consensus_cache_time else None
+    return {
+        "status": "success",
+        "symbols_requested": len(sym_list),
+        "results": consensus,
+        "cache_age_seconds": cache_age
+    }
 
 
 # ==========================================

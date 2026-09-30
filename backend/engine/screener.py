@@ -5,6 +5,10 @@ Indices, and Equities on eToro with quantitative opportunity scores and dynamic 
 """
 from typing import Dict, List, Any, Optional
 import time
+import logging
+import requests
+
+logger = logging.getLogger("auton-cockpit.screener")
 
 # Complete Multi-Asset Master Universe on eToro (Crypto, ETFs, Commodities, Indices, Stocks)
 MASTER_STOCK_UNIVERSE: Dict[str, Dict[str, Any]] = {
@@ -317,3 +321,213 @@ class MarketScreener:
         # Sort by opportunity score descending
         results.sort(key=lambda x: x["opportunity_score"], reverse=True)
         return results[:top_n]
+
+    # ── TradingView Screener & Technical Consensus Engine ───────────────────
+    _tv_cache: List[Dict[str, Any]] = []
+    _tv_cache_time: float = 0.0
+    _tv_cache_ttl: float = 300.0  # 5 minutes cache to prevent rate-limiting
+
+    _tv_consensus_cache: Dict[str, Dict[str, Any]] = {}
+    _tv_consensus_cache_time: float = 0.0
+    _tv_consensus_cache_ttl: float = 180.0  # 3 minutes cache
+
+    @classmethod
+    def scan_tradingview_volume_breakouts(
+        cls,
+        min_rvol: float = 1.5,
+        min_price: float = 5.0,
+        top_n: int = 25,
+        force_refresh: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Scans US equities for abnormal relative volume breakouts (RVOL > 1.5x 10-day average)
+        and multi-timeframe technical consensus directly from TradingView's official screener backend.
+        Results are cached for 5 minutes to prevent rate-limiting.
+        """
+        now = time.time()
+        if not force_refresh and cls._tv_cache and (now - cls._tv_cache_time < cls._tv_cache_ttl):
+            return cls._tv_cache[:top_n]
+
+        url = "https://scanner.tradingview.com/america/scan"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+
+        payload = {
+            "filter": [
+                {"left": "volume", "operation": "greater", "right": 100000},
+                {"left": "type", "operation": "in_range", "right": ["stock", "dr"]},
+                {"left": "exchange", "operation": "in_range", "right": ["NASDAQ", "NYSE", "AMEX"]},
+                {"left": "relative_volume_10d_calc", "operation": "greater", "right": min_rvol},
+                {"left": "close", "operation": "greater", "right": min_price}
+            ],
+            "options": {"lang": "en"},
+            "symbols": {"query": {"types": []}, "tickers": []},
+            "columns": [
+                "name",
+                "description",
+                "close",
+                "change",
+                "volume",
+                "relative_volume_10d_calc",
+                "Recommend.All",
+                "Recommend.MA",
+                "Recommend.Other",
+                "Recommend.All|60",
+                "Recommend.All|15",
+                "RSI",
+                "MACD.macd",
+                "MACD.signal"
+            ],
+            "sort": {"sortBy": "relative_volume_10d_calc", "sortOrder": "desc"},
+            "range": [0, max(top_n, 30)]
+        }
+
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=8)
+            if resp.status_code != 200:
+                logger.warning(f"TradingView screener returned HTTP {resp.status_code}")
+                return cls._tv_cache[:top_n]
+
+            data = resp.json().get("data", [])
+            results = []
+
+            def _to_consensus(score: float) -> str:
+                if score >= 0.5:
+                    return "STRONG_BUY"
+                elif score >= 0.1:
+                    return "BUY"
+                elif score <= -0.5:
+                    return "STRONG_SELL"
+                elif score <= -0.1:
+                    return "SELL"
+                return "NEUTRAL"
+
+            for item in data:
+                ticker = item.get("s", "")
+                d = item.get("d", [])
+                if len(d) >= 12:
+                    sym = str(d[0]).upper()
+                    # Exclude crypto or restricted symbols
+                    if sym in PROHIBITED_CRYPTO:
+                        continue
+
+                    rec_1d = float(d[6] or 0.0)
+                    rec_1h = float(d[9] if len(d) > 9 and d[9] is not None else rec_1d)
+                    rec_15m = float(d[10] if len(d) > 10 and d[10] is not None else rec_1h)
+
+                    rvol = round(float(d[5]), 2) if d[5] is not None else 1.0
+                    price = round(float(d[2]), 2) if d[2] is not None else 0.0
+                    chg = round(float(d[3]), 2) if d[3] is not None else 0.0
+
+                    results.append({
+                        "ticker": ticker,
+                        "symbol": sym,
+                        "name": d[1] or sym,
+                        "price": price,
+                        "change_pct": chg,
+                        "volume": int(d[4]) if d[4] is not None else 0,
+                        "relative_volume": rvol,
+                        "recommend_score": round(rec_1d, 3),
+                        "consensus_1d": _to_consensus(rec_1d),
+                        "consensus_1h": _to_consensus(rec_1h),
+                        "consensus_15m": _to_consensus(rec_15m),
+                        "rsi": round(float(d[11]), 1) if len(d) > 11 and d[11] is not None else None,
+                        "is_etoro_anchor": sym in MASTER_STOCK_UNIVERSE
+                    })
+
+            if results:
+                cls._tv_cache = results
+                cls._tv_cache_time = now
+
+            return results[:top_n]
+
+        except Exception as e:
+            logger.warning(f"TradingView volume breakout scan error: {e}")
+            return cls._tv_cache[:top_n]
+
+    @classmethod
+    def get_tradingview_technical_consensus(
+        cls,
+        symbols: List[str],
+        force_refresh: bool = False
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Batch-queries TradingView scanner for technical consensus on specific symbols.
+        Returns multi-timeframe consensus (15m, 1h, 1D), RSI, and relative volume.
+        Cached for 3 minutes.
+        """
+        clean_symbols = [str(s).upper() for s in symbols if str(s).upper() not in PROHIBITED_CRYPTO]
+        if not clean_symbols:
+            return {}
+
+        now = time.time()
+        if not force_refresh and (now - cls._tv_consensus_cache_time < cls._tv_consensus_cache_ttl):
+            cached = {s: cls._tv_consensus_cache[s] for s in clean_symbols if s in cls._tv_consensus_cache}
+            if len(cached) >= len(clean_symbols) * 0.8:
+                return cached
+
+        url = "https://scanner.tradingview.com/america/scan"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "filter": [{"left": "name", "operation": "in_range", "right": clean_symbols}],
+            "columns": [
+                "name", "close", "change",
+                "Recommend.All", "Recommend.MA", "Recommend.Other",
+                "Recommend.All|60", "Recommend.All|15",
+                "RSI", "relative_volume_10d_calc"
+            ]
+        }
+
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=6)
+            if resp.status_code != 200:
+                return cls._tv_consensus_cache
+
+            def _to_consensus(score: float) -> str:
+                if score >= 0.5:
+                    return "STRONG_BUY"
+                elif score >= 0.1:
+                    return "BUY"
+                elif score <= -0.5:
+                    return "STRONG_SELL"
+                elif score <= -0.1:
+                    return "SELL"
+                return "NEUTRAL"
+
+            results = dict(cls._tv_consensus_cache)
+            for row in resp.json().get("data", []):
+                d = row.get("d", [])
+                if len(d) >= 10:
+                    sym = str(d[0]).upper()
+                    rec_1d = float(d[3] or 0.0)
+                    rec_1h = float(d[6] if d[6] is not None else rec_1d)
+                    rec_15m = float(d[7] if d[7] is not None else rec_1h)
+                    results[sym] = {
+                        "symbol": sym,
+                        "close": round(float(d[1] or 0.0), 2),
+                        "change_pct": round(float(d[2] or 0.0), 2),
+                        "recommend_score_1d": round(rec_1d, 3),
+                        "recommend_score_1h": round(rec_1h, 3),
+                        "recommend_score_15m": round(rec_15m, 3),
+                        "consensus_1d": _to_consensus(rec_1d),
+                        "consensus_1h": _to_consensus(rec_1h),
+                        "consensus_15m": _to_consensus(rec_15m),
+                        "rsi": round(float(d[8]), 1) if d[8] is not None else None,
+                        "relative_volume": round(float(d[9]), 2) if d[9] is not None else 1.0,
+                        "source": "TradingView Scanner"
+                    }
+
+            cls._tv_consensus_cache = results
+            cls._tv_consensus_cache_time = now
+            return {s: results[s] for s in clean_symbols if s in results}
+
+        except Exception as e:
+            logger.warning(f"TradingView consensus fetch error: {e}")
+            return cls._tv_consensus_cache
