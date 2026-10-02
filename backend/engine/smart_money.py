@@ -211,16 +211,17 @@ class SmartMoneyEngine:
         # 4. Identify Potential Trade Setups (Cross-matching Congressional Buys with Watchlist/Anchors)
         candidates: List[Dict[str, Any]] = []
         for sym, score in sorted(normalized_scores.items(), key=lambda x: x[1], reverse=True):
-            if score >= 0.20:
+            if score >= 0.08:
                 trades_for_sym = symbol_trades_map.get(sym, [])
                 top_members = list(dict.fromkeys([t.get("member") for t in trades_for_sym if t.get("member")]))
+                buyers_desc = top_members[:3] if top_members else ["Market-Wide Net Flow"]
                 candidates.append({
                     "symbol": sym,
                     "signal": "CONGRESS_BUY",
                     "conviction_score": score,
-                    "buyers": top_members[:3],
+                    "buyers": buyers_desc,
                     "total_trades": len(trades_for_sym),
-                    "latest_filing": trades_for_sym[0].get("disclosed") if trades_for_sym else "Recent",
+                    "latest_filing": trades_for_sym[0].get("disclosed") if trades_for_sym else "Recent Disclosure",
                     "source": "CongressInvests + Equibles MCP"
                 })
 

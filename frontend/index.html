@@ -81,6 +81,7 @@
           <span id="modeStatusLabel">🛡️ DEMO / LEARNING</span>
         </button>
         <button id="btnScreenerModal" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981, #059669);" title="Market Screener & Universal Stock Universe">🔍 SCREENER / STOCKS</button>
+        <button id="btnSmartMoneyHeader" class="btn btn-outline" style="border-color: #a855f7; color: #c084fc; font-weight: bold; font-size: 11px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px;" title="View Congressional STOCK Act Trades & Smart Money Opportunities">🏛️ CONGRESS TRADES</button>
         <button id="btnDailyReport" class="btn btn-primary" title="View Full Day Performance & Learning Audit">📊 DAILY REPORT</button>
         <button id="btnBacktestModal" class="btn btn-secondary" title="Quantitative Backtester & Parameter Optimizer">🧪 BACKTEST</button>
         <button id="btnHeaderTestEtoro" class="btn btn-outline" style="border-color: #06b6d4; color: #06b6d4; font-weight: bold; font-size: 11px;" title="Test eToro API Connection (Read-Only)">🧪 TEST ETORO</button>
@@ -935,12 +936,13 @@
               <button class="btn btn-secondary btn-cat-tab" data-cat="Indices" style="font-size: 11px; padding: 4px 10px;">📈 Indices</button>
               <button class="btn btn-secondary btn-cat-tab" data-cat="ETFs" style="font-size: 11px; padding: 4px 10px;">🌐 ETFs</button>
               <button class="btn btn-secondary btn-cat-tab" data-cat="AI & Tech Titans" style="font-size: 11px; padding: 4px 10px;">⚡ Equities</button>
+              <button class="btn btn-secondary btn-cat-tab" data-cat="smart_money" style="font-size: 11px; padding: 4px 10px; color: #c084fc; border-color: rgba(192, 132, 252, 0.4);">🏛️ Smart Money (Congress)</button>
             </div>
             <button id="btnRefreshScreener" class="btn btn-secondary" style="font-size: 10px; padding: 4px 8px;">🔄 REFRESH SCAN</button>
           </div>
           <div class="table-responsive" style="max-height: 320px; overflow-y: auto;">
             <table class="cyber-table">
-              <thead>
+              <thead id="screenerTableHead">
                 <tr>
                   <th>INSTRUMENT / ASSET</th>
                   <th>CLASS / HOURS</th>

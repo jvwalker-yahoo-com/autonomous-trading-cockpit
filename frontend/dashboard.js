@@ -1966,61 +1966,149 @@ let currentScreenerCategory = "all";
 async function loadScreenerScan(category = "all") {
   currentScreenerCategory = category;
   if (!screenerTableBody) return;
+  const screenerTableHead = document.getElementById("screenerTableHead");
   screenerTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted">⌛ Scanning multi-asset universe (${category}) in real-time...</td></tr>`;
 
   try {
-    const url = category === "all"
-      ? `${BASE_URL}/api/screener/scan?top_n=40`
-      : `${BASE_URL}/api/screener/scan?category=${encodeURIComponent(category)}&top_n=40`;
+    if (category === "smart_money") {
+      if (screenerTableHead) {
+        screenerTableHead.innerHTML = `
+          <tr>
+            <th>TICKER & ASSET</th>
+            <th>CONGRESS SIGNAL</th>
+            <th>CONVICTION</th>
+            <th>BUYING MEMBERS (STOCK ACT)</th>
+            <th>TV 1D TREND</th>
+            <th>TV 1H TREND</th>
+            <th>RVOL</th>
+            <th>LATEST FILING</th>
+            <th>ACTION</th>
+          </tr>
+        `;
+      }
+      const res = await fetch(`${BASE_URL}/api/smart_money/opportunities?top_n=30`);
+      if (!res.ok) throw new Error("Smart money query failed");
+      const data = await res.json();
+      const screened = data.opportunities || [];
 
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("Screener failed");
-    const screened = await res.json();
+      if (screened.length === 0) {
+        screenerTableBody.innerHTML = `<tr><td colspan="9" class="text-center text-muted">No congressional trade setups active right now.</td></tr>`;
+        return;
+      }
 
-    if (screened.length === 0) {
-      screenerTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted">No opportunities found for category: ${category}.</td></tr>`;
-      return;
+      screenerTableBody.innerHTML = screened.map(s => {
+        const isHigh = s.signal === "HIGH_CONVICTION_BUY";
+        const sigBadge = isHigh
+          ? `<span class="badge" style="background: rgba(16,185,129,0.2); color:#34d399; border:1px solid #10b981; font-weight:bold; font-size:10px;">🏛️ HIGH CONVICTION BUY</span>`
+          : `<span class="badge" style="background: rgba(168,85,247,0.2); color:#c084fc; border:1px solid #a855f7; font-size:10px;">🏛️ ACCUMULATION</span>`;
+        
+        const tv1dBadge = s.tradingview_1d === "STRONG_BUY" ? "badge-ok" : (s.tradingview_1d === "BUY" ? "badge-ok" : (s.tradingview_1d === "SELL" || s.tradingview_1d === "STRONG_SELL" ? "badge-critical" : "badge-normal"));
+        const tv1hBadge = s.tradingview_1h === "STRONG_BUY" ? "badge-ok" : (s.tradingview_1h === "BUY" ? "badge-ok" : (s.tradingview_1h === "SELL" || s.tradingview_1h === "STRONG_SELL" ? "badge-critical" : "badge-normal"));
+        const buyersStr = (s.buyers && s.buyers.length > 0) ? s.buyers.join(", ") : "Market-Wide Net Flow";
+
+        return `
+          <tr>
+            <td>
+              <strong>${s.symbol}</strong>
+              <span style="display: block; font-size: 10px; color: var(--text-muted);">${s.is_etoro_anchor ? '✓ eToro Tradable' : 'US Equity'}</span>
+            </td>
+            <td>${sigBadge}</td>
+            <td><strong style="color: #10b981; font-size: 13px;">+${(s.congress_conviction || 0).toFixed(2)}</strong></td>
+            <td style="font-size: 11px; max-width: 180px; white-space: normal;">
+              <span style="color: #e2e8f0; font-weight: 500;">${buyersStr}</span>
+            </td>
+            <td><span class="badge ${tv1dBadge}">${s.tradingview_1d || 'NEUTRAL'}</span></td>
+            <td><span class="badge ${tv1hBadge}">${s.tradingview_1h || 'NEUTRAL'}</span></td>
+            <td><span style="font-size: 11px;">${(s.relative_volume || 1.0).toFixed(1)}x</span></td>
+            <td style="font-size: 10px; color: var(--text-muted);">${s.latest_filing || 'Recent'}</td>
+            <td>
+              <div style="display: flex; gap: 4px;">
+                <button class="btn btn-outline btn-screener-select" data-sym="${s.symbol}" style="font-size: 10px; padding: 2px 6px;" title="View in Cockpit">⚡ VIEW</button>
+                <button class="btn btn-primary btn-screener-add" data-sym="${s.symbol}" style="font-size: 10px; padding: 2px 6px;" title="Add to Automated Bot">➕ ADD</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+      if (screenerStatusMsg) {
+        screenerStatusMsg.textContent = `🏛️ ${screened.length} Congressional Smart Money trade setups identified (CongressInvests + Equibles MCP). Updated at ${new Date().toLocaleTimeString()}.`;
+      }
+    } else {
+      if (screenerTableHead) {
+        screenerTableHead.innerHTML = `
+          <tr>
+            <th>INSTRUMENT / ASSET</th>
+            <th>CLASS / HOURS</th>
+            <th>PRICE ($)</th>
+            <th>24H CHG (%)</th>
+            <th>ADX (TREND)</th>
+            <th>SUPERTREND</th>
+            <th>RSI</th>
+            <th>SIGNAL</th>
+            <th>SCORE</th>
+            <th>ACTION</th>
+          </tr>
+        `;
+      }
+      const url = category === "all"
+        ? `${BASE_URL}/api/screener/scan?top_n=40`
+        : `${BASE_URL}/api/screener/scan?category=${encodeURIComponent(category)}&top_n=40`;
+
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Screener failed");
+      const screened = await res.json();
+
+      if (screened.length === 0) {
+        screenerTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted">No opportunities found for category: ${category}.</td></tr>`;
+        return;
+      }
+
+      screenerTableBody.innerHTML = screened.map((s, idx) => {
+        const chgColor = s.change_pct >= 0 ? "color-success" : "color-danger";
+        const chgSign = s.change_pct >= 0 ? "+" : "";
+        const isBull = s.supertrend === "BULLISH";
+        const isBuy = s.signal.startsWith("BUY");
+        const sigBadge = isBuy ? "badge-ok" : "badge-critical";
+        const scoreColor = s.opportunity_score >= 80 ? "color-success" : (s.opportunity_score >= 65 ? "var(--accent-cyan)" : "var(--text-color)");
+
+        return `
+          <tr>
+            <td>
+              <strong>${s.symbol}</strong>
+              <span style="display: block; font-size: 10px; color: var(--text-muted);">${s.name}</span>
+              <div style="display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap;">
+                ${s.recommended_horizon === 'DAY' ? '<span class="badge" style="background: rgba(245,158,11,0.2); color:#fbbf24; border:1px solid #f59e0b; font-size:9px; padding: 1px 4px;">☀️ DAY</span>' : '<span class="badge" style="background: rgba(56,189,248,0.2); color:#38bdf8; border:1px solid #0284c7; font-size:9px; padding: 1px 4px;">🌙 SWING</span>'}
+                ${s.pattern_detected && s.pattern_detected !== "Trend Continuation" ? `<span class="badge" style="background: rgba(168,85,247,0.2); color:#c084fc; border:1px solid #a855f7; font-size:9px; padding: 1px 4px;">📐 ${s.pattern_detected}</span>` : ''}
+                ${s.vol_surge >= 1.25 ? `<span class="badge" style="background: rgba(16,185,129,0.2); color:#34d399; border:1px solid #10b981; font-size:9px; padding: 1px 4px;">⚡ ${s.vol_surge.toFixed(1)}x VOL</span>` : ''}
+                ${s.congress_conviction && s.congress_conviction > 0 ? `<span class="badge" style="background: rgba(168,85,247,0.2); color:#c084fc; border:1px solid #a855f7; font-size:9px; padding: 1px 4px;">🏛️ Congress +${s.congress_conviction.toFixed(2)}</span>` : ''}
+              </div>
+            </td>
+            <td>
+              <span class="badge badge-normal" style="font-size: 10px;">${s.asset_class || s.category}</span>
+              <span style="display: block; font-size: 9px; color: var(--text-muted); margin-top: 2px;">${s.trading_hours || ''}</span>
+            </td>
+            <td><strong>$${s.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong></td>
+            <td class="${chgColor}">${chgSign}${s.change_pct.toFixed(2)}%</td>
+            <td><span class="badge ${s.adx >= 25 ? 'badge-ok' : 'badge-normal'}">${s.adx}</span></td>
+            <td><span class="badge ${isBull ? 'badge-ok' : 'badge-critical'}">${s.supertrend}</span></td>
+            <td>${s.rsi}</td>
+            <td><span class="badge ${sigBadge}">${s.signal}</span></td>
+            <td><strong style="color: ${scoreColor}; font-size: 13px;">${s.opportunity_score}</strong>/100</td>
+            <td>
+              <div style="display: flex; gap: 4px;">
+                <button class="btn btn-outline btn-screener-select" data-sym="${s.symbol}" style="font-size: 10px; padding: 2px 6px;" title="View in Cockpit">⚡ VIEW</button>
+                <button class="btn btn-primary btn-screener-add" data-sym="${s.symbol}" style="font-size: 10px; padding: 2px 6px;" title="Add to Automated Bot">➕ ADD</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+      if (screenerStatusMsg) {
+        screenerStatusMsg.textContent = `✓ Top ${screened.length} ranked opportunities updated at ${new Date().toLocaleTimeString()}.`;
+      }
     }
-
-    screenerTableBody.innerHTML = screened.map((s, idx) => {
-      const chgColor = s.change_pct >= 0 ? "color-success" : "color-danger";
-      const chgSign = s.change_pct >= 0 ? "+" : "";
-      const isBull = s.supertrend === "BULLISH";
-      const isBuy = s.signal.startsWith("BUY");
-      const sigBadge = isBuy ? "badge-ok" : "badge-critical";
-      const scoreColor = s.opportunity_score >= 80 ? "color-success" : (s.opportunity_score >= 65 ? "var(--accent-cyan)" : "var(--text-color)");
-
-      return `
-        <tr>
-          <td>
-            <strong>${s.symbol}</strong>
-            <span style="display: block; font-size: 10px; color: var(--text-muted);">${s.name}</span>
-            <div style="display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap;">
-              ${s.recommended_horizon === 'DAY' ? '<span class="badge" style="background: rgba(245,158,11,0.2); color:#fbbf24; border:1px solid #f59e0b; font-size:9px; padding: 1px 4px;">☀️ DAY</span>' : '<span class="badge" style="background: rgba(56,189,248,0.2); color:#38bdf8; border:1px solid #0284c7; font-size:9px; padding: 1px 4px;">🌙 SWING</span>'}
-              ${s.pattern_detected && s.pattern_detected !== "Trend Continuation" ? `<span class="badge" style="background: rgba(168,85,247,0.2); color:#c084fc; border:1px solid #a855f7; font-size:9px; padding: 1px 4px;">📐 ${s.pattern_detected}</span>` : ''}
-              ${s.vol_surge >= 1.25 ? `<span class="badge" style="background: rgba(16,185,129,0.2); color:#34d399; border:1px solid #10b981; font-size:9px; padding: 1px 4px;">⚡ ${s.vol_surge.toFixed(1)}x VOL</span>` : ''}
-            </div>
-          </td>
-          <td>
-            <span class="badge badge-normal" style="font-size: 10px;">${s.asset_class || s.category}</span>
-            <span style="display: block; font-size: 9px; color: var(--text-muted); margin-top: 2px;">${s.trading_hours || ''}</span>
-          </td>
-          <td><strong>$${s.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong></td>
-          <td class="${chgColor}">${chgSign}${s.change_pct.toFixed(2)}%</td>
-          <td><span class="badge ${s.adx >= 25 ? 'badge-ok' : 'badge-normal'}">${s.adx}</span></td>
-          <td><span class="badge ${isBull ? 'badge-ok' : 'badge-critical'}">${s.supertrend}</span></td>
-          <td>${s.rsi}</td>
-          <td><span class="badge ${sigBadge}">${s.signal}</span></td>
-          <td><strong style="color: ${scoreColor}; font-size: 13px;">${s.opportunity_score}</strong>/100</td>
-          <td>
-            <div style="display: flex; gap: 4px;">
-              <button class="btn btn-outline btn-screener-select" data-sym="${s.symbol}" style="font-size: 10px; padding: 2px 6px;" title="View in Cockpit">⚡ VIEW</button>
-              <button class="btn btn-primary btn-screener-add" data-sym="${s.symbol}" style="font-size: 10px; padding: 2px 6px;" title="Add to Automated Bot">➕ ADD</button>
-            </div>
-          </td>
-        </tr>
-      `;
-    }).join("");
 
     // Hook buttons
     document.querySelectorAll(".btn-screener-select").forEach(b => {
@@ -2054,12 +2142,27 @@ async function loadScreenerScan(category = "all") {
       });
     });
 
-    if (screenerStatusMsg) {
-      screenerStatusMsg.textContent = `✓ Top ${screened.length} ranked opportunities updated at ${new Date().toLocaleTimeString()}.`;
-    }
   } catch (e) {
     screenerTableBody.innerHTML = `<tr><td colspan="10" class="text-center text-muted">Error loading scan: ${e.message}</td></tr>`;
   }
+}
+
+const btnSmartMoneyHeader = document.getElementById("btnSmartMoneyHeader");
+if (btnSmartMoneyHeader) {
+  btnSmartMoneyHeader.addEventListener("click", () => {
+    screenerModal.classList.remove("hidden");
+    updateWatchlistUI();
+    const smartTab = document.querySelector('.btn-cat-tab[data-cat="smart_money"]');
+    if (smartTab) {
+      document.querySelectorAll(".btn-cat-tab").forEach(t => {
+        t.classList.remove("active", "btn-primary");
+        t.classList.add("btn-secondary");
+      });
+      smartTab.classList.remove("btn-secondary");
+      smartTab.classList.add("active", "btn-primary");
+    }
+    loadScreenerScan("smart_money");
+  });
 }
 
 if (btnScreenerModal) {
