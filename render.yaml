@@ -27,3 +27,9 @@ services:
         value: "8"
       - key: EXECUTION_LOOP_INTERVAL
         value: "5.0"
+      - key: EQUIBLES_API_KEY
+        value: "eq_1a4793cb907bc87e163c0b457166914a95c86e8e"
+      - key: CONGRESS_INVESTS_URL
+        value: "https://congressinfor-production.up.railway.app"
+      - key: ENABLE_SMART_MONEY
+        value: "true"

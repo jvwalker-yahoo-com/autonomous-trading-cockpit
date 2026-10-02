@@ -55,9 +55,13 @@ class SystemConfig(BaseModel):
     day_trade_max_hold_hours: float = float(os.getenv("DAY_TRADE_MAX_HOLD_HOURS", "6.0")) # Max 6 hours holding time
     day_trade_eod_flatten_minutes_before_close: int = int(os.getenv("DAY_TRADE_EOD_FLATTEN_MINS", "15")) # 15 mins before market close
     
-    # News Intelligence
+    # News & Smart Money Intelligence
     news_intel_refresh_interval_sec: float = float(os.getenv("NEWS_INTEL_REFRESH_SEC", "600.0"))  # 10 minutes
-    news_intel_catalyst_weight: float = float(os.getenv("NEWS_INTEL_CATALYST_WEIGHT", "0.40"))   # 40% news weight in sentiment
+    news_intel_catalyst_weight: float = float(os.getenv("NEWS_INTEL_CATALYST_WEIGHT", "0.30"))   # 30% news weight in sentiment
+    smart_money_weight: float = float(os.getenv("SMART_MONEY_WEIGHT", "0.20"))                    # 20% smart money / congress weight
+    equibles_api_key: str = os.getenv("EQUIBLES_API_KEY", "eq_1a4793cb907bc87e163c0b457166914a95c86e8e")
+    congress_invests_url: str = os.getenv("CONGRESS_INVESTS_URL", "https://congressinfor-production.up.railway.app")
+    enable_smart_money: bool = os.getenv("ENABLE_SMART_MONEY", "true").lower() in ("true", "1", "yes")
     max_daily_loss_usd: float = float(os.getenv("MAX_DAILY_LOSS_USD", "35.0")) # $35.00 daily loss limit on £1,000/$1,300 account
     max_daily_loss_pct: float = float(os.getenv("MAX_DAILY_LOSS_PCT", "0.025")) # 2.5% daily drawdown circuit breaker
     max_spread_pct_day_trade: float = float(os.getenv("MAX_SPREAD_PCT_DAY_TRADE", "0.0015")) # 0.15% (15 bps) spread threshold

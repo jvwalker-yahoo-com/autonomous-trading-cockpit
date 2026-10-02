@@ -34,6 +34,7 @@ from .engine.etoro_client import EToroClient
 from .engine.instruments_db import get_instruments_db, get_etoro_id
 from .engine.data_feed import BASE_PRICES
 from .engine.news_intel import NewsIntelligenceEngine
+from .engine.smart_money import SmartMoneyEngine
 from .engine.models import (
     RegimeState, FederationOutput, ArbitrationOutput,
     DecisionOutput, AnomalyDetectorOutput, QuadrantOutput,
@@ -78,6 +79,7 @@ broker = SimulatedBroker(initial_capital=config.initial_capital, db_path=config.
 backtester = BacktesterEngine()
 screener = MarketScreener()
 news_intel = NewsIntelligenceEngine(finnhub_api_key=config.finnhub_api_key)
+smart_money = SmartMoneyEngine(equibles_api_key=config.equibles_api_key, congress_invests_url=config.congress_invests_url)
 
 # Restore persisted system settings from disk
 saved_settings = broker.load_state()
@@ -188,20 +190,23 @@ async def autonomous_background_worker_loop():
     last_universe_scan = 0.0
     last_news_refresh = 0.0
     last_tv_scan = 0.0
+    last_smart_money_refresh = 0.0
     last_nightly_sync_date = ""
     last_auth_warn = 0.0
 
     # Ensure core anchor assets are in watchlist on boot (strictly excluding any crypto)
     config.watchlist = [s for s in dict.fromkeys(CORE_ANCHOR_SYMBOLS + config.watchlist) if s not in CRYPTO_SYMBOLS]
 
-    # Immediately trigger initial background warmup for News and TradingView (non-blocking)
+    # Immediately trigger initial background warmup for News, TradingView, and Smart Money (non-blocking)
     def _initial_warmup():
         try:
             news_intel.set_finnhub_key(config.finnhub_api_key)
             news_intel.refresh_all(list(config.watchlist))
             screener.scan_tradingview_volume_breakouts(1.5, 5.0, 25, True)
             screener.get_tradingview_technical_consensus(list(config.watchlist), True)
-            logger.info("🚀 [WARMUP] Initial news intelligence and TradingView consensus pre-cached successfully.")
+            smart_money.set_equibles_key(config.equibles_api_key)
+            smart_money.refresh_all(list(config.watchlist))
+            logger.info("🚀 [WARMUP] Initial news intelligence, TradingView consensus, and Smart Money pre-cached successfully.")
         except Exception as we:
             logger.warning(f"Initial warmup notice: {we}")
 
@@ -244,6 +249,15 @@ async def autonomous_background_worker_loop():
                     logger.info("📡 [TRADINGVIEW SCREENER] 5-minute volume breakouts and multi-timeframe consensus updated.")
                 except Exception as tve:
                     logger.debug(f"TradingView background scan notice: {tve}")
+
+            # Smart Money & Congressional Disclosures Refresh (every 15 minutes / 900s)
+            if (now - last_smart_money_refresh) >= 900.0:
+                last_smart_money_refresh = now
+                try:
+                    smart_money.set_equibles_key(config.equibles_api_key)
+                    await asyncio.to_thread(smart_money.refresh_all, list(config.watchlist))
+                except Exception as sme:
+                    logger.warning(f"Smart Money background refresh error: {sme}")
 
             # Scheduled 10:00 PM UK Time eToro SQLite Database Sync
             # Automatically syncs newly discovered instruments from eToro catalog every night at 22:00 UK time
@@ -289,8 +303,11 @@ async def autonomous_background_worker_loop():
             if config.auto_rotate_universe and (now - last_universe_scan > config.universe_scan_interval_sec):
                 last_universe_scan = now
                 try:
-                    top_screened = await asyncio.to_thread(screener.scan_universe, data_feed, "Stock", 25, True)
+                    top_screened = await asyncio.to_thread(screener.scan_universe, data_feed, "Stock", 25, True, False, smart_money)
+                    smart_buys = [c["symbol"] for c in smart_money.get_trade_candidates() if c.get("conviction_score", 0) >= 0.20 and c.get("symbol") in MASTER_STOCK_UNIVERSE]
                     screened_syms = [s["symbol"] for s in top_screened if s.get("opportunity_score", 0) >= 50 and s["symbol"] not in CRYPTO_SYMBOLS]
+                    if smart_buys:
+                        screened_syms = list(dict.fromkeys(smart_buys + screened_syms))
                     if screened_syms:
                         clean_watchlist = [s for s in config.watchlist if s not in CRYPTO_SYMBOLS]
                         combined = list(dict.fromkeys(CORE_ANCHOR_SYMBOLS + screened_syms + clean_watchlist))[:40]
@@ -348,6 +365,7 @@ class ManualTradeRequest(BaseModel):
     horizon: Optional[str] = "swing" # "day" or "swing"
 
 _last_catalyst_log: Dict[str, float] = {}
+_last_congress_log: Dict[str, float] = {}
 
 def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     """
@@ -364,16 +382,25 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     quote = data_feed.get_latest_quote(symbol)
     indicators = data_feed.get_technical_indicators(symbol)
     
-    # Blend DataFeed sentiment with NewsIntel catalyst score (60/40 weighted)
+    # Blend DataFeed sentiment with NewsIntel catalyst score and SmartMoney Congressional conviction
     base_sentiment = data_feed.get_news_sentiment(symbol)
     catalyst_score = news_intel.get_catalyst_score(symbol)
-    sentiment = round(base_sentiment * 0.60 + catalyst_score * 0.40, 3)
+    congress_score = smart_money.get_congress_conviction(symbol)
+    
+    if config.enable_smart_money:
+        sentiment = round(base_sentiment * 0.50 + catalyst_score * 0.30 + congress_score * 0.20, 3)
+    else:
+        sentiment = round(base_sentiment * 0.60 + catalyst_score * 0.40, 3)
     
     # Log significant catalysts (throttled to once per 10 minutes per symbol to prevent repetitive spam)
     now_ts = time.time()
     if abs(catalyst_score) >= 0.30 and (now_ts - _last_catalyst_log.get(symbol, 0.0) >= 600.0):
         _last_catalyst_log[symbol] = now_ts
         logger.info(f"🔥 [CATALYST ALERT] {symbol}: catalyst_score={catalyst_score:+.2f} (EDGAR+RSS+Finnhub) | blended_sentiment={sentiment:+.2f}")
+    
+    if abs(congress_score) >= 0.20 and (now_ts - _last_congress_log.get(symbol, 0.0) >= 600.0):
+        _last_congress_log[symbol] = now_ts
+        logger.info(f"🏛️ [CONGRESS TRADE] {symbol}: conviction={congress_score:+.2f} (CongressInvests + Equibles MCP) | blended_sentiment={sentiment:+.2f}")
     
     # 2. Check stops on existing open positions (simulation mode only; live positions are managed by eToro)
     if config.simulation_mode:
@@ -1051,7 +1078,10 @@ def get_system_config():
         "day_trade_take_profit_pct": config.day_trade_take_profit_pct,
         "day_trade_max_hold_hours": config.day_trade_max_hold_hours,
         "max_daily_loss_usd": config.max_daily_loss_usd,
-        "news_intel_last_refresh": news_intel._last_refresh
+        "news_intel_last_refresh": news_intel._last_refresh,
+        "equibles_api_key_configured": bool(config.equibles_api_key and len(config.equibles_api_key) > 5),
+        "smart_money_enabled": config.enable_smart_money,
+        "smart_money_last_refresh": smart_money._last_refresh
     }
 
 @app.post("/api/config", tags=["Configuration"])
@@ -1485,7 +1515,7 @@ class WatchlistPresetRequest(BaseModel):
 @app.get("/api/screener/scan", tags=["Market Screener"])
 def scan_market(category: Optional[str] = None, top_n: int = 35):
     """Scans all multi-asset instruments across Crypto, Commodities, Indices, ETFs, and Equities."""
-    return MarketScreener.scan_universe(data_feed, category_filter=category, top_n=top_n)
+    return MarketScreener.scan_universe(data_feed, category_filter=category, top_n=top_n, smart_money_engine=smart_money)
 
 @app.get("/api/screener/universe", tags=["Market Screener"])
 def get_market_universe():
@@ -1549,7 +1579,7 @@ def set_watchlist_preset(req: WatchlistPresetRequest):
 @app.post("/api/screener/auto_add_top", tags=["Market Screener"])
 def auto_add_top_screened(top_n: int = 15):
     """Automatically scans universe and adds top ranked momentum opportunities to the active trading bot."""
-    screened = MarketScreener.scan_universe(data_feed, top_n=top_n)
+    screened = MarketScreener.scan_universe(data_feed, top_n=top_n, smart_money_engine=smart_money)
     top_symbols = [s["symbol"] for s in screened]
     for sym in top_symbols:
         if sym not in config.watchlist:
@@ -1787,6 +1817,101 @@ def get_tradingview_consensus(symbols: Optional[str] = None, force_refresh: bool
         "results": consensus,
         "cache_age_seconds": cache_age
     }
+
+
+# ==========================================
+# SMART MONEY & CONGRESSIONAL INTELLIGENCE
+# ==========================================
+
+@app.get("/api/smart_money/congress", tags=["Intelligence"])
+def get_congress_intelligence(limit: int = 50, days: int = 30):
+    """
+    Returns recent Congressional stock trade disclosures from CongressInvests (STOCK Act)
+    and per-symbol calculated conviction scores.
+    """
+    recent = smart_money.get_recent_trades(limit=limit)
+    if not recent:
+        try:
+            smart_money.refresh_all(list(config.watchlist))
+            recent = smart_money.get_recent_trades(limit=limit)
+        except Exception as e:
+            logger.warning(f"On-demand smart money refresh notice: {e}")
+    scores = smart_money.get_all_scores()
+    top_buys = [s for s, sc in sorted(scores.items(), key=lambda x: x[1], reverse=True) if sc > 0][:10]
+    top_sells = [s for s, sc in sorted(scores.items(), key=lambda x: x[1]) if sc < 0][:10]
+
+    return {
+        "status": "success",
+        "total_disclosures": len(recent),
+        "top_congress_buys": top_buys,
+        "top_congress_sells": top_sells,
+        "conviction_scores": scores,
+        "recent_trades": recent,
+        "last_refresh": smart_money._last_refresh,
+        "cache_age_seconds": round(time.time() - smart_money._last_refresh, 1) if smart_money._last_refresh else None
+    }
+
+
+@app.get("/api/smart_money/opportunities", tags=["Intelligence"])
+def get_smart_money_opportunities(top_n: int = 20):
+    """
+    Identifies high-conviction trade setups where US Congress members are accumulating
+    AND TradingView technical momentum / relative volume confirms the setup.
+    """
+    opportunities = screener.scan_smart_money_opportunities(smart_money, top_n=top_n)
+    return {
+        "status": "success",
+        "opportunities_count": len(opportunities),
+        "opportunities": opportunities,
+        "equibles_connected": bool(smart_money.equibles_api_key),
+        "congress_invests_source": smart_money.congress_invests_url
+    }
+
+
+@app.get("/api/smart_money/ticker/{symbol}", tags=["Intelligence"])
+def get_ticker_smart_money(symbol: str):
+    """
+    Returns Congressional trading history and conviction score for a specific ticker.
+    """
+    sym = symbol.upper().strip()
+    trades = smart_money.get_symbol_trades(sym)
+    conviction = smart_money.get_congress_conviction(sym)
+    return {
+        "symbol": sym,
+        "congress_conviction_score": conviction,
+        "signal": "CONGRESS_BUY" if conviction >= 0.20 else ("CONGRESS_SELL" if conviction <= -0.20 else "NEUTRAL"),
+        "total_disclosures": len(trades),
+        "trades": trades
+    }
+
+
+@app.get("/api/smart_money/equibles", tags=["Intelligence"])
+def get_equibles_reports():
+    """
+    Returns Equibles MCP market-wide congressional buying, short squeeze rankings, and insider sentiment reports.
+    """
+    reports = smart_money.get_equibles_reports()
+    return {
+        "status": "success",
+        "equibles_api_configured": bool(smart_money.equibles_api_key),
+        "reports": reports
+    }
+
+
+@app.post("/api/smart_money/refresh", tags=["Intelligence"])
+def force_smart_money_refresh(background_tasks: BackgroundTasks):
+    """
+    Manually triggers an immediate refresh of CongressInvests and Equibles smart money data.
+    """
+    def _do_refresh():
+        try:
+            smart_money.set_equibles_key(config.equibles_api_key)
+            smart_money.refresh_all(list(config.watchlist))
+        except Exception as e:
+            logger.warning(f"Manual smart money refresh error: {e}")
+
+    background_tasks.add_task(_do_refresh)
+    return {"status": "refresh_triggered", "timestamp": time.time()}
 
 
 # ==========================================

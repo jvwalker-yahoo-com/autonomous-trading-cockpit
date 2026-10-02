@@ -188,7 +188,14 @@ class MarketScreener:
     """Scans all multi-asset instruments across Commodities, Indices, ETFs, and Equities (Crypto Deactivated)."""
 
     @staticmethod
-    def scan_universe(data_feed_manager=None, category_filter: Optional[str] = None, top_n: int = 35, tradable_only: bool = False, day_trade_only: bool = False) -> List[Dict[str, Any]]:
+    def scan_universe(
+        data_feed_manager=None,
+        category_filter: Optional[str] = None,
+        top_n: int = 35,
+        tradable_only: bool = False,
+        day_trade_only: bool = False,
+        smart_money_engine=None
+    ) -> List[Dict[str, Any]]:
         """
         Scans multi-asset instruments and ranks by quantitative opportunity score.
         Evaluates:
@@ -285,6 +292,14 @@ class MarketScreener:
                 signal = "SHORT (OVERBOUGHT REVERSAL)"
                 score += 15.0
 
+            # Congressional / Smart Money Conviction Bonus
+            congress_score = smart_money_engine.get_congress_conviction(symbol) if smart_money_engine else 0.0
+            if congress_score >= 0.20:
+                score += min(18.0, congress_score * 20.0)
+                signal = f"{signal} + CONGRESS BUY"
+            elif congress_score <= -0.25:
+                score -= min(15.0, abs(congress_score) * 15.0)
+
             # Volatility bonus
             score += min(15.0, abs(chg_pct) * 2.0)
             final_score = min(99.0, max(10.0, round(score, 1)))
@@ -297,6 +312,10 @@ class MarketScreener:
                 continue
 
             pattern_desc = "Double Bottom" if db_det else ("Double Top" if dt_det else (breakout if breakout != "NONE" else "Trend Continuation"))
+            if congress_score >= 0.20:
+                pattern_desc = f"{pattern_desc} [Congress Accumulation]"
+            elif congress_score <= -0.25:
+                pattern_desc = f"{pattern_desc} [Congress Distribution]"
 
             results.append({
                 "symbol": symbol,
@@ -315,7 +334,8 @@ class MarketScreener:
                 "pattern": pattern_desc,
                 "recommended_horizon": rec_horizon,
                 "signal": signal,
-                "opportunity_score": final_score
+                "opportunity_score": final_score,
+                "congress_conviction": round(congress_score, 2)
             })
 
         # Sort by opportunity score descending
@@ -531,3 +551,50 @@ class MarketScreener:
         except Exception as e:
             logger.warning(f"TradingView consensus fetch error: {e}")
             return cls._tv_consensus_cache
+
+    @classmethod
+    def scan_smart_money_opportunities(
+        cls,
+        smart_money_engine,
+        top_n: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Cross-matches Congressional & Smart Money accumulation with TradingView volume breakouts.
+        Returns high-conviction trade setups where Congress is buying AND technical momentum aligns.
+        """
+        candidates = smart_money_engine.get_trade_candidates()
+        if not candidates:
+            try:
+                smart_money_engine.refresh_all()
+                candidates = smart_money_engine.get_trade_candidates()
+            except Exception as e:
+                logger.warning(f"Smart money opportunity refresh error: {e}")
+
+        symbols_to_check = [c["symbol"] for c in candidates if c.get("symbol")]
+        tv_consensus = cls.get_tradingview_technical_consensus(symbols_to_check) if symbols_to_check else {}
+
+        results = []
+        for cand in candidates:
+            sym = cand["symbol"]
+            tv_data = tv_consensus.get(sym, {})
+            c_1d = tv_data.get("consensus_1d", "NEUTRAL")
+            c_1h = tv_data.get("consensus_1h", "NEUTRAL")
+            rvol = tv_data.get("relative_volume", 1.0)
+            
+            # High conviction when TradingView agrees with Congressional buying
+            is_confirmed = (c_1d in ("BUY", "STRONG_BUY") or c_1h in ("BUY", "STRONG_BUY"))
+            
+            results.append({
+                "symbol": sym,
+                "signal": "HIGH_CONVICTION_BUY" if is_confirmed else "CONGRESS_ACCUMULATION",
+                "congress_conviction": cand["conviction_score"],
+                "buyers": cand.get("buyers", []),
+                "tradingview_1d": c_1d,
+                "tradingview_1h": c_1h,
+                "relative_volume": rvol,
+                "latest_filing": cand.get("latest_filing", "Recent"),
+                "is_etoro_anchor": sym in MASTER_STOCK_UNIVERSE
+            })
+
+        results.sort(key=lambda x: (x["signal"] == "HIGH_CONVICTION_BUY", x["congress_conviction"]), reverse=True)
+        return results[:top_n]
