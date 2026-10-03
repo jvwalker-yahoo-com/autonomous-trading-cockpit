@@ -1441,7 +1441,7 @@ class EToroClient:
         """
         if not self.is_configured():
             return {"status": "unconfigured", "connected": False}
-        res = self.call_mcp_tool("get-my-profile-and-scopes")
+        res = self.call_mcp_tool("get-my-profile-and-scopes", timeout=6.0)
         if res.get("success"):
             data = res.get("data", {})
             if isinstance(data, dict):

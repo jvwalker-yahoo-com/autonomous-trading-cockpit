@@ -204,11 +204,16 @@
       <button id="btnClear" class="btn btn-outline">🗑️ Clear Input</button>
     </div>
 
-    <button id="btnPushKeys" class="btn btn-success" style="font-size: 13px; padding: 11px;">
-      ⚡ PUSH & REAUTHORIZE ON SERVER
-    </button>
+    <div class="btn-row" style="margin-bottom: 8px;">
+      <button id="btnPushKeys" class="btn btn-success" style="font-size: 12px; padding: 11px;">
+        ⚡ PUSH & REAUTH
+      </button>
+      <button id="btnTestConnMobile" class="btn btn-primary" style="font-size: 12px; padding: 11px;">
+        🧪 TEST CONNECTION
+      </button>
+    </div>
 
-    <div style="margin-top: 8px;">
+    <div style="margin-top: 4px;">
       <button id="btnRestoreServerKey" class="btn btn-secondary" style="font-size: 11px; padding: 6px;">
         📥 Pull Current Working Keys from Server (Undo)
       </button>
@@ -260,6 +265,7 @@
       btnPasteClipboard: document.getElementById('btnPasteClipboard'),
       btnClear: document.getElementById('btnClear'),
       btnPushKeys: document.getElementById('btnPushKeys'),
+      btnTestConnMobile: document.getElementById('btnTestConnMobile'),
       btnRestoreServerKey: document.getElementById('btnRestoreServerKey'),
       btnFetchPortfolio: document.getElementById('btnFetchPortfolio'),
       actionStatus: document.getElementById('actionStatus'),
@@ -410,15 +416,19 @@
       }
     }
 
-    // Paste from clipboard with auto-sanitize
+    // Paste from clipboard with auto-sanitize & safety guard
     el.btnPasteClipboard.addEventListener('click', async () => {
       try {
         const text = await navigator.clipboard.readText();
         if (text) {
           const clean = text.trim().replace(/^['"]|['"]$/g, '');
+          if (!clean.startsWith('ey') || clean.length < 50) {
+            showStatus(`⚠️ Clipboard does not contain a valid eToro JWT (starts with "${clean.slice(0, 10)}...", len: ${clean.length}). Kept your current working key safe.`, false);
+            return;
+          }
           el.inputUserKey.value = clean;
           validateUserKey(clean);
-          showStatus(`Pasted from clipboard (${clean.length} chars). Click "PUSH" to apply.`, true);
+          showStatus(`✓ Pasted valid eToro JWT from clipboard (${clean.length} chars). Click "PUSH & REAUTH" to apply.`, true);
         } else {
           showStatus('Clipboard is empty.', false);
         }
@@ -433,7 +443,29 @@
       showStatus('Input cleared.');
     });
 
+    // Test current server connection directly without re-pushing
+    async function testCurrentConnection() {
+      showStatus('Testing live connection to eToro...');
+      try {
+        const testRes = await fetch(`${BASE}/api/etoro/test_connection`, { method: 'POST' });
+        const testData = await testRes.json();
+        if (testData.connected) {
+          const u = testData.profile?.username || 'jvwalker88';
+          const cid = testData.profile?.realCid || '49441865';
+          showStatus(`✓ eToro LIVE CONNECTED! User: @${u} (Real CID: ${cid})`, true);
+          fetchServerStatus();
+          fetchPortfolio();
+        } else {
+          showStatus(`❌ eToro Connection Failed: ${testData.message || 'Unauthorized (401)'}`, false);
+          fetchServerStatus();
+        }
+      } catch (err) {
+        showStatus('Test error: ' + err.message, false);
+      }
+    }
+
     el.btnPushKeys.addEventListener('click', pushKeys);
+    if (el.btnTestConnMobile) el.btnTestConnMobile.addEventListener('click', testCurrentConnection);
     el.btnRestoreServerKey.addEventListener('click', restoreServerKeys);
     el.btnRefreshStatus.addEventListener('click', () => { fetchServerStatus(); fetchPortfolio(); });
     el.btnFetchPortfolio.addEventListener('click', fetchPortfolio);
