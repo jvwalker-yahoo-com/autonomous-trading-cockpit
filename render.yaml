@@ -45,4 +45,6 @@ services:
         sync: false
       - key: ANSPIRE_API_KEY
         sync: false
+      - key: QUIVER_API_KEY
+        sync: false
 
