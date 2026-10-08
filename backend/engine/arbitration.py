@@ -18,6 +18,7 @@ class ArbitrationModule:
         active_positions_count: int,
         max_concurrent_positions: int = 8,
         market_open: bool = True,
+        session_msg: Optional[str] = None,
         enforce_market_hours: bool = True,
         # Enhanced Risk Engine & Day Trading parameters
         daily_drawdown_usd: float = 0.0,
@@ -43,10 +44,11 @@ class ArbitrationModule:
         day_trade_ok = day_trading_enabled
         final_mode = main_mode
 
-        # 0. Market Hours Gate (eToro UK: 14:30 - 21:00 UK Time)
+        # 0. Market Hours Gate: Check trading hours before clearing trades
         if enforce_market_hours and not market_open:
             approved = False
-            reasons.append("Outside eToro UK US-market trading hours (14:30 - 21:00 UK / Mon-Fri)")
+            msg = session_msg or "Outside eToro UK trading hours (14:30 - 21:00 UK / Mon-Fri)"
+            reasons.append(f"Market Closed: {msg}")
 
         # 1. Max Overall Portfolio Drawdown Circuit Breaker
         if current_drawdown_pct >= max_drawdown_limit_pct:

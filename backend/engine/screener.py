@@ -226,8 +226,9 @@ class MarketScreener:
                 if info.get("category", "").lower() != category_filter.lower() and info.get("asset_class", "").lower() != category_filter.lower():
                     continue
 
-            quote = data_feed_manager.get_latest_quote(symbol)
+            quote = data_feed_manager.get_latest_quote(symbol, allow_external=False)
             ind = data_feed_manager.get_technical_indicators(symbol)
+
 
             adx = ind.get("adx", 20.0)
             supertrend_dir = ind.get("supertrend_direction", ind.get("supertrend_dir", 1.0))

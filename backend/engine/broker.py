@@ -6,10 +6,13 @@ and persistent ledger storage.
 import json
 import uuid
 import os
+import logging
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timezone, timedelta
 from .models import Position, TradeRecord, PortfolioSummary, StockPerformanceSummary, MultiDayPerformanceReport
 from .learner import AdaptiveLearner
+
+logger = logging.getLogger("broker")
 
 class SimulatedBroker:
     def __init__(self, initial_capital: float = 10000.0, db_path: str = "", learner: Optional[AdaptiveLearner] = None):
@@ -280,11 +283,17 @@ class SimulatedBroker:
         rationale: str = "",
         contributing_models: Optional[Dict[str, float]] = None,
         horizon: str = "swing", # "day" or "swing"
-        max_hold_hours: float = 4.0
+        max_hold_hours: float = 4.0,
+        market_open: bool = True,
+        enforce_market_hours: bool = False
     ) -> Optional[Position]:
         """
         Executes a fractional share market order (Long or Short CFD) with horizon tagging.
         """
+        if enforce_market_hours and not market_open:
+            logger.warning(f"⚠️ [BROKER ORDER REJECTED] Cannot execute order on {symbol}: market hours are closed.")
+            return None
+
         if allocated_usd > self.cash:
             allocated_usd = self.cash * 0.95 # Cap to available cash
             

@@ -74,6 +74,10 @@
         <span class="pill-label">DAY TRADES</span>
         <span class="pill-val mode-badge-ok" id="pillDayTrading" style="color: #f59e0b;">☀️ ACTIVE</span>
       </div>
+      <div class="telemetry-pill" id="pillMacroRiskWrapper" title="Worldwide Macro News Risk Level & Global Sentiment">
+        <span class="pill-label">MACRO RISK</span>
+        <span class="pill-val mode-badge-ok" id="pillMacroRisk" style="color: #38bdf8;">🌍 NORMAL</span>
+      </div>
 
       <div class="action-btn-group">
         <button id="btnModeToggle" class="btn btn-outline" style="border-color: #10b981; color: #10b981; font-weight: bold; font-size: 11px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px;" title="Click to switch between Demo / Learning and Live eToro Trading">
@@ -82,6 +86,7 @@
         </button>
         <button id="btnScreenerModal" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981, #059669);" title="Market Screener & Universal Stock Universe">🔍 SCREENER / STOCKS</button>
         <button id="btnSmartMoneyHeader" class="btn btn-outline" style="border-color: #a855f7; color: #c084fc; font-weight: bold; font-size: 11px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px;" title="View Congressional STOCK Act Trades & Smart Money Opportunities">🏛️ CONGRESS TRADES</button>
+        <button id="btnWorldNewsHeader" class="btn btn-outline" style="border-color: #38bdf8; color: #38bdf8; font-weight: bold; font-size: 11px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px;" title="Global Breaking Market News & Worldwide Macro Risk Radar">🌍 WORLD NEWS</button>
         <button id="btnDailyReport" class="btn btn-primary" title="View Full Day Performance & Learning Audit">📊 DAILY REPORT</button>
         <button id="btnBacktestModal" class="btn btn-secondary" title="Quantitative Backtester & Parameter Optimizer">🧪 BACKTEST</button>
         <button id="btnHeaderTestEtoro" class="btn btn-outline" style="border-color: #06b6d4; color: #06b6d4; font-weight: bold; font-size: 11px;" title="Test eToro API Connection (Read-Only)">🧪 TEST ETORO</button>
@@ -643,14 +648,39 @@
                   <option value="demo">🛡️ Demo / Simulation Mode (Virtual & Learning)</option>
                 </select>
               </div>
-              <div class="form-group" style="margin-bottom: 10px;">
-                <label for="inputFinnhubKey">Finnhub Market Data Key (Optional):</label>
-                <input type="password" id="inputFinnhubKey" class="cyber-input" placeholder="Enter Finnhub API Key for real-time fallback">
+              <div class="form-group" style="margin-bottom: 8px;">
+                <label for="inputFinnhubKey" style="font-size: 10px;">Finnhub API Key (Real-Time Quotes & News):</label>
+                <input type="password" id="inputFinnhubKey" class="cyber-input" placeholder="da02ec1r01qgk75qq5v0da02ec1r01qgk75qq5vg">
+              </div>
+              <div class="form-group" style="margin-bottom: 8px;">
+                <label for="inputTwelveDataKey" style="font-size: 10px;">Twelve Data API Key (High-Frequency Feed):</label>
+                <input type="password" id="inputTwelveDataKey" class="cyber-input" placeholder="fa5122e69e6346359095fec0581fb72d">
+              </div>
+              <div class="form-group" style="margin-bottom: 8px;">
+                <label for="inputFmpKey" style="font-size: 10px;">FMP API Key (Financial Modeling Prep Stable Feed):</label>
+                <input type="password" id="inputFmpKey" class="cyber-input" placeholder="i2dkmxpEVNF4X5pln0XwwNk0wfwtf9oN">
+              </div>
+              <div class="form-group" style="margin-bottom: 8px;">
+                <label for="inputAlphaVantageKey" style="font-size: 10px;">Alpha Vantage API Key (Global Quotes & News):</label>
+                <input type="password" id="inputAlphaVantageKey" class="cyber-input" placeholder="P3I4HA7S9JQHFL8X">
+              </div>
+              <div class="form-group" style="margin-bottom: 8px;">
+                <label for="inputTavilyKey" style="font-size: 10px;">Tavily AI Search Key (Congress & Breaking Catalysts):</label>
+                <input type="password" id="inputTavilyKey" class="cyber-input" placeholder="tvly-dev-mYvCc-...">
+              </div>
+              <div class="form-group" style="margin-bottom: 8px;">
+                <label for="inputSerpApiKey" style="font-size: 10px;">SerpApi Key (Google Finance & News):</label>
+                <input type="password" id="inputSerpApiKey" class="cyber-input" placeholder="572f3ee5596cb17ee970fd...">
+              </div>
+              <div class="form-group" style="margin-bottom: 8px;">
+                <label for="inputAnspireKey" style="font-size: 10px;">Anspire API Key:</label>
+                <input type="password" id="inputAnspireKey" class="cyber-input" placeholder="PrR9nw3YnOMTdmjk3uvA0yLOvoBuEAoD">
               </div>
               <div class="form-group">
                 <label for="inputRiskPct">Risk Per Trade (% of Capital):</label>
                 <input type="number" id="inputRiskPct" class="cyber-input" step="0.5" min="0.5" max="10" value="2.0">
               </div>
+
             </div>
           </div>
 
@@ -967,6 +997,66 @@
       <div class="modal-footer" style="justify-content: space-between;">
         <span id="screenerStatusMsg" class="text-muted" style="font-size: 11px;">Universe: Verified multi-asset eToro instruments loaded (Commodities, Indices, ETFs, Stocks). Zero Crypto Policy.</span>
         <button id="btnCloseScreenerFooter" class="btn btn-secondary">CLOSE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- WORLDWIDE BREAKING NEWS & MACRO RADAR MODAL -->
+  <div id="worldNewsModal" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width: 1100px; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding: 14px 18px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <h3 style="margin: 0; font-size: 15px; font-weight: bold; color: #38bdf8; display: flex; align-items: center; gap: 8px;">
+            <span>🌍</span> WORLDWIDE BREAKING MARKET NEWS & MACRO RADAR
+          </h3>
+          <span id="badgeModalMacroRisk" class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid #38bdf8; font-size: 11px; padding: 3px 8px; border-radius: 4px;">
+            RISK: NORMAL
+          </span>
+          <span id="badgeModalMacroSent" class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; font-size: 11px; padding: 3px 8px; border-radius: 4px;">
+            SENTIMENT: +0.00
+          </span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button id="btnRefreshWorldNews" class="btn btn-outline" style="border-color: #38bdf8; color: #38bdf8; font-size: 11px; padding: 4px 10px;">🔄 REFRESH LIVE</button>
+          <button id="btnCloseWorldNewsModal" class="btn-close">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body" style="overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px;">
+        
+        <!-- Macro Themes Grid -->
+        <div id="macroThemesContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;">
+          <!-- Rendered dynamically -->
+        </div>
+
+        <!-- Filter Controls Bar -->
+        <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+            <span style="font-size: 10px; color: var(--text-muted); margin-right: 4px;">THEMES:</span>
+            <button class="btn btn-primary btn-news-theme-filter" data-theme="ALL" style="font-size: 10px; padding: 3px 8px;">ALL</button>
+            <button class="btn btn-secondary btn-news-theme-filter" data-theme="CENTRAL_BANKS_RATES" style="font-size: 10px; padding: 3px 8px;">🏦 Rates & Fed</button>
+            <button class="btn btn-secondary btn-news-theme-filter" data-theme="GEOPOLITICS_CONFLICT" style="font-size: 10px; padding: 3px 8px;">⚔️ Geopolitics</button>
+            <button class="btn btn-secondary btn-news-theme-filter" data-theme="ENERGY_COMMODITIES" style="font-size: 10px; padding: 3px 8px;">🛢️ Energy/OPEC</button>
+            <button class="btn btn-secondary btn-news-theme-filter" data-theme="AI_TECH_REGULATION" style="font-size: 10px; padding: 3px 8px;">🤖 Tech & Semis</button>
+            <button class="btn btn-secondary btn-news-theme-filter" data-theme="SYSTEMIC_RECESSION" style="font-size: 10px; padding: 3px 8px;">📉 Recession Risk</button>
+          </div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <span style="font-size: 10px; color: var(--text-muted);">SEVERITY:</span>
+            <button class="btn btn-primary btn-news-sev-filter" data-sev="ALL" style="font-size: 10px; padding: 3px 8px;">ALL</button>
+            <button class="btn btn-secondary btn-news-sev-filter" data-sev="HIGH" style="font-size: 10px; padding: 3px 8px; color: #ef4444; border-color: rgba(239,68,68,0.4);">🔥 HIGH ONLY</button>
+          </div>
+        </div>
+
+        <!-- News Articles Cards Container -->
+        <div id="worldNewsCardsContainer" style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="text-align: center; color: var(--text-muted); padding: 40px;">Fetching live worldwide breaking headlines...</div>
+        </div>
+
+      </div>
+      <div class="modal-footer" style="justify-content: space-between; border-top: 1px solid var(--border-color); padding: 10px 18px;">
+        <span id="worldNewsStatusMsg" class="text-muted" style="font-size: 11px;">
+          Ingesting live streams: Finnhub General Wire, SerpApi Google News, Tavily AI Search & Global RSS Feeds (BBC, Yahoo, CNBC).
+        </span>
+        <button id="btnCloseWorldNewsFooter" class="btn btn-secondary">CLOSE</button>
       </div>
     </div>
   </div>

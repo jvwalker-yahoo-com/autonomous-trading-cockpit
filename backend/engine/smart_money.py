@@ -41,11 +41,17 @@ class SmartMoneyEngine:
     def __init__(
         self,
         equibles_api_key: str = "eq_1a4793cb907bc87e163c0b457166914a95c86e8e",
-        congress_invests_url: str = "https://congressinfor-production.up.railway.app"
+        congress_invests_url: str = "https://congressinfor-production.up.railway.app",
+        tavily_api_key: str = "",
+        serpapi_api_key: str = "",
+        anspire_api_key: str = ""
     ):
         self.equibles_api_key = equibles_api_key.strip()
         self.congress_invests_url = congress_invests_url.rstrip("/")
         self.equibles_mcp_url = f"https://mcp.equibles.com/mcp?api_key={self.equibles_api_key}"
+        self.tavily_api_key = tavily_api_key.strip()
+        self.serpapi_api_key = serpapi_api_key.strip()
+        self.anspire_api_key = anspire_api_key.strip()
         
         self._lock = threading.Lock()
         
@@ -53,6 +59,7 @@ class SmartMoneyEngine:
         self._recent_congress_trades: List[Dict[str, Any]] = []
         self._symbol_congress_scores: Dict[str, float] = {}
         self._symbol_congress_trades: Dict[str, List[Dict[str, Any]]] = {}
+        self._congress_news_articles: List[Dict[str, Any]] = []
         self._equibles_market_buying: str = ""
         self._equibles_short_squeeze: str = ""
         self._equibles_insider_sentiment: str = ""
@@ -65,6 +72,16 @@ class SmartMoneyEngine:
         with self._lock:
             self.equibles_api_key = key.strip()
             self.equibles_mcp_url = f"https://mcp.equibles.com/mcp?api_key={self.equibles_api_key}"
+
+    def set_feed_keys(self, tavily_key: str = "", serpapi_key: str = "", anspire_key: str = ""):
+        with self._lock:
+            if tavily_key:
+                self.tavily_api_key = tavily_key.strip()
+            if serpapi_key:
+                self.serpapi_api_key = serpapi_key.strip()
+            if anspire_key:
+                self.anspire_api_key = anspire_key.strip()
+
 
     # ── CongressInvests Client ──────────────────────────────────────────────
 
@@ -130,12 +147,52 @@ class SmartMoneyEngine:
             logger.warning(f"Equibles MCP call '{tool_name}' error: {e}")
         return ""
 
+    # ── Tavily & SerpApi Congressional Intelligence Search ──────────────────
+
+    def fetch_congress_tavily(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """Queries Tavily AI Search for breaking US Congress stock trades and STOCK Act filings."""
+        if not self.tavily_api_key or len(self.tavily_api_key) < 5:
+            return []
+        import requests
+        try:
+            resp = requests.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": self.tavily_api_key,
+                    "query": "US Congress member stock trades recent purchases sales STOCK Act 2026",
+                    "search_depth": "basic",
+                    "max_results": limit
+                },
+                timeout=8
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("results", [])
+        except Exception as e:
+            logger.debug(f"Tavily congress search notice: {e}")
+        return []
+
+    def fetch_congress_serpapi(self) -> List[Dict[str, Any]]:
+        """Queries SerpApi for breaking news and reports on congressional stock trading."""
+        if not self.serpapi_api_key or len(self.serpapi_api_key) < 5:
+            return []
+        import requests
+        try:
+            url = f"https://serpapi.com/search.json?q=congress+stock+trades+disclosures&api_key={self.serpapi_key}"
+            resp = requests.get(url, timeout=8)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("organic_results", [])[:5]
+        except Exception as e:
+            logger.debug(f"SerpApi congress search notice: {e}")
+        return []
+
     # ── Smart Money Refresh & Trade Candidate Identification ────────────────
 
     def refresh_all(self, watchlist: Optional[List[str]] = None) -> Dict[str, Any]:
         """
-        Refreshes all congressional & institutional data across CongressInvests and Equibles.
-        Computes per-symbol scores and surfaces trade opportunities.
+        Refreshes all congressional & institutional data across CongressInvests, Tavily AI,
+        SerpApi, and Equibles. Computes per-symbol scores and surfaces trade opportunities.
         """
         now = time.time()
         logger.info("🏛️ [SMART MONEY] Refreshing Congressional & Institutional Intelligence...")
@@ -143,12 +200,31 @@ class SmartMoneyEngine:
         # 1. Fetch CongressInvests recent trades
         recent_trades = self.fetch_congress_invests_recent(limit=60, days=30)
         
-        # 2. Query Equibles Market-Wide Congressional Activity & Short Squeeze
+        # 2. Query Tavily and SerpApi Congressional Intelligence
+        tavily_articles = self.fetch_congress_tavily(limit=5)
+        serp_articles = self.fetch_congress_serpapi()
+        congress_articles = []
+        for art in tavily_articles:
+            congress_articles.append({
+                "title": art.get("title", ""),
+                "url": art.get("url", ""),
+                "snippet": art.get("content", "")[:250],
+                "source": "Tavily AI"
+            })
+        for art in serp_articles:
+            congress_articles.append({
+                "title": art.get("title", ""),
+                "url": art.get("link", ""),
+                "snippet": art.get("snippet", "")[:250],
+                "source": "SerpApi"
+            })
+
+        # 3. Query Equibles Market-Wide Congressional Activity & Short Squeeze
         eq_buying = self.call_equibles_tool("GetMarketWideCongressionalActivity", {"direction": "buys", "limit": 15})
         eq_squeeze = self.call_equibles_tool("GetShortSqueezeScores", {"limit": 10})
         eq_insiders = self.call_equibles_tool("GetInsiderSentimentScores", {"limit": 10})
 
-        # 3. Calculate per-symbol Congressional net conviction scores
+        # 4. Calculate per-symbol Congressional net conviction scores
         new_scores: Dict[str, float] = {}
         symbol_trades_map: Dict[str, List[Dict[str, Any]]] = {}
         today = datetime.now(timezone.utc).date()
@@ -202,19 +278,32 @@ class SmartMoneyEngine:
                         except Exception:
                             new_scores[sym] = new_scores.get(sym, 0.0) + 5.0
 
+        # Corroborate with Tavily search articles
+        for art in congress_articles:
+            text = (art.get("title", "") + " " + art.get("snippet", "")).upper()
+            for sym in list(new_scores.keys()):
+                if f" {sym} " in text or f"${sym}" in text:
+                    new_scores[sym] = new_scores.get(sym, 0.0) + 3.0
+
         # Normalize all scores to [-1.0, +1.0] using hyperbolic tangent scaling
         normalized_scores: Dict[str, float] = {}
         for sym, raw in new_scores.items():
             norm = math.tanh(raw / 12.0)
             normalized_scores[sym] = round(max(-1.0, min(1.0, norm)), 3)
 
-        # 4. Identify Potential Trade Setups (Cross-matching Congressional Buys with Watchlist/Anchors)
+        # 5. Identify Potential Trade Setups (Cross-matching Congressional Buys with Watchlist/Anchors)
         candidates: List[Dict[str, Any]] = []
         for sym, score in sorted(normalized_scores.items(), key=lambda x: x[1], reverse=True):
             if score >= 0.08:
                 trades_for_sym = symbol_trades_map.get(sym, [])
                 top_members = list(dict.fromkeys([t.get("member") for t in trades_for_sym if t.get("member")]))
                 buyers_desc = top_members[:3] if top_members else ["Market-Wide Net Flow"]
+                source_label = "CongressInvests"
+                if self.tavily_api_key:
+                    source_label += " + Tavily AI"
+                if self.equibles_api_key:
+                    source_label += " + Equibles MCP"
+                
                 candidates.append({
                     "symbol": sym,
                     "signal": "CONGRESS_BUY",
@@ -222,7 +311,8 @@ class SmartMoneyEngine:
                     "buyers": buyers_desc,
                     "total_trades": len(trades_for_sym),
                     "latest_filing": trades_for_sym[0].get("disclosed") if trades_for_sym else "Recent Disclosure",
-                    "source": "CongressInvests + Equibles MCP"
+                    "recent_filings": trades_for_sym[:3],
+                    "source": source_label
                 })
 
         # Commit atomically
@@ -230,6 +320,7 @@ class SmartMoneyEngine:
             self._recent_congress_trades = recent_trades
             self._symbol_congress_scores = normalized_scores
             self._symbol_congress_trades = symbol_trades_map
+            self._congress_news_articles = congress_articles
             self._equibles_market_buying = eq_buying
             self._equibles_short_squeeze = eq_squeeze
             self._equibles_insider_sentiment = eq_insiders
@@ -242,8 +333,10 @@ class SmartMoneyEngine:
         return {
             "total_trades_analyzed": len(recent_trades),
             "candidates_count": len(candidates),
-            "top_candidates": candidates[:10]
+            "top_candidates": candidates[:10],
+            "articles_count": len(congress_articles)
         }
+
 
     # ── Public Accessors ────────────────────────────────────────────────────
 

@@ -64,7 +64,12 @@ def get_uk_now() -> datetime:
     return now_utc + timedelta(hours=1 if is_bst else 0)
 
 # Instantiate Core Engine Components
-data_feed = DataFeedManager(api_key=config.finnhub_api_key)
+data_feed = DataFeedManager(
+    api_key=config.finnhub_api_key,
+    twelve_data_api_key=config.twelve_data_api_key,
+    fmp_api_key=config.fmp_api_key,
+    alpha_vantage_api_key=config.alpha_vantage_api_key
+)
 etoro_client = EToroClient(api_key=config.etoro_api_key, user_key=config.etoro_user_key, base_url=config.etoro_base_url)
 instruments_db = get_instruments_db()
 metrics_module = MetricsModule()
@@ -78,8 +83,20 @@ learner = AdaptiveLearner()
 broker = SimulatedBroker(initial_capital=config.initial_capital, db_path=config.db_path, learner=learner)
 backtester = BacktesterEngine()
 screener = MarketScreener()
-news_intel = NewsIntelligenceEngine(finnhub_api_key=config.finnhub_api_key)
-smart_money = SmartMoneyEngine(equibles_api_key=config.equibles_api_key, congress_invests_url=config.congress_invests_url)
+news_intel = NewsIntelligenceEngine(
+    finnhub_api_key=config.finnhub_api_key,
+    alpha_vantage_api_key=config.alpha_vantage_api_key,
+    tavily_api_key=config.tavily_api_key,
+    serpapi_api_key=config.serpapi_api_key
+)
+smart_money = SmartMoneyEngine(
+    equibles_api_key=config.equibles_api_key,
+    congress_invests_url=config.congress_invests_url,
+    tavily_api_key=config.tavily_api_key,
+    serpapi_api_key=config.serpapi_api_key,
+    anspire_api_key=config.anspire_api_key
+)
+
 
 # Restore persisted system settings from disk
 saved_settings = broker.load_state()
@@ -101,10 +118,33 @@ if saved_settings:
     if "finnhub_api_key" in saved_settings and saved_settings["finnhub_api_key"]:
         config.finnhub_api_key = saved_settings["finnhub_api_key"]
         data_feed.set_api_key(config.finnhub_api_key)
+        news_intel.set_finnhub_key(config.finnhub_api_key)
+    if "twelve_data_api_key" in saved_settings and saved_settings["twelve_data_api_key"]:
+        config.twelve_data_api_key = saved_settings["twelve_data_api_key"]
+        data_feed.twelve_data_api_key = config.twelve_data_api_key
+    if "fmp_api_key" in saved_settings and saved_settings["fmp_api_key"]:
+        config.fmp_api_key = saved_settings["fmp_api_key"]
+        data_feed.fmp_api_key = config.fmp_api_key
+    if "alpha_vantage_api_key" in saved_settings and saved_settings["alpha_vantage_api_key"]:
+        config.alpha_vantage_api_key = saved_settings["alpha_vantage_api_key"]
+        data_feed.alpha_vantage_api_key = config.alpha_vantage_api_key
+        news_intel.alpha_vantage_api_key = config.alpha_vantage_api_key
+    if "tavily_api_key" in saved_settings and saved_settings["tavily_api_key"]:
+        config.tavily_api_key = saved_settings["tavily_api_key"]
+        news_intel.tavily_api_key = config.tavily_api_key
+        smart_money.tavily_api_key = config.tavily_api_key
+    if "serpapi_api_key" in saved_settings and saved_settings["serpapi_api_key"]:
+        config.serpapi_api_key = saved_settings["serpapi_api_key"]
+        news_intel.serpapi_api_key = config.serpapi_api_key
+        smart_money.serpapi_api_key = config.serpapi_api_key
+    if "anspire_api_key" in saved_settings and saved_settings["anspire_api_key"]:
+        config.anspire_api_key = saved_settings["anspire_api_key"]
+        smart_money.anspire_api_key = config.anspire_api_key
     if "min_conviction_score" in saved_settings and saved_settings["min_conviction_score"]:
         config.min_conviction_score = float(saved_settings["min_conviction_score"])
     if "max_concurrent_positions" in saved_settings and saved_settings["max_concurrent_positions"]:
         config.max_concurrent_positions = int(saved_settings["max_concurrent_positions"])
+
 
 # Cache for full cockpit snapshot to prevent redundant execution cycles on frequent UI polling
 _cockpit_snapshot_cache: Dict[str, Any] = {}
@@ -318,6 +358,12 @@ async def autonomous_background_worker_loop():
 
             # Cycle analysis across all currently active dynamic watchlist assets (non-blocking thread)
             for sym in list(config.watchlist):
+                # Check trading hours before checking whether to place a trade
+                if config.enforce_market_hours:
+                    m_open, _ = telemetry_module.is_etoro_uk_market_open(sym)
+                    if not m_open and sym != active_symbol:
+                        # Skip background trade analysis for closed markets unless active on UI
+                        continue
                 await asyncio.to_thread(run_analysis_cycle, sym)
                 await asyncio.sleep(0.1)
 
@@ -337,6 +383,12 @@ app.add_middleware(
 
 class ConfigUpdateRequest(BaseModel):
     finnhub_api_key: Optional[str] = None
+    twelve_data_api_key: Optional[str] = None
+    fmp_api_key: Optional[str] = None
+    alpha_vantage_api_key: Optional[str] = None
+    tavily_api_key: Optional[str] = None
+    serpapi_api_key: Optional[str] = None
+    anspire_api_key: Optional[str] = None
     active_symbol: Optional[str] = None
     simulation_mode: Optional[bool] = None
     risk_per_trade_pct: Optional[float] = None
@@ -347,6 +399,7 @@ class ConfigUpdateRequest(BaseModel):
     execution_mode: Optional[str] = None
     watchlist: Optional[List[str]] = None
     max_concurrent_positions: Optional[int] = None
+
     enable_day_trading: Optional[bool] = None
     day_trade_allocation_pct: Optional[float] = None
     day_trade_max_active: Optional[int] = None
@@ -363,9 +416,11 @@ class ManualTradeRequest(BaseModel):
     action: str # "BUY", "SHORT", "CLOSE"
     amount_usd: Optional[float] = 100.0
     horizon: Optional[str] = "swing" # "day" or "swing"
+    bypass_market_hours: Optional[bool] = False
 
 _last_catalyst_log: Dict[str, float] = {}
 _last_congress_log: Dict[str, float] = {}
+_last_macro_log: Dict[str, float] = {}
 
 def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     """
@@ -382,15 +437,18 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     quote = data_feed.get_latest_quote(symbol)
     indicators = data_feed.get_technical_indicators(symbol)
     
-    # Blend DataFeed sentiment with NewsIntel catalyst score and SmartMoney Congressional conviction
+    # Blend DataFeed sentiment with NewsIntel catalyst score, SmartMoney Congressional conviction, and Worldwide Macro Sentiment
     base_sentiment = data_feed.get_news_sentiment(symbol)
     catalyst_score = news_intel.get_catalyst_score(symbol)
     congress_score = smart_money.get_congress_conviction(symbol)
+    macro_state = news_intel.get_macro_risk_state()
+    macro_sentiment = float(macro_state.get("macro_sentiment", 0.0))
+    macro_risk = str(macro_state.get("macro_risk_level", "NORMAL"))
     
     if config.enable_smart_money:
-        sentiment = round(base_sentiment * 0.50 + catalyst_score * 0.30 + congress_score * 0.20, 3)
+        sentiment = round(base_sentiment * 0.40 + catalyst_score * 0.30 + congress_score * 0.15 + macro_sentiment * 0.15, 3)
     else:
-        sentiment = round(base_sentiment * 0.60 + catalyst_score * 0.40, 3)
+        sentiment = round(base_sentiment * 0.50 + catalyst_score * 0.35 + macro_sentiment * 0.15, 3)
     
     # Log significant catalysts (throttled to once per 10 minutes per symbol to prevent repetitive spam)
     now_ts = time.time()
@@ -401,6 +459,10 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     if abs(congress_score) >= 0.20 and (now_ts - _last_congress_log.get(symbol, 0.0) >= 600.0):
         _last_congress_log[symbol] = now_ts
         logger.info(f"🏛️ [CONGRESS TRADE] {symbol}: conviction={congress_score:+.2f} (CongressInvests + Equibles MCP) | blended_sentiment={sentiment:+.2f}")
+
+    if macro_risk in ("CRITICAL", "ELEVATED") and (now_ts - _last_macro_log.get("risk", 0.0) >= 600.0):
+        _last_macro_log["risk"] = now_ts
+        logger.warning(f"⚠️ [GLOBAL MACRO RISK: {macro_risk}] Sentiment: {macro_sentiment:+.2f} | Worldwide breaking headlines dampening risk posture")
     
     # 2. Check stops on existing open positions (simulation mode only; live positions are managed by eToro)
     if config.simulation_mode:
@@ -425,14 +487,6 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
         indicators, quote.price, sentiment, learner.weights, trend=regime.trend
     )
 
-    # 8. Arbitration & Risk Gates (including eToro UK Market Hours gate)
-    equity = broker.get_equity()
-    peak = max(broker.peak_equity, equity)
-    drawdown_pct = (peak - equity) / max(1.0, peak)
-    total_invested = sum(p.market_value_usd for p in broker.positions.values())
-    exposure_pct = total_invested / max(1.0, equity)
-    market_open, session_msg = telemetry_module.is_etoro_uk_market_open(symbol)
-    
     # 8. Arbitration & Risk Gates (including eToro UK Market Hours gate, Daily Drawdown & Spread Filter)
     equity = broker.get_equity()
     peak = max(broker.peak_equity, equity)
@@ -456,6 +510,7 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
         active_positions_count=len(broker.positions),
         max_concurrent_positions=getattr(config, "max_concurrent_positions", 8),
         market_open=market_open,
+        session_msg=session_msg,
         enforce_market_hours=config.enforce_market_hours,
         daily_drawdown_usd=daily_drawdown_usd,
         max_daily_loss_usd=config.max_daily_loss_usd,
@@ -470,141 +525,158 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     )
 
     # 9. Decision Engine & Autonomous Execution
+    # Check trading hours before checking whether to place a trade
     signal = "HOLD"
     allocated_usd = 0.0
     target_shares = 0.0
-    confidence = abs(federation.federated_score)
-    rationale = f"Ensemble score: {federation.federated_score:+.2f} | Winning model: {federation.federation}"
+    trade_horizon = "swing"
+    pattern_desc = None
+    sl_pct = config.default_stop_loss_pct
+    tp_pct = config.default_take_profit_pct
 
-    # Determine directional signal
-    conv_thresh = getattr(config, "min_conviction_score", 0.60)
-    if federation.federated_score >= conv_thresh:
-        signal = "BUY"
-    elif federation.federated_score <= -conv_thresh:
-        signal = "SHORT"
-
-    # Evaluate Trade Horizon (Day Trading vs Long-Term / Swing)
-    vol_surge = float(indicators.get("volume_surge", 1.0))
-    breakout = str(indicators.get("breakout_type", "NONE"))
-    db_det = float(indicators.get("double_bottom_detected", 0.0)) > 0
-    dt_det = float(indicators.get("double_top_detected", 0.0)) > 0
-    adx_val = float(indicators.get("adx", 20.0))
-    pattern_desc = "Double Bottom" if db_det else ("Double Top" if dt_det else (breakout if breakout != "NONE" else None))
-
-    # Day Trading as PRIMARY mode: prefer intraday unless market conditions suggest swing
-    # Day setup: volume surge OR breakout OR pattern OR strong trend OR significant news catalyst
-    catalyst_score = news_intel.get_catalyst_score(symbol)
-    is_day_setup = (
-        vol_surge >= 1.15              # Lower vol threshold (was 1.25)
-        or breakout != "NONE"          # Any range breakout
-        or db_det or dt_det            # Pattern recognition
-        or (adx_val >= 25.0 and confidence >= 0.10)  # Strong trend + conviction
-        or abs(catalyst_score) >= 0.25  # Significant news catalyst
-    )
-    can_day_trade = config.enable_day_trading and arbitration.day_trade_approved and is_day_setup
-
-    trade_horizon = "day" if can_day_trade else "swing"
-    
-    if trade_horizon == "day":
-        sl_pct = config.day_trade_stop_loss_pct
-        tp_pct = config.day_trade_take_profit_pct
+    if config.enforce_market_hours and not market_open:
+        confidence = 0.0
+        rationale = f"Trading hours closed for {symbol}: {session_msg}. Autonomous trade checks bypassed."
+        logger.debug(f"[TRADING HOURS CLOSED] {symbol}: {session_msg} - trade evaluation bypassed.")
     else:
-        sl_pct = config.default_stop_loss_pct
-        tp_pct = config.default_take_profit_pct
+        confidence = abs(federation.federated_score)
+        rationale = f"Ensemble score: {federation.federated_score:+.2f} | Winning model: {federation.federation}"
 
-    # Execution if arbitration approved
-    if arbitration.approved and signal in ("BUY", "SHORT"):
-        # Position sizing based on confidence, ATR volatility adjustment, and risk budget
-        is_index = symbol in ("UK100", "GER40", "FRA40", "SPX500", "NSDQ100", "DJ30")
-        min_alloc = 100.0 if is_index else 20.0
-        max_alloc = min(config.max_position_size_usd, min(250.0 if is_index else 150.0, max(min_alloc, equity * 0.20)))
-        # JEV Fractional Kelly Sizing: f = 0.25 × max(0, 2p-1) applied to max_alloc
-        # Falls back to confidence-scaled sizing if Kelly fraction is zero (no statistical edge)
-        kelly_f = getattr(federation, 'kelly_fraction', None)
-        if kelly_f and kelly_f > 0.0:
-            alloc_base = max_alloc * (kelly_f / 0.25)  # normalise: kelly_f=0.25 → 100% of max_alloc
+        # Determine directional signal
+        conv_thresh = getattr(config, "min_conviction_score", 0.60)
+        if federation.federated_score >= conv_thresh:
+            signal = "BUY"
+        elif federation.federated_score <= -conv_thresh:
+            signal = "SHORT"
+
+        # Evaluate Trade Horizon (Day Trading vs Long-Term / Swing)
+        vol_surge = float(indicators.get("volume_surge", 1.0))
+        breakout = str(indicators.get("breakout_type", "NONE"))
+        dt_sig = str(indicators.get("dual_thrust_signal", "NONE"))
+        lon_sig = str(indicators.get("london_breakout_signal", "NONE"))
+        ha_trend = str(indicators.get("heikin_ashi_trend", "CHOPPY"))
+        db_det = float(indicators.get("double_bottom_detected", 0.0)) > 0
+        dt_det = float(indicators.get("double_top_detected", 0.0)) > 0
+        adx_val = float(indicators.get("adx", 20.0))
+        pattern_desc = "Double Bottom" if db_det else ("Double Top" if dt_det else (breakout if breakout != "NONE" else (f"DualThrust {dt_sig}" if dt_sig != "NONE" else (f"London {lon_sig}" if lon_sig != "NONE" else None))))
+
+        # Day Trading as PRIMARY mode: prefer intraday unless market conditions suggest swing
+        # Day setup: volume surge OR breakout OR Dual Thrust OR London breakout OR Heikin-Ashi trend OR pattern OR strong trend OR significant news catalyst
+        catalyst_score = news_intel.get_catalyst_score(symbol)
+        is_day_setup = (
+            vol_surge >= 1.15              # Lower vol threshold (was 1.25)
+            or breakout != "NONE"          # Any range breakout
+            or dt_sig != "NONE"            # Dual Thrust quantitative breakout (from quant-trading)
+            or (lon_sig != "NONE" and symbol in ("UK100", "GER40", "FRA40"))  # London open breakout (European coverage)
+            or (ha_trend in ("BULLISH", "BEARISH") and adx_val >= 22.0)      # Heikin-Ashi smoothed trend
+            or db_det or dt_det            # Pattern recognition
+            or (adx_val >= 25.0 and confidence >= 0.10)  # Strong trend + conviction
+            or abs(catalyst_score) >= 0.25  # Significant news catalyst
+        )
+        can_day_trade = config.enable_day_trading and arbitration.day_trade_approved and is_day_setup
+
+        trade_horizon = "day" if can_day_trade else "swing"
+        
+        if trade_horizon == "day":
+            sl_pct = config.day_trade_stop_loss_pct
+            tp_pct = config.day_trade_take_profit_pct
         else:
-            alloc_base = max_alloc * confidence
+            sl_pct = config.default_stop_loss_pct
+            tp_pct = config.default_take_profit_pct
 
-        # ATR Volatility-Adjusted Sizing
-        if config.atr_volatility_sizing_enabled:
-            atr = float(indicators.get("atr", quote.price * 0.015))
-            norm_atr = max(0.005, min(0.05, atr / max(0.01, quote.price)))
-            vol_scaler = 0.015 / norm_atr
-            alloc_base = alloc_base * vol_scaler
+        # Execution if arbitration approved
+        if arbitration.approved and signal in ("BUY", "SHORT"):
+            # Position sizing based on confidence, ATR volatility adjustment, and risk budget
+            is_index = symbol in ("UK100", "GER40", "FRA40", "SPX500", "NSDQ100", "DJ30")
+            min_alloc = 100.0 if is_index else 20.0
+            max_alloc = min(config.max_position_size_usd, min(250.0 if is_index else 150.0, max(min_alloc, equity * 0.20)))
+            # JEV Fractional Kelly Sizing: f = 0.25 × max(0, 2p-1) applied to max_alloc
+            # Falls back to confidence-scaled sizing if Kelly fraction is zero (no statistical edge)
+            kelly_f = getattr(federation, 'kelly_fraction', None)
+            if kelly_f and kelly_f > 0.0:
+                alloc_base = max_alloc * (kelly_f / 0.25)  # normalise: kelly_f=0.25 → 100% of max_alloc
+            else:
+                alloc_base = max_alloc * confidence
 
-        allocated_usd = max(min_alloc, min(max_alloc, alloc_base))
-        target_shares = round(allocated_usd / max(0.00000001, quote.price), 4)
+            # ATR Volatility-Adjusted Sizing
+            if config.atr_volatility_sizing_enabled:
+                atr = float(indicators.get("atr", quote.price * 0.015))
+                norm_atr = max(0.005, min(0.05, atr / max(0.01, quote.price)))
+                vol_scaler = 0.015 / norm_atr
+                alloc_base = alloc_base * vol_scaler
 
-        # Autonomous trade entry (if not already holding this direction)
-        existing = broker.positions.get(symbol)
-        if not existing or (existing.direction != ("LONG" if signal == "BUY" else "SHORT")):
-            trade_dir = "LONG" if signal == "BUY" else "SHORT"
-            can_execute_broker = True
+            allocated_usd = max(min_alloc, min(max_alloc, alloc_base))
+            target_shares = round(allocated_usd / max(0.00000001, quote.price), 4)
 
-            # When in Live mode, dispatch real order to official eToro REST API
-            if config.execution_mode == "live" and etoro_client.is_configured():
-                if etoro_client.is_in_auth_cooldown():
-                    logger.debug(f"[eToro Auth Paused] Skipping live order on {symbol} - waiting for fresh credentials.")
-                    can_execute_broker = False
-                elif trade_dir == "SHORT" and symbol in CRYPTO_SYMBOLS:
-                    logger.info(f"ℹ️ [CRYPTO LONG-ONLY] Skipping autonomous SHORT on {symbol}: Crypto is spot long-only on eToro.")
-                    can_execute_broker = False
-                else:
-                    inst_id = etoro_client.resolve_instrument_id(symbol)
-                    is_short = (trade_dir == "SHORT")
-                    sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
-                    sl_rate = round(quote.price * (1.0 + sl_pct if is_short else 1.0 - sl_pct), sl_prec)
-                    tp_rate = round(quote.price * (1.0 - tp_pct if is_short else 1.0 + tp_pct), sl_prec)
+            # Autonomous trade entry (if not already holding this direction)
+            existing = broker.positions.get(symbol)
+            if not existing or (existing.direction != ("LONG" if signal == "BUY" else "SHORT")):
+                trade_dir = "LONG" if signal == "BUY" else "SHORT"
+                can_execute_broker = True
 
-                    id_desc = f"ID: {inst_id}" if inst_id else "symbol-only"
-                    logger.info(f"⚡ [LIVE ETORO ORDER] Dispatching [{trade_horizon.upper()}] {trade_dir} on {symbol} ({id_desc}) for ${allocated_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
-                    try:
-                        order_res = etoro_client.create_order(
-                            instrument_id=inst_id,
-                            direction=trade_dir,
-                            amount_usd=allocated_usd,
-                            stop_loss_rate=sl_rate,
-                            take_profit_rate=tp_rate,
-                            mode="real",
-                            symbol=None if inst_id else symbol
-                        )
-                        if order_res.get("success"):
-                            logger.info(f"✅ [LIVE ETORO SUCCESS] Order filled for {symbol}: {order_res}")
-                            can_execute_broker = True
-                            try:
-                                etoro_client.sync_symbols_to_watchlist([symbol], watchlist_name="Autonomous Cockpit")
-                            except Exception as e:
-                                logger.debug(f"Watchlist auto-sync notice for {symbol}: {e}")
-                        else:
-                            err_payload = order_res.get('error') or order_res
-                            err_str = str(err_payload).lower()
-                            if order_res.get("status_code") == 401 or "unauthorized" in err_str or "re-authenticate" in err_str:
-                                logger.warning(
-                                    f"🔑 [ETORO RE-AUTHENTICATION REQUIRED] Order failed for {symbol}: eToro rejected credentials (HTTP 401 Unauthorized). "
-                                    f"Live orders paused for 60s to protect API rate limits. Please paste a fresh ETORO_USER_KEY in Cockpit Settings (⚙️ CONFIG)."
-                                )
-                            else:
-                                logger.warning(f"❌ [LIVE ETORO REJECTED] Order failed for {symbol}: {err_payload}")
-                            can_execute_broker = False
-                    except Exception as e:
-                        logger.error(f"eToro live order execution exception: {e}")
+                # When in Live mode, dispatch real order to official eToro REST API
+                if config.execution_mode == "live" and etoro_client.is_configured():
+                    if etoro_client.is_in_auth_cooldown():
+                        logger.debug(f"[eToro Auth Paused] Skipping live order on {symbol} - waiting for fresh credentials.")
                         can_execute_broker = False
+                    elif trade_dir == "SHORT" and symbol in CRYPTO_SYMBOLS:
+                        logger.info(f"ℹ️ [CRYPTO LONG-ONLY] Skipping autonomous SHORT on {symbol}: Crypto is spot long-only on eToro.")
+                        can_execute_broker = False
+                    else:
+                        inst_id = etoro_client.resolve_instrument_id(symbol)
+                        is_short = (trade_dir == "SHORT")
+                        sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
+                        sl_rate = round(quote.price * (1.0 + sl_pct if is_short else 1.0 - sl_pct), sl_prec)
+                        tp_rate = round(quote.price * (1.0 - tp_pct if is_short else 1.0 + tp_pct), sl_prec)
 
-            # In live mode, only record in local broker ledger if eToro order was actually executed!
-            if can_execute_broker:
-                broker.execute_order(
-                    symbol=symbol,
-                    direction=trade_dir,
-                    allocated_usd=allocated_usd,
-                    current_price=quote.price,
-                    stop_loss_pct=sl_pct,
-                    take_profit_pct=tp_pct,
-                    rationale=f"Autonomous [{trade_horizon.upper()}] {trade_dir} entry on {symbol}. {rationale}. Dominant: {federation.federation}",
-                    contributing_models=federation.outputs,
-                    horizon=trade_horizon,
-                    max_hold_hours=config.day_trade_max_hold_hours
-                )
+                        id_desc = f"ID: {inst_id}" if inst_id else "symbol-only"
+                        logger.info(f"⚡ [LIVE ETORO ORDER] Dispatching [{trade_horizon.upper()}] {trade_dir} on {symbol} ({id_desc}) for ${allocated_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
+                        try:
+                            order_res = etoro_client.create_order(
+                                instrument_id=inst_id,
+                                direction=trade_dir,
+                                amount_usd=allocated_usd,
+                                stop_loss_rate=sl_rate,
+                                take_profit_rate=tp_rate,
+                                mode="real",
+                                symbol=None if inst_id else symbol
+                            )
+                            if order_res.get("success"):
+                                logger.info(f"✅ [LIVE ETORO SUCCESS] Order filled for {symbol}: {order_res}")
+                                can_execute_broker = True
+                                try:
+                                    etoro_client.sync_symbols_to_watchlist([symbol], watchlist_name="Autonomous Cockpit")
+                                except Exception as e:
+                                    logger.debug(f"Watchlist auto-sync notice for {symbol}: {e}")
+                            else:
+                                err_payload = order_res.get('error') or order_res
+                                err_str = str(err_payload).lower()
+                                if order_res.get("status_code") == 401 or "unauthorized" in err_str or "re-authenticate" in err_str:
+                                    logger.warning(
+                                        f"🔑 [ETORO RE-AUTHENTICATION REQUIRED] Order failed for {symbol}: eToro rejected credentials (HTTP 401 Unauthorized). "
+                                        f"Live orders paused for 60s to protect API rate limits. Please paste a fresh ETORO_USER_KEY in Cockpit Settings (⚙️ CONFIG)."
+                                    )
+                                else:
+                                    logger.warning(f"❌ [LIVE ETORO REJECTED] Order failed for {symbol}: {err_payload}")
+                                can_execute_broker = False
+                        except Exception as e:
+                            logger.error(f"eToro live order execution exception: {e}")
+                            can_execute_broker = False
+
+                # In live mode, only record in local broker ledger if eToro order was actually executed!
+                if can_execute_broker:
+                    broker.execute_order(
+                        symbol=symbol,
+                        direction=trade_dir,
+                        allocated_usd=allocated_usd,
+                        current_price=quote.price,
+                        stop_loss_pct=sl_pct,
+                        take_profit_pct=tp_pct,
+                        rationale=f"Autonomous [{trade_horizon.upper()}] {trade_dir} entry on {symbol}. {rationale}. Dominant: {federation.federation}",
+                        contributing_models=federation.outputs,
+                        horizon=trade_horizon,
+                        max_hold_hours=config.day_trade_max_hold_hours
+                    )
 
     decision = DecisionOutput(
         symbol=symbol,
@@ -761,7 +833,8 @@ async def get_cockpit_full_snapshot(symbol: Optional[str] = None):
         } if analysis.get("quote") else {},
         "watchlist": config.watchlist,
         "execution_mode": config.execution_mode,
-        "is_configured": etoro_client.is_configured()
+        "is_configured": etoro_client.is_configured(),
+        "macro_risk": news_intel.get_macro_risk_state()
     }
 
     _cockpit_snapshot_cache[sym] = (now, payload)
@@ -1003,6 +1076,18 @@ def execute_manual_action(req: ManualTradeRequest):
             detail=f"Cannot trade {sym}: Cryptocurrency trading is permanently deactivated due to excessive spread costs."
         )
 
+    # Check trading hours before checking whether to place a trade
+    if req.action.upper() in ("BUY", "SHORT") and config.enforce_market_hours and not getattr(req, "bypass_market_hours", False):
+        market_open, session_msg = telemetry_module.is_etoro_uk_market_open(sym)
+        if not market_open:
+            if config.execution_mode == "live":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot place live trade on {sym}: {session_msg}. Trading hours are currently closed."
+                )
+            else:
+                logger.warning(f"⚠️ [SIMULATION NOTICE] Market is closed for {sym} ({session_msg}); proceeding in simulation mode.")
+
     direction = "LONG" if req.action.upper() == "BUY" else "SHORT"
     alloc_usd = req.amount_usd or 100.0
     etoro_res = None
@@ -1059,6 +1144,13 @@ def get_system_config():
     """Returns current system configuration and API status."""
     return {
         "finnhub_api_key_configured": bool(config.finnhub_api_key and len(config.finnhub_api_key) > 5),
+        "twelve_data_api_key_configured": bool(config.twelve_data_api_key and len(config.twelve_data_api_key) > 5),
+        "fmp_api_key_configured": bool(config.fmp_api_key and len(config.fmp_api_key) > 5),
+        "alpha_vantage_api_key_configured": bool(config.alpha_vantage_api_key and len(config.alpha_vantage_api_key) > 5),
+        "tavily_api_key_configured": bool(config.tavily_api_key and len(config.tavily_api_key) > 5),
+        "serpapi_api_key_configured": bool(config.serpapi_api_key and len(config.serpapi_api_key) > 5),
+        "anspire_api_key_configured": bool(config.anspire_api_key and len(config.anspire_api_key) > 5),
+        "active_feed_source": data_feed.active_feed_source,
         "etoro_api_key_configured": bool(config.etoro_api_key and len(config.etoro_api_key) > 5),
         "etoro_user_key_configured": bool(config.etoro_user_key and len(config.etoro_user_key) > 5),
         "etoro_base_url": config.etoro_base_url,
@@ -1091,6 +1183,29 @@ def update_system_config(req: ConfigUpdateRequest, background_tasks: BackgroundT
     if req.finnhub_api_key is not None:
         config.finnhub_api_key = req.finnhub_api_key.strip()
         data_feed.set_api_key(config.finnhub_api_key)
+        news_intel.set_finnhub_key(config.finnhub_api_key)
+    if req.twelve_data_api_key is not None:
+        config.twelve_data_api_key = req.twelve_data_api_key.strip()
+        data_feed.twelve_data_api_key = config.twelve_data_api_key
+    if req.fmp_api_key is not None:
+        config.fmp_api_key = req.fmp_api_key.strip()
+        data_feed.fmp_api_key = config.fmp_api_key
+    if req.alpha_vantage_api_key is not None:
+        config.alpha_vantage_api_key = req.alpha_vantage_api_key.strip()
+        data_feed.alpha_vantage_api_key = config.alpha_vantage_api_key
+        news_intel.alpha_vantage_api_key = config.alpha_vantage_api_key
+    if req.tavily_api_key is not None:
+        config.tavily_api_key = req.tavily_api_key.strip()
+        news_intel.tavily_api_key = config.tavily_api_key
+        smart_money.tavily_api_key = config.tavily_api_key
+    if req.serpapi_api_key is not None:
+        config.serpapi_api_key = req.serpapi_api_key.strip()
+        news_intel.serpapi_api_key = config.serpapi_api_key
+        smart_money.serpapi_api_key = config.serpapi_api_key
+    if req.anspire_api_key is not None:
+        config.anspire_api_key = req.anspire_api_key.strip()
+        smart_money.anspire_api_key = config.anspire_api_key
+
     if req.etoro_api_key is not None:
         config.etoro_api_key = req.etoro_api_key.strip()
         etoro_client.api_key = config.etoro_api_key
@@ -1769,6 +1884,48 @@ def force_news_refresh(background_tasks: BackgroundTasks):
     return {"status": "refresh_triggered", "watchlist_size": len(config.watchlist)}
 
 
+@app.get("/api/news/world", tags=["Intelligence"])
+def get_world_breaking_news(
+    theme: Optional[str] = None,
+    severity: Optional[str] = None,
+    limit: int = 60
+):
+    """
+    Returns live worldwide breaking financial & macroeconomic news,
+    classified by macro themes (CENTRAL_BANKS_RATES, GEOPOLITICS_CONFLICT, ENERGY_COMMODITIES, AI_TECH_REGULATION, SYSTEMIC_RECESSION),
+    severity, and impacted global assets.
+    """
+    raw_articles = news_intel.get_world_breaking_news(limit=100)
+
+    # If cache is empty and needs refresh, trigger on-demand pull
+    if not raw_articles and news_intel.needs_refresh():
+        try:
+            import requests as req
+            arts, sent, risk, themes = news_intel._fetch_global_market_news(req)
+            with news_intel._lock:
+                news_intel._world_breaking_news = arts[:100]
+                news_intel._macro_sentiment = sent
+                news_intel._macro_risk_level = risk
+                news_intel._macro_themes = themes
+                news_intel._last_refresh = time.time()
+            raw_articles = arts
+        except Exception as e:
+            logger.debug(f"On-demand world news fetch error: {e}")
+
+    filtered = raw_articles
+    if theme and theme.upper() != "ALL":
+        filtered = [a for a in filtered if a.get("theme", "").upper() == theme.upper()]
+    if severity and severity.upper() != "ALL":
+        filtered = [a for a in filtered if a.get("severity", "").upper() == severity.upper()]
+
+    return {
+        "macro_risk": news_intel.get_macro_risk_state(),
+        "articles": filtered[:limit],
+        "total_articles": len(filtered),
+        "last_refresh": news_intel._last_refresh,
+    }
+
+
 @app.get("/api/screener/tradingview", tags=["Intelligence"])
 def get_tradingview_breakouts(
     min_rvol: float = 1.5,
@@ -1846,10 +2003,13 @@ def get_congress_intelligence(limit: int = 50, days: int = 30):
         "top_congress_buys": top_buys,
         "top_congress_sells": top_sells,
         "conviction_scores": scores,
+        "candidates": smart_money.get_trade_candidates(),
+        "articles": smart_money._congress_news_articles,
         "recent_trades": recent,
         "last_refresh": smart_money._last_refresh,
         "cache_age_seconds": round(time.time() - smart_money._last_refresh, 1) if smart_money._last_refresh else None
     }
+
 
 
 @app.get("/api/smart_money/opportunities", tags=["Intelligence"])

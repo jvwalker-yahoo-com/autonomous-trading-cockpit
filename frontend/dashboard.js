@@ -131,8 +131,15 @@ const el = {
   btnCloseModal: document.getElementById("btnCloseModal"),
   btnSaveConfig: document.getElementById("btnSaveConfig"),
   inputFinnhubKey: document.getElementById("inputFinnhubKey"),
+  inputTwelveDataKey: document.getElementById("inputTwelveDataKey"),
+  inputFmpKey: document.getElementById("inputFmpKey"),
+  inputAlphaVantageKey: document.getElementById("inputAlphaVantageKey"),
+  inputTavilyKey: document.getElementById("inputTavilyKey"),
+  inputSerpApiKey: document.getElementById("inputSerpApiKey"),
+  inputAnspireKey: document.getElementById("inputAnspireKey"),
   selectSimMode: document.getElementById("selectSimMode"),
   inputRiskPct: document.getElementById("inputRiskPct"),
+
   
   // eToro Live Switch & Credentials
   btnModeToggle: document.getElementById("btnModeToggle"),
@@ -231,6 +238,23 @@ function renderCockpit(data) {
     } else {
       pillMarketHours.textContent = "CLOSED (14:30 UK)";
       pillMarketHours.className = "pill-val mode-badge-warn";
+    }
+  }
+
+  const pillMacroRisk = document.getElementById("pillMacroRisk");
+  if (pillMacroRisk && data.macro_risk) {
+    const mRisk = data.macro_risk.macro_risk_level || "NORMAL";
+    const mSent = data.macro_risk.macro_sentiment !== undefined ? (data.macro_risk.macro_sentiment >= 0 ? `+${data.macro_risk.macro_sentiment.toFixed(2)}` : data.macro_risk.macro_sentiment.toFixed(2)) : "";
+    pillMacroRisk.textContent = `🌍 ${mRisk} (${mSent})`;
+    if (mRisk === "CRITICAL") {
+      pillMacroRisk.className = "pill-val mode-badge-fail";
+      pillMacroRisk.style.color = "#ef4444";
+    } else if (mRisk === "ELEVATED") {
+      pillMacroRisk.className = "pill-val mode-badge-warn";
+      pillMacroRisk.style.color = "#f59e0b";
+    } else {
+      pillMacroRisk.className = "pill-val mode-badge-ok";
+      pillMacroRisk.style.color = "#38bdf8";
     }
   }
 
@@ -1124,6 +1148,14 @@ if (el.btnSettings) {
         if (el.inputRiskPct) el.inputRiskPct.value = ((cfg.risk_per_trade_pct || 0.02) * 100).toFixed(1);
         if (el.inputEtoroBaseUrl) el.inputEtoroBaseUrl.value = cfg.etoro_base_url || "https://public-api.etoro.com";
 
+        if (el.inputFinnhubKey && !el.inputFinnhubKey.value) el.inputFinnhubKey.value = localStorage.getItem("finnhub_api_key") || "";
+        if (el.inputTwelveDataKey && !el.inputTwelveDataKey.value) el.inputTwelveDataKey.value = localStorage.getItem("twelve_data_api_key") || "";
+        if (el.inputFmpKey && !el.inputFmpKey.value) el.inputFmpKey.value = localStorage.getItem("fmp_api_key") || "";
+        if (el.inputAlphaVantageKey && !el.inputAlphaVantageKey.value) el.inputAlphaVantageKey.value = localStorage.getItem("alpha_vantage_api_key") || "";
+        if (el.inputTavilyKey && !el.inputTavilyKey.value) el.inputTavilyKey.value = localStorage.getItem("tavily_api_key") || "";
+        if (el.inputSerpApiKey && !el.inputSerpApiKey.value) el.inputSerpApiKey.value = localStorage.getItem("serpapi_api_key") || "";
+        if (el.inputAnspireKey && !el.inputAnspireKey.value) el.inputAnspireKey.value = localStorage.getItem("anspire_api_key") || "";
+
         if (el.inputEnableDayTrading) el.inputEnableDayTrading.checked = cfg.enable_day_trading !== false;
         if (el.inputDayTradeAllocPct) el.inputDayTradeAllocPct.value = Math.round((cfg.day_trade_allocation_pct || 0.35) * 100);
         if (el.inputDayTradeMaxActive) el.inputDayTradeMaxActive.value = cfg.day_trade_max_active || 4;
@@ -1174,6 +1206,13 @@ if (el.settingsModal) {
 if (el.btnSaveConfig) {
   el.btnSaveConfig.addEventListener("click", async () => {
     const finnhubKey = el.inputFinnhubKey ? el.inputFinnhubKey.value.trim() : "";
+    const twelveDataKey = el.inputTwelveDataKey ? el.inputTwelveDataKey.value.trim() : "";
+    const fmpKey = el.inputFmpKey ? el.inputFmpKey.value.trim() : "";
+    const alphaVantageKey = el.inputAlphaVantageKey ? el.inputAlphaVantageKey.value.trim() : "";
+    const tavilyKey = el.inputTavilyKey ? el.inputTavilyKey.value.trim() : "";
+    const serpApiKey = el.inputSerpApiKey ? el.inputSerpApiKey.value.trim() : "";
+    const anspireKey = el.inputAnspireKey ? el.inputAnspireKey.value.trim() : "";
+
     const execMode = el.selectSimMode ? el.selectSimMode.value : "demo";
     const riskPct = el.inputRiskPct ? parseFloat(el.inputRiskPct.value) / 100.0 : 0.02;
     const etoroApiKey = el.inputEtoroApiKey ? el.inputEtoroApiKey.value.trim() : "";
@@ -1203,6 +1242,12 @@ if (el.btnSaveConfig) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           finnhub_api_key: finnhubKey || null,
+          twelve_data_api_key: twelveDataKey || null,
+          fmp_api_key: fmpKey || null,
+          alpha_vantage_api_key: alphaVantageKey || null,
+          tavily_api_key: tavilyKey || null,
+          serpapi_api_key: serpApiKey || null,
+          anspire_api_key: anspireKey || null,
           execution_mode: execMode,
           risk_per_trade_pct: riskPct,
           etoro_api_key: etoroApiKey || null,
@@ -1222,10 +1267,19 @@ if (el.btnSaveConfig) {
         throw new Error(`Server returned HTTP ${res.status}`);
       }
 
+      if (finnhubKey) localStorage.setItem("finnhub_api_key", finnhubKey);
+      if (twelveDataKey) localStorage.setItem("twelve_data_api_key", twelveDataKey);
+      if (fmpKey) localStorage.setItem("fmp_api_key", fmpKey);
+      if (alphaVantageKey) localStorage.setItem("alpha_vantage_api_key", alphaVantageKey);
+      if (tavilyKey) localStorage.setItem("tavily_api_key", tavilyKey);
+      if (serpApiKey) localStorage.setItem("serpapi_api_key", serpApiKey);
+      if (anspireKey) localStorage.setItem("anspire_api_key", anspireKey);
+
       if (etoroApiKey) localStorage.setItem("etoro_api_key", etoroApiKey);
       if (etoroUserKey) localStorage.setItem("etoro_user_key", etoroUserKey);
       if (etoroBaseUrl) localStorage.setItem("etoro_base_url", etoroBaseUrl);
       if (execMode) localStorage.setItem("execution_mode", execMode);
+
 
       updateExecutionModeUI(execMode);
       document.body.style.overflow = "";
@@ -2265,7 +2319,253 @@ if (btnAutoAddTopScreened) {
       btnAutoAddTopScreened.textContent = "✨ AUTO-POPULATE TOP SCREENED";
     }
   });
+// ==============================================================================
+// 🌍 WORLDWIDE BREAKING NEWS & MACRO RADAR CONTROLLER
+// ==============================================================================
+const worldNewsModal = document.getElementById("worldNewsModal");
+const btnWorldNewsHeader = document.getElementById("btnWorldNewsHeader");
+const btnCloseWorldNewsModal = document.getElementById("btnCloseWorldNewsModal");
+const btnCloseWorldNewsFooter = document.getElementById("btnCloseWorldNewsFooter");
+const btnRefreshWorldNews = document.getElementById("btnRefreshWorldNews");
+const macroThemesContainer = document.getElementById("macroThemesContainer");
+const worldNewsCardsContainer = document.getElementById("worldNewsCardsContainer");
+const badgeModalMacroRisk = document.getElementById("badgeModalMacroRisk");
+const badgeModalMacroSent = document.getElementById("badgeModalMacroSent");
+const worldNewsStatusMsg = document.getElementById("worldNewsStatusMsg");
+
+let currentNewsTheme = "ALL";
+let currentNewsSev = "ALL";
+
+const THEME_DISPLAY = {
+  "CENTRAL_BANKS_RATES": { label: "Rates & Central Banks", icon: "🏦" },
+  "GEOPOLITICS_CONFLICT": { label: "Geopolitics & Conflict", icon: "⚔️" },
+  "ENERGY_COMMODITIES": { label: "Energy & Commodities", icon: "🛢️" },
+  "AI_TECH_REGULATION": { label: "Tech, Semis & AI", icon: "🤖" },
+  "SYSTEMIC_RECESSION": { label: "Systemic / Recession", icon: "📉" },
+  "MACRO_GLOBAL": { label: "Global Macro Markets", icon: "🌐" }
+};
+
+async function loadWorldNews() {
+  if (!worldNewsCardsContainer) return;
+  worldNewsCardsContainer.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px;">Fetching live worldwide breaking headlines...</div>';
+
+  try {
+    const url = `${BASE_URL}/api/news/world?theme=${encodeURIComponent(currentNewsTheme)}&severity=${encodeURIComponent(currentNewsSev)}&limit=60`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const risk = data.macro_risk || {};
+    const riskLevel = risk.macro_risk_level || "NORMAL";
+    const sent = risk.macro_sentiment !== undefined ? risk.macro_sentiment : 0.0;
+
+    // Header Badges
+    if (badgeModalMacroRisk) {
+      badgeModalMacroRisk.textContent = `RISK: ${riskLevel}`;
+      if (riskLevel === "CRITICAL") {
+        badgeModalMacroRisk.style.background = "rgba(239, 68, 68, 0.2)";
+        badgeModalMacroRisk.style.color = "#ef4444";
+        badgeModalMacroRisk.style.borderColor = "#ef4444";
+      } else if (riskLevel === "ELEVATED") {
+        badgeModalMacroRisk.style.background = "rgba(245, 158, 11, 0.2)";
+        badgeModalMacroRisk.style.color = "#f59e0b";
+        badgeModalMacroRisk.style.borderColor = "#f59e0b";
+      } else {
+        badgeModalMacroRisk.style.background = "rgba(56, 189, 248, 0.2)";
+        badgeModalMacroRisk.style.color = "#38bdf8";
+        badgeModalMacroRisk.style.borderColor = "#38bdf8";
+      }
+    }
+
+    if (badgeModalMacroSent) {
+      badgeModalMacroSent.textContent = `SENTIMENT: ${sent >= 0 ? '+' : ''}${sent.toFixed(2)}`;
+      if (sent >= 0.08) {
+        badgeModalMacroSent.style.background = "rgba(16, 185, 129, 0.2)";
+        badgeModalMacroSent.style.color = "#10b981";
+        badgeModalMacroSent.style.borderColor = "#10b981";
+      } else if (sent <= -0.08) {
+        badgeModalMacroSent.style.background = "rgba(239, 68, 68, 0.2)";
+        badgeModalMacroSent.style.color = "#ef4444";
+        badgeModalMacroSent.style.borderColor = "#ef4444";
+      } else {
+        badgeModalMacroSent.style.background = "rgba(148, 163, 184, 0.2)";
+        badgeModalMacroSent.style.color = "#94a3b8";
+        badgeModalMacroSent.style.borderColor = "#94a3b8";
+      }
+    }
+
+    // Macro Themes Grid
+    if (macroThemesContainer && risk.macro_themes) {
+      macroThemesContainer.innerHTML = risk.macro_themes.map(t => {
+        const meta = THEME_DISPLAY[t.theme] || { label: t.theme, icon: "📌" };
+        const scColor = t.sentiment > 0.05 ? "#10b981" : (t.sentiment < -0.05 ? "#ef4444" : "#94a3b8");
+        return `
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; cursor: pointer; transition: border-color 0.2s;" onclick="filterNewsByTheme('${t.theme}')">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-size: 11px; font-weight: bold; color: var(--text-color);">${meta.icon} ${meta.label}</span>
+              <span style="font-size: 10px; background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 10px;">${t.count}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
+              <span style="color: var(--text-muted);">${t.label}</span>
+              <span style="font-weight: bold; color: ${scColor};">${t.sentiment >= 0 ? '+' : ''}${t.sentiment.toFixed(2)}</span>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    // Articles List
+    const articles = data.articles || [];
+    if (worldNewsStatusMsg) {
+      worldNewsStatusMsg.textContent = `Showing ${articles.length} of ${data.total_articles} global market headlines. Ingested live via Finnhub, SerpApi, Tavily & Global RSS.`;
+    }
+
+    if (articles.length === 0) {
+      worldNewsCardsContainer.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px;">No breaking news found for selected theme and severity filters.</div>';
+      return;
+    }
+
+    worldNewsCardsContainer.innerHTML = articles.map(a => {
+      const meta = THEME_DISPLAY[a.theme] || { label: a.theme, icon: "🌐" };
+      const isHigh = a.severity === "HIGH";
+      const isBull = a.sentiment === "BULLISH";
+      const isBear = a.sentiment === "BEARISH";
+      const borderAccent = isBear ? "#ef4444" : (isBull ? "#10b981" : "rgba(255,255,255,0.15)");
+      const sentBg = isBear ? "rgba(239,68,68,0.15)" : (isBull ? "rgba(16,185,129,0.15)" : "rgba(148,163,184,0.15)");
+      const sentColor = isBear ? "#ef4444" : (isBull ? "#10b981" : "#94a3b8");
+
+      const timeStr = a.time ? new Date(a.time * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Live";
+
+      const assetsPills = (a.affected_assets || []).map(sym => `
+        <span onclick="event.stopPropagation(); setCockpitActiveSymbol('${sym}')" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; padding: 2px 6px; border-radius: 4px; font-size: 10px; cursor: pointer; font-weight: bold;" title="Click to view & trade ${sym}">
+          ${sym} ↗
+        </span>
+      `).join(" ");
+
+      return `
+        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-left: 4px solid ${borderAccent}; border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 10px; color: var(--text-muted); font-weight: bold; text-transform: uppercase;">📰 ${a.source}</span>
+              <span style="font-size: 10px; color: var(--text-muted);">🕒 ${timeStr}</span>
+              <span style="font-size: 10px; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; color: var(--text-muted);">
+                ${meta.icon} ${meta.label}
+              </span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              ${isHigh ? '<span style="font-size: 10px; background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; padding: 2px 6px; border-radius: 4px; font-weight: bold;">🔥 HIGH IMPACT</span>' : ''}
+              <span style="font-size: 10px; background: ${sentBg}; color: ${sentColor}; border: 1px solid ${sentColor}; padding: 2px 6px; border-radius: 4px; font-weight: bold;">
+                ${a.sentiment} (${a.score >= 0 ? '+' : ''}${a.score.toFixed(2)})
+              </span>
+            </div>
+          </div>
+
+          <div style="font-size: 13px; font-weight: bold; line-height: 1.4;">
+            <a href="${a.url || '#'}" target="_blank" rel="noopener noreferrer" style="color: #e2e8f0; text-decoration: none;" onmouseover="this.style.color='#38bdf8'" onmouseout="this.style.color='#e2e8f0'">
+              ${a.title} ↗
+            </a>
+          </div>
+
+          ${a.summary ? `<div style="font-size: 11px; color: var(--text-muted); line-height: 1.4;">${a.summary}</div>` : ''}
+
+          ${(a.affected_assets && a.affected_assets.length > 0) ? `
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px;">
+              <span style="font-size: 10px; color: var(--text-muted);">Impacted Assets:</span>
+              ${assetsPills}
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join("");
+
+  } catch (err) {
+    worldNewsCardsContainer.innerHTML = `<div style="text-align: center; color: #ef4444; padding: 40px;">Error loading world news: ${err.message}</div>`;
+  }
 }
+
+window.filterNewsByTheme = function(theme) {
+  currentNewsTheme = theme;
+  document.querySelectorAll(".btn-news-theme-filter").forEach(b => {
+    if (b.getAttribute("data-theme") === theme) {
+      b.classList.remove("btn-secondary");
+      b.classList.add("btn-primary");
+    } else {
+      b.classList.remove("btn-primary");
+      b.classList.add("btn-secondary");
+    }
+  });
+  loadWorldNews();
+};
+
+window.setCockpitActiveSymbol = function(sym) {
+  if (!sym || sym === "ENERGY" || sym === "SEMIS") return;
+  if (worldNewsModal) worldNewsModal.classList.add("hidden");
+  activeSymbol = sym.toUpperCase();
+  const select = document.getElementById("selectActiveSymbol");
+  if (select) select.value = activeSymbol;
+  fetchCockpitData();
+};
+
+if (btnWorldNewsHeader) {
+  btnWorldNewsHeader.addEventListener("click", () => {
+    if (worldNewsModal) {
+      worldNewsModal.classList.remove("hidden");
+      loadWorldNews();
+    }
+  });
+}
+
+if (btnCloseWorldNewsModal) {
+  btnCloseWorldNewsModal.addEventListener("click", () => {
+    if (worldNewsModal) worldNewsModal.classList.add("hidden");
+  });
+}
+
+if (btnCloseWorldNewsFooter) {
+  btnCloseWorldNewsFooter.addEventListener("click", () => {
+    if (worldNewsModal) worldNewsModal.classList.add("hidden");
+  });
+}
+
+if (btnRefreshWorldNews) {
+  btnRefreshWorldNews.addEventListener("click", async () => {
+    btnRefreshWorldNews.textContent = "⏳ REFRESHING...";
+    try {
+      await fetch(`${BASE_URL}/api/news/refresh`, { method: "POST" });
+      await loadWorldNews();
+    } catch (e) {
+      console.warn("Refresh error:", e);
+    } finally {
+      btnRefreshWorldNews.textContent = "🔄 REFRESH LIVE";
+    }
+  });
+}
+
+document.querySelectorAll(".btn-news-theme-filter").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".btn-news-theme-filter").forEach(x => {
+      x.classList.remove("btn-primary");
+      x.classList.add("btn-secondary");
+    });
+    b.classList.remove("btn-secondary");
+    b.classList.add("btn-primary");
+    currentNewsTheme = b.getAttribute("data-theme") || "ALL";
+    loadWorldNews();
+  });
+});
+
+document.querySelectorAll(".btn-news-sev-filter").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".btn-news-sev-filter").forEach(x => {
+      x.classList.remove("btn-primary");
+      x.classList.add("btn-secondary");
+    });
+    b.classList.remove("btn-secondary");
+    b.classList.add("btn-primary");
+    currentNewsSev = b.getAttribute("data-sev") || "ALL";
+    loadWorldNews();
+  });
+});
 
 // Initialization & Loop
 try {

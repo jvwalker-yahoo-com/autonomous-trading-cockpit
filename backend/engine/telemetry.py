@@ -20,12 +20,12 @@ ETORO_EXCHANGES_UK: Dict[str, Dict[str, Any]] = {
     "LSE": {
         "name": "London Stock Exchange (LSE)",
         "category": "Stocks & ETFs",
-        "description": "UK Equities & FTSE constituents",
+        "description": "UK Equities & FTSE constituents (VUKE, VOD, LLOY, BP, etc.)",
         "days": [0, 1, 2, 3, 4],
         "open_time_uk": (8, 0),
         "close_time_uk": (16, 30),
         "daily_break": "16:30 - 08:00 UK",
-        "symbols": [".L", "LSE", "LON"]
+        "symbols": [".L", "LSE", "LON", "VUKE", "ISF", "VMID", "VUSA", "VOD", "LLOY", "BP", "SHEL", "AZN", "RR", "BARC", "GLEN", "GSK", "ULVR", "BATS", "NG", "RIO", "BA"]
     },
     "EUROPE_EQUITIES": {
         "name": "Frankfurt / Euronext / Madrid",
@@ -190,7 +190,7 @@ class TelemetryModule:
             return ETORO_EXCHANGES_UK["FUTURES"]
 
         # LSE / UK Equities check
-        if sym.endswith(".L") or sym.endswith(".LON"):
+        if sym.endswith(".L") or sym.endswith(".LON") or sym in ETORO_EXCHANGES_UK["LSE"]["symbols"]:
             return ETORO_EXCHANGES_UK["LSE"]
 
         # European Equities check
@@ -204,6 +204,7 @@ class TelemetryModule:
         """
         Validates whether eToro UK trading session is open for the specified asset.
         Computes current UK local time (accounting for BST/GMT offset).
+        Returns: (market_open: bool, session_status_message: str)
         """
         now_utc = datetime.now(timezone.utc)
         # UK is UTC+1 during BST (British Summer Time, last Sunday March to last Sunday Oct)
@@ -217,7 +218,8 @@ class TelemetryModule:
         
         # Check active trading days
         if weekday not in exch["days"]:
-            return False, f"Market Closed (Weekend: {exch['name']} opens next active session)"
+            day_name = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][weekday]
+            return False, f"Market Closed ({day_name}: {exch['name']} opens next active session)"
 
         open_h, open_m = exch["open_time_uk"]
         close_h, close_m = exch["close_time_uk"]
@@ -238,6 +240,13 @@ class TelemetryModule:
             return False, f"Market Closed ({exch['name']} closed at {close_h:02d}:{close_m:02d} UK)"
         else:
             return True, f"eToro UK Active Session ({open_h:02d}:{open_m:02d} - {close_h:02d}:{close_m:02d} UK)"
+
+    def check_trading_hours_before_trade(self, symbol: str) -> Tuple[bool, str]:
+        """
+        Direct gateway method: verifies trading hours for an asset before checking
+        whether to place a trade. Returns (is_open, status_reason).
+        """
+        return self.is_etoro_uk_market_open(symbol)
 
 
     def sync_drift(self) -> SyncDriftOutput:

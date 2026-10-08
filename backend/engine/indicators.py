@@ -318,3 +318,153 @@ class TechnicalIndicators:
             "chip_resistance": round(chip_core_price if cur_p < chip_core_price else max_p, 2),
             "current_above_chip_core": cur_p >= chip_core_price
         }
+
+    @staticmethod
+    def calc_dual_thrust(
+        highs: np.ndarray,
+        lows: np.ndarray,
+        closes: np.ndarray,
+        open_price: float,
+        current_price: float,
+        lookback_days: int = 4,
+        k1: float = 0.5,
+        k2: float = 0.5
+    ) -> Dict[str, Any]:
+        """
+        Dual Thrust Breakout Strategy from je-suis-tm/quant-trading:
+        Calculates asymmetric upper and lower breakout thresholds based on historical N-day range.
+        HH = highest high over lookback
+        HC = highest close over lookback
+        LL = lowest low over lookback
+        LC = lowest close over lookback
+        range = max(HH - LC, HC - LL)
+        Buy Line = Open + k1 * range
+        Sell Line = Open - k2 * range
+        """
+        if len(closes) < 2:
+            range_val = float(current_price * 0.02)
+            buy_line = open_price + k1 * range_val
+            sell_line = open_price - k2 * range_val
+            return {
+                "dual_thrust_buy_line": round(buy_line, 4),
+                "dual_thrust_sell_line": round(sell_line, 4),
+                "dual_thrust_range": round(range_val, 4),
+                "dual_thrust_signal": "BUY" if current_price > buy_line else ("SHORT" if current_price < sell_line else "NONE")
+            }
+
+        lb = min(len(closes), lookback_days)
+        h_slice = highs[-lb:]
+        l_slice = lows[-lb:]
+        c_slice = closes[-lb:]
+
+        hh = float(np.max(h_slice))
+        hc = float(np.max(c_slice))
+        ll = float(np.min(l_slice))
+        lc = float(np.min(c_slice))
+
+        range_val = max(hh - lc, hc - ll)
+        if range_val <= 0:
+            range_val = float(current_price * 0.015)
+
+        buy_line = open_price + k1 * range_val
+        sell_line = open_price - k2 * range_val
+
+        signal = "NONE"
+        if current_price > buy_line:
+            signal = "BUY"
+        elif current_price < sell_line:
+            signal = "SHORT"
+
+        return {
+            "dual_thrust_buy_line": round(buy_line, 4),
+            "dual_thrust_sell_line": round(sell_line, 4),
+            "dual_thrust_range": round(range_val, 4),
+            "dual_thrust_signal": signal
+        }
+
+    @staticmethod
+    def calc_london_breakout(
+        premarket_prices: np.ndarray,
+        current_price: float,
+        buffer_pct: float = 0.001
+    ) -> Dict[str, Any]:
+        """
+        London Breakout Strategy from je-suis-tm/quant-trading:
+        Captures opening range volatility breakout (tailored for UK100, GER40, European morning sessions).
+        Establishes high/low range during the pre-market window (07:00 - 08:00 UK time),
+        then generates a breakout signal when the 08:00 London open breaks past the channel.
+        """
+        if len(premarket_prices) < 2:
+            return {
+                "london_range_high": round(current_price * (1.0 + buffer_pct), 2),
+                "london_range_low": round(current_price * (1.0 - buffer_pct), 2),
+                "london_breakout_signal": "NONE"
+            }
+
+        high_lvl = float(np.max(premarket_prices)) * (1.0 + buffer_pct)
+        low_lvl = float(np.min(premarket_prices)) * (1.0 - buffer_pct)
+
+        signal = "NONE"
+        if current_price > high_lvl:
+            signal = "BUY"
+        elif current_price < low_lvl:
+            signal = "SHORT"
+
+        return {
+            "london_range_high": round(high_lvl, 2),
+            "london_range_low": round(low_lvl, 2),
+            "london_breakout_signal": signal
+        }
+
+    @staticmethod
+    def calc_heikin_ashi(
+        opens: np.ndarray,
+        highs: np.ndarray,
+        lows: np.ndarray,
+        closes: np.ndarray
+    ) -> Dict[str, Any]:
+        """
+        Heikin-Ashi Candlestick Smoothing from je-suis-tm/quant-trading:
+        Filters out market noise and false pullbacks for robust trend detection.
+        ha_close = (open + high + low + close) / 4
+        ha_open = (prev_ha_open + prev_ha_close) / 2
+        ha_high = max(high, ha_open, ha_close)
+        ha_low = min(low, ha_open, ha_close)
+        """
+        n = len(closes)
+        if n == 0:
+            return {"ha_trend": "CHOPPY", "ha_consecutive_bars": 0, "ha_bullish": False}
+
+        ha_closes = (opens + highs + lows + closes) / 4.0
+        ha_opens = np.zeros(n)
+        ha_opens[0] = (opens[0] + closes[0]) / 2.0
+
+        for i in range(1, n):
+            ha_opens[i] = (ha_opens[i-1] + ha_closes[i-1]) / 2.0
+
+        ha_highs = np.maximum(highs, np.maximum(ha_opens, ha_closes))
+        ha_lows = np.minimum(lows, np.minimum(ha_opens, ha_closes))
+
+        last_open = ha_opens[-1]
+        last_close = ha_closes[-1]
+        is_bullish = bool(last_close > last_open)
+
+        # Count consecutive trending bars
+        consecutive = 0
+        for i in range(n - 1, -1, -1):
+            if (ha_closes[i] > ha_opens[i]) == is_bullish:
+                consecutive += 1
+            else:
+                break
+
+        trend = "BULLISH" if (is_bullish and consecutive >= 2) else ("BEARISH" if (not is_bullish and consecutive >= 2) else "CHOPPY")
+
+        return {
+            "ha_open": round(float(last_open), 4),
+            "ha_close": round(float(last_close), 4),
+            "ha_high": round(float(ha_highs[-1]), 4),
+            "ha_low": round(float(ha_lows[-1]), 4),
+            "ha_trend": trend,
+            "ha_consecutive_bars": consecutive,
+            "ha_bullish": is_bullish
+        }

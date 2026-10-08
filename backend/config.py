@@ -16,8 +16,15 @@ DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 class SystemConfig(BaseModel):
-    # API credentials
-    finnhub_api_key: str = os.getenv("FINNHUB_API_KEY", "")
+    # API credentials & Multi-Provider Data Feeds
+    finnhub_api_key: str = os.getenv("FINNHUB_API_KEY", "da02ec1r01qgk75qq5v0da02ec1r01qgk75qq5vg")
+    twelve_data_api_key: str = os.getenv("TWELVE_DATA_API_KEY", "fa5122e69e6346359095fec0581fb72d")
+    fmp_api_key: str = os.getenv("FMP_API_KEY", "i2dkmxpEVNF4X5pln0XwwNk0wfwtf9oN")
+    alpha_vantage_api_key: str = os.getenv("ALPHA_VANTAGE_API_KEY", "P3I4HA7S9JQHFL8X")
+    tavily_api_key: str = os.getenv("TAVILY_API_KEY", "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")
+    serpapi_api_key: str = os.getenv("SERPAPI_API_KEY", "572f3ee5596cb17ee970fd360dfc8a36e8b8cba99c27b88d6362db83f76b30db")
+    anspire_api_key: str = os.getenv("ANSPIRE_API_KEY", "PrR9nw3YnOMTdmjk3uvA0yLOvoBuEAoD")
+
     
     # Official eToro API Credentials
     etoro_api_key: str = os.getenv("ETORO_API_KEY", "")

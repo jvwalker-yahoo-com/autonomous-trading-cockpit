@@ -33,3 +33,16 @@ services:
         value: "https://congressinfor-production.up.railway.app"
       - key: ENABLE_SMART_MONEY
         value: "true"
+      - key: TWELVE_DATA_API_KEY
+        sync: false
+      - key: FMP_API_KEY
+        sync: false
+      - key: ALPHA_VANTAGE_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: SERPAPI_API_KEY
+        sync: false
+      - key: ANSPIRE_API_KEY
+        sync: false
+

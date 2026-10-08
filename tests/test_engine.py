@@ -24,7 +24,10 @@ client = TestClient(app)
 def test_root_health():
     response = client.get("/")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    # Root endpoint serves dashboard HTML or health status JSON
+    assert "html" in response.headers.get("content-type", "") or response.json() == {"status": "ok"}
+    head_resp = client.head("/")
+    assert head_resp.status_code == 200
 
 def test_data_feed_and_indicators():
     feed = DataFeedManager()
@@ -52,7 +55,7 @@ def test_regime_classification():
     regime_mod = RegimeModule()
     # Test OK mode
     m_ok = {"risk": 0.2, "impact": 0.2, "slippage": 0.2, "latency": 10.0}
-    ind = {"ema_9": 105.0, "ema_21": 100.0, "rsi_14": 60.0, "macd_line": 0.5}
+    ind = {"ema_9": 105.0, "ema_21": 100.0, "rsi_14": 60.0, "macd_line": 0.5, "adx": 30.0}
     res_ok = regime_mod.model_mode(m_ok, ind)
     assert res_ok.mode == "OK"
     assert res_ok.trend == "BULL_TREND"
@@ -117,79 +120,84 @@ def test_adaptive_learner_and_broker():
     assert learner.weights["momentum_trend"] < 0.25 # Down-weighted after failure
 
 def test_all_api_endpoints():
-    # 10 Core Blueprint Endpoints
-    r = client.get("/state?symbol=AAPL")
-    assert r.status_code == 200
-    assert "risk" in r.json()
+    orig_mode = config.execution_mode
+    config.execution_mode = "simulated"
+    try:
+        # 10 Core Blueprint Endpoints
+        r = client.get("/state?symbol=AAPL")
+        assert r.status_code == 200
+        assert "risk" in r.json()
 
-    r = client.get("/decision?symbol=AAPL")
-    assert r.status_code == 200
-    assert "signal" in r.json()
+        r = client.get("/decision?symbol=AAPL")
+        assert r.status_code == 200
+        assert "signal" in r.json()
 
-    r = client.get("/federation?symbol=AAPL")
-    assert r.status_code == 200
-    assert "federation" in r.json()
+        r = client.get("/federation?symbol=AAPL")
+        assert r.status_code == 200
+        assert "federation" in r.json()
 
-    r = client.get("/arbitration?symbol=AAPL")
-    assert r.status_code == 200
-    assert "approved" in r.json()
+        r = client.get("/arbitration?symbol=AAPL")
+        assert r.status_code == 200
+        assert "approved" in r.json()
 
-    r = client.get("/anomaly_detector?symbol=AAPL")
-    assert r.status_code == 200
-    assert "anomaly_detected" in r.json()
+        r = client.get("/anomaly_detector?symbol=AAPL")
+        assert r.status_code == 200
+        assert "anomaly_detected" in r.json()
 
-    r = client.get("/node_events")
-    assert r.status_code == 200
-    assert "events" in r.json()
+        r = client.get("/node_events")
+        assert r.status_code == 200
+        assert "events" in r.json()
 
-    r = client.get("/quadrant?symbol=AAPL")
-    assert r.status_code == 200
-    assert "quadrant" in r.json()
+        r = client.get("/quadrant?symbol=AAPL")
+        assert r.status_code == 200
+        assert "quadrant" in r.json()
 
-    r = client.get("/heartbeat")
-    assert r.status_code == 200
-    assert r.json()["alive"] is True
+        r = client.get("/heartbeat")
+        assert r.status_code == 200
+        assert r.json()["alive"] is True
 
-    r = client.get("/sync_drift")
-    assert r.status_code == 200
-    assert "drift_ms" in r.json()
+        r = client.get("/sync_drift")
+        assert r.status_code == 200
+        assert "drift_ms" in r.json()
 
-    # Extended endpoints
-    r = client.get("/api/cockpit/snapshot?symbol=AAPL")
-    assert r.status_code == 200
-    assert "state" in r.json()
-    assert "decision" in r.json()
-    assert "portfolio" in r.json()
-    assert "learning" in r.json()
+        # Extended endpoints
+        r = client.get("/api/cockpit/snapshot?symbol=AAPL")
+        assert r.status_code == 200
+        assert "state" in r.json()
+        assert "decision" in r.json()
+        assert "portfolio" in r.json()
+        assert "learning" in r.json()
 
-    r = client.get("/api/portfolio")
-    assert r.status_code == 200
-    assert "cash" in r.json()
+        r = client.get("/api/portfolio")
+        assert r.status_code == 200
+        assert "cash" in r.json()
 
-    r = client.get("/api/trades")
-    assert r.status_code == 200
-    assert "trades" in r.json()
+        r = client.get("/api/trades")
+        assert r.status_code == 200
+        assert "trades" in r.json()
 
-    r = client.get("/api/learning/stats")
-    assert r.status_code == 200
-    assert "strategy_weights" in r.json()
+        r = client.get("/api/learning/stats")
+        assert r.status_code == 200
+        assert "strategy_weights" in r.json()
 
-    r = client.post("/api/action/trade", json={"symbol": "MSFT", "action": "BUY", "amount_usd": 300.0})
-    assert r.status_code == 200
+        r = client.post("/api/action/trade", json={"symbol": "MSFT", "action": "BUY", "amount_usd": 300.0, "bypass_market_hours": True})
+        assert r.status_code == 200
 
-    r = client.post("/api/action/trade", json={"symbol": "MSFT", "action": "CLOSE"})
-    assert r.status_code == 200
+        r = client.post("/api/action/trade", json={"symbol": "MSFT", "action": "CLOSE"})
+        assert r.status_code == 200
 
-    r = client.post("/api/portfolio/reset")
-    assert r.status_code == 200
-    assert r.json()["cash"] > 0
+        r = client.post("/api/portfolio/reset")
+        assert r.status_code == 200
+        assert r.json()["cash"] > 0
 
-    # Circuit breaker reset endpoint test
-    r = client.post("/api/circuit_breaker/reset")
-    assert r.status_code == 200
-    assert r.json()["status"] == "success"
-    assert r.json()["drawdown_pct"] == 0.0
-    assert r.json()["circuit_breaker_active"] is False
+        # Circuit breaker reset endpoint test
+        r = client.post("/api/circuit_breaker/reset")
+        assert r.status_code == 200
+        assert r.json()["status"] == "success"
+        assert r.json()["drawdown_pct"] == 0.0
+        assert r.json()["circuit_breaker_active"] is False
+    finally:
+        config.execution_mode = orig_mode
 
 def test_backtester_and_optimizer():
     from backend.engine.backtester import BacktesterEngine
@@ -516,36 +524,41 @@ def test_close_all_trades_and_crypto_deactivation():
     3. Adding crypto tickers to the active watchlist is rejected with HTTP 400.
     4. Market screener permanently excludes all crypto assets.
     """
-    test_client = TestClient(app)
+    orig_mode = config.execution_mode
+    config.execution_mode = "simulated"
+    try:
+        test_client = TestClient(app)
 
-    # 1. Test POST /api/positions/close_all
-    r_close = test_client.post("/api/positions/close_all")
-    assert r_close.status_code == 200
-    close_data = r_close.json()
-    assert close_data["status"] == "success"
-    assert "closed_local_trades" in close_data
+        # 1. Test POST /api/positions/close_all
+        r_close = test_client.post("/api/positions/close_all")
+        assert r_close.status_code == 200
+        close_data = r_close.json()
+        assert close_data["status"] == "success"
+        assert "closed_local_trades" in close_data
 
-    # 2. Test manual trade rejection for Crypto
-    r_btc_buy = test_client.post("/api/action/trade", json={"symbol": "BTC", "action": "BUY", "amount_usd": 100.0})
-    assert r_btc_buy.status_code == 400
-    assert "Cryptocurrency trading is permanently deactivated" in r_btc_buy.json()["detail"]
+        # 2. Test manual trade rejection for Crypto
+        r_btc_buy = test_client.post("/api/action/trade", json={"symbol": "BTC", "action": "BUY", "amount_usd": 100.0})
+        assert r_btc_buy.status_code == 400
+        assert "Cryptocurrency trading is permanently deactivated" in r_btc_buy.json()["detail"]
 
-    r_eth_short = test_client.post("/api/action/trade", json={"symbol": "ETH", "action": "SHORT", "amount_usd": 100.0})
-    assert r_eth_short.status_code == 400
-    assert "Cryptocurrency trading is permanently deactivated" in r_eth_short.json()["detail"]
+        r_eth_short = test_client.post("/api/action/trade", json={"symbol": "ETH", "action": "SHORT", "amount_usd": 100.0})
+        assert r_eth_short.status_code == 400
+        assert "Cryptocurrency trading is permanently deactivated" in r_eth_short.json()["detail"]
 
-    # 3. Test watchlist add rejection for Crypto
-    r_add_crypto = test_client.post("/api/watchlist/add", json={"symbol": "SOL"})
-    assert r_add_crypto.status_code == 400
-    assert "Cryptocurrency trading is permanently deactivated" in r_add_crypto.json()["detail"]
+        # 3. Test watchlist add rejection for Crypto
+        r_add_crypto = test_client.post("/api/watchlist/add", json={"symbol": "SOL"})
+        assert r_add_crypto.status_code == 400
+        assert "Cryptocurrency trading is permanently deactivated" in r_add_crypto.json()["detail"]
 
-    # 4. Test market screener exclusion
-    from backend.engine.screener import MarketScreener
-    from backend.server import CRYPTO_SYMBOLS
-    screened = MarketScreener.scan_universe()
-    for item in screened:
-        assert item["symbol"] not in CRYPTO_SYMBOLS
-        assert item.get("category", "").lower() != "crypto"
+        # 4. Test market screener exclusion
+        from backend.engine.screener import MarketScreener
+        from backend.server import CRYPTO_SYMBOLS
+        screened = MarketScreener.scan_universe()
+        for item in screened:
+            assert item["symbol"] not in CRYPTO_SYMBOLS
+            assert item.get("category", "").lower() != "crypto"
+    finally:
+        config.execution_mode = orig_mode
 
 
 def test_sync_live_etoro_portfolio():
@@ -828,6 +841,183 @@ def test_day_trading_api_endpoints():
     r_flat = client.post("/api/day_trading/flatten")
     assert r_flat.status_code == 200
     assert r_flat.json()["status"] == "success"
+
+
+def test_trading_hours_check_before_placing_trade():
+    """
+    Verifies that the Cockpit checks trading hours before checking whether to place a trade:
+    1. Telemetry checks trading hours per asset class (LSE, US Equities, Crypto, Indices, Commodities).
+    2. run_analysis_cycle enforces market hours and bypasses trade evaluation when market is closed.
+    3. Manual trade endpoint rejects orders outside trading hours when market is closed.
+    4. Broker execute_order respects market_open and enforce_market_hours safeguards.
+    """
+    telemetry = TelemetryModule()
+
+    # 1. Telemetry verification: BTC is 24/7, Gold is continuous with maintenance
+    btc_open, btc_msg = telemetry.check_trading_hours_before_trade("BTC")
+    assert btc_open is True
+    assert "24/7" in btc_msg
+
+    vuke_open, vuke_msg = telemetry.check_trading_hours_before_trade("VUKE")
+    assert "London Stock Exchange (LSE)" in vuke_msg
+
+    # 2. Decision engine check: When market is closed, trade evaluation must be bypassed
+    from backend.server import run_analysis_cycle
+    analysis = run_analysis_cycle("VUKE")
+    dec = analysis.get("decision")
+    arb = analysis.get("arbitration")
+
+    # Outside trading hours, decision signal MUST be HOLD and arbitration rejected
+    if not vuke_open and config.enforce_market_hours:
+        assert dec.signal == "HOLD"
+        assert "Trading hours closed" in dec.rationale
+        assert arb.approved is False
+        assert any("Market Closed" in r for r in arb.reasons)
+
+    # 3. Manual trade endpoint: Rejects live trades outside market hours
+    if not vuke_open and config.enforce_market_hours:
+        r = client.post("/api/action/trade", json={"symbol": "VUKE", "action": "BUY", "amount_usd": 100.0})
+        # In live mode, should reject with 400
+        if config.execution_mode == "live":
+            assert r.status_code == 400
+            assert "Trading hours are currently closed" in r.json()["detail"]
+
+    # 4. Broker execution safeguard: Returns None if market is closed and enforced
+    from backend.engine.broker import SimulatedBroker
+    test_broker = SimulatedBroker(initial_capital=1000.0)
+    blocked_pos = test_broker.execute_order(
+        symbol="AAPL",
+        direction="LONG",
+        allocated_usd=100.0,
+        current_price=220.0,
+        market_open=False,
+        enforce_market_hours=True
+    )
+    assert blocked_pos is None
+
+def test_quant_trading_indicators():
+    """
+    Validates algorithms incorporated from je-suis-tm/quant-trading:
+    1. Dual Thrust Range Breakout
+    2. London Opening Range Breakout
+    3. Heikin-Ashi Smoothed Trend Filter
+    4. DataFeedManager Integration
+    """
+    from backend.engine.indicators import TechnicalIndicators
+    from backend.engine.data_feed import DataFeedManager
+    import numpy as np
+
+    # 1. Dual Thrust Calculation
+    highs = np.array([100.0, 102.0, 103.0, 105.0, 104.0])
+    lows = np.array([96.0, 97.0, 99.0, 100.0, 99.0])
+    closes = np.array([98.0, 101.0, 102.0, 103.0, 101.0])
+    open_p = 101.0
+
+    # 1. Dual Thrust Calculation (lookback=4 by default: highs[-4:], lows[-4:], closes[-4:])
+    # HH = 105, LC = 101 -> 4. HC = 103, LL = 97 -> 6. Range = max(4, 6) = 6.0.
+    # buy_line = 101 + 0.5 * 6 = 104.0
+    # sell_line = 101 - 0.5 * 6 = 98.0
+    res_buy = TechnicalIndicators.calc_dual_thrust(highs, lows, closes, open_price=open_p, current_price=105.0, k1=0.5, k2=0.5)
+    assert res_buy["dual_thrust_signal"] == "BUY"
+    assert res_buy["dual_thrust_buy_line"] == 104.0
+
+    res_short = TechnicalIndicators.calc_dual_thrust(highs, lows, closes, open_price=open_p, current_price=97.0, k1=0.5, k2=0.5)
+    assert res_short["dual_thrust_signal"] == "SHORT"
+    assert res_short["dual_thrust_sell_line"] == 98.0
+
+    res_neutral = TechnicalIndicators.calc_dual_thrust(highs, lows, closes, open_price=open_p, current_price=101.0, k1=0.5, k2=0.5)
+    assert res_neutral["dual_thrust_signal"] == "NONE"
+
+    # 2. London Breakout Calculation
+    premarket = np.array([8400.0, 8420.0, 8410.0, 8430.0, 8390.0])
+    # high = 8430 * 1.001 = 8438.43, low = 8390 * 0.999 = 8381.61
+    res_london_buy = TechnicalIndicators.calc_london_breakout(premarket, current_price=8450.0, buffer_pct=0.001)
+    assert res_london_buy["london_breakout_signal"] == "BUY"
+    assert res_london_buy["london_range_high"] > 8430.0
+
+    res_london_short = TechnicalIndicators.calc_london_breakout(premarket, current_price=8370.0, buffer_pct=0.001)
+    assert res_london_short["london_breakout_signal"] == "SHORT"
+
+    res_london_none = TechnicalIndicators.calc_london_breakout(premarket, current_price=8400.0, buffer_pct=0.001)
+    assert res_london_none["london_breakout_signal"] == "NONE"
+
+    # 3. Heikin-Ashi Smoothing
+    ha_opens = np.array([100.0, 102.0, 104.0, 106.0, 108.0])
+    ha_highs = np.array([103.0, 105.0, 107.0, 109.0, 111.0])
+    ha_lows = np.array([99.0, 101.0, 103.0, 105.0, 107.0])
+    ha_closes = np.array([102.5, 104.5, 106.5, 108.5, 110.5])
+
+    res_ha = TechnicalIndicators.calc_heikin_ashi(ha_opens, ha_highs, ha_lows, ha_closes)
+    assert res_ha["ha_trend"] == "BULLISH"
+    assert res_ha["ha_bullish"] is True
+    assert res_ha["ha_consecutive_bars"] >= 2
+    assert "ha_open" in res_ha and "ha_close" in res_ha
+
+    # 4. DataFeedManager Integration Check
+    feed = DataFeedManager()
+    feed.get_latest_quote("VUKE")
+    ti = feed.get_technical_indicators("VUKE")
+    assert "dual_thrust_signal" in ti
+    assert "dual_thrust_buy_line" in ti
+    assert "dual_thrust_sell_line" in ti
+    assert "london_breakout_signal" in ti
+    assert "london_range_high" in ti
+    assert "london_range_low" in ti
+    assert "heikin_ashi_trend" in ti
+    assert "heikin_ashi_consecutive" in ti
+
+
+def test_worldwide_news_and_macro_radar():
+    """Validates classification of worldwide news headlines, macro themes, severity, and risk."""
+    from backend.engine.news_intel import NewsIntelligenceEngine
+
+    intel = NewsIntelligenceEngine()
+
+    # Test classification of rate hike headline
+    art_fed = intel._classify_macro_article(
+        title="Federal Reserve signals interest rate hike as inflation exceeds CPI forecast",
+        summary="Jerome Powell warns rates may stay elevated to combat persistence.",
+        source="Reuters"
+    )
+    assert art_fed["theme"] == "CENTRAL_BANKS_RATES"
+    assert "SPY" in art_fed["affected_assets"] or "QQQ" in art_fed["affected_assets"]
+    assert art_fed["severity"] in ("HIGH", "MEDIUM")
+
+    # Test classification of geopolitical war headline
+    art_geo = intel._classify_macro_article(
+        title="Middle east missile attacks disrupt oil shipping through Strait of Hormuz",
+        summary="Military action causes crude oil prices to surge.",
+        source="Bloomberg"
+    )
+    assert art_geo["theme"] in ("GEOPOLITICS_CONFLICT", "ENERGY_COMMODITIES")
+    assert art_geo["severity"] == "HIGH"
+    assert "ENERGY" in art_geo["affected_assets"]
+
+    # Test classification of tech semiconductor headline
+    art_tech = intel._classify_macro_article(
+        title="Nvidia announces breakthrough in Blackwell AI chip foundry with TSMC",
+        summary="Jensen Huang highlights record demand for AI processors.",
+        source="CNBC"
+    )
+    assert "NVDA" in art_tech["affected_assets"]
+    assert art_tech["sentiment"] == "BULLISH"
+    assert art_tech["score"] > 0
+
+
+def test_world_news_api_endpoint():
+    """Validates GET /api/news/world endpoint response format and macro risk telemetry."""
+    r = client.get("/api/news/world")
+    assert r.status_code == 200
+    data = r.json()
+    assert "macro_risk" in data
+    assert "macro_sentiment" in data["macro_risk"]
+    assert "macro_risk_level" in data["macro_risk"]
+    assert "macro_themes" in data["macro_risk"]
+    assert "articles" in data
+    assert isinstance(data["articles"], list)
+
+
+
 
 
 

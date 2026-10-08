@@ -10,6 +10,7 @@ import random
 import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
 from pydantic import BaseModel
+from .jev_decision import evaluate_decision
 
 from .indicators import TechnicalIndicators
 from .federation import FederationModule
@@ -233,6 +234,61 @@ class BacktesterEngine:
             if open_position is None and adx >= adx_threshold:
                 fed_out = self.federation_mod.model_federation(indicators, curr_p, 0.05, weights)
                 score = fed_out.federated_score
+
+                # Decision making via Jev decision maker
+                state = {
+                    "symbol": symbol,
+                    "price": curr_p,
+                    "adx": adx,
+                    "score": score,
+                    "indicators": indicators,
+                }
+                # LONG entry decision
+                if score >= 0.28:
+                    long_questions = [{
+                        "type": "choice",
+                        "question": "Approve LONG entry?",
+                        "options": ["APPROVE", "REJECT"]
+                    }]
+                    if evaluate_decision(state, long_questions):
+                        alloc = min(1000.0, cash * 0.25)
+                        if alloc >= 50.0:
+                            sh = round(alloc / curr_p, 4)
+                            cost = sh * curr_p
+                            cash -= cost
+                            open_position = {
+                                "direction": "LONG",
+                                "shares": sh,
+                                "entry_price": curr_p,
+                                "cost_basis": cost,
+                                "stop_loss": round(curr_p * (1.0 - stop_loss_pct), 2),
+                                "take_profit": round(curr_p * (1.0 + take_profit_pct), 2),
+                                "tick_index": i,
+                                "rationale": f"Long entry on {symbol} (Ensemble: {score:+.2f}, ADX: {adx:.1f})"
+                            }
+                # SHORT entry decision
+                elif score <= -0.28:
+                    short_questions = [{
+                        "type": "choice",
+                        "question": "Approve SHORT entry?",
+                        "options": ["APPROVE", "REJECT"]
+                    }]
+                    if evaluate_decision(state, short_questions):
+                        alloc = min(1000.0, cash * 0.25)
+                        if alloc >= 50.0:
+                            sh = round(alloc / curr_p, 4)
+                            cost = sh * curr_p
+                            cash -= cost
+                            open_position = {
+                                "direction": "SHORT",
+                                "shares": sh,
+                                "entry_price": curr_p,
+                                "cost_basis": cost,
+                                "stop_loss": round(curr_p * (1.0 + stop_loss_pct), 2),
+                                "take_profit": round(curr_p * (1.0 - take_profit_pct), 2),
+                                "tick_index": i,
+                                "rationale": f"Short entry on {symbol} (Ensemble: {score:+.2f}, ADX: {adx:.1f})"
+                            }
 
                 if score >= 0.28: # BUY LONG
                     alloc = min(1000.0, cash * 0.25)
