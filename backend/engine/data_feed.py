@@ -376,7 +376,22 @@ class DataFeedManager:
                 "london_range_high": round(p * 1.005, 2),
                 "london_range_low": round(p * 0.995, 2),
                 "heikin_ashi_trend": "CHOPPY",
-                "heikin_ashi_consecutive": 0
+                "heikin_ashi_consecutive": 0,
+                "wyckoff_structure": "NEUTRAL",
+                "wyckoff_phase": "Phase A: Stopping The Prior Trend",
+                "wyckoff_phase_code": "A",
+                "wyckoff_bias": "EQUILIBRIUM",
+                "wyckoff_signal": "HOLD",
+                "wyckoff_creek": round(p * 1.02, 2),
+                "wyckoff_ice": round(p * 0.98, 2),
+                "wyckoff_climax_score": 0,
+                "wyckoff_spring_score": 0,
+                "wyckoff_utad_score": 0,
+                "wyckoff_tp1": round(p * 1.01, 2),
+                "wyckoff_tp2": round(p * 1.02, 2),
+                "wyckoff_tp3": round(p * 1.03, 2),
+                "wyckoff_sl": round(p * 0.98, 2),
+                "wyckoff_data": {}
             }
 
         # 1. EMAs & MACD
@@ -462,6 +477,15 @@ class DataFeedManager:
             closes=prices
         )
 
+        # 17. Classic Wyckoff Range Engine (Accumulation/Distribution, Springs, UTADs, Multi-TP)
+        wyckoff_res = TechnicalIndicators.calc_wyckoff(
+            prices=prices,
+            volumes=volumes,
+            highs=highs,
+            lows=lows,
+            symbol=symbol
+        )
+
         return {
             "ema_9": round(ema_9, 2),
             "ema_21": round(ema_21, 2),
@@ -501,7 +525,22 @@ class DataFeedManager:
             "london_range_high": round(london_res.get("london_range_high", 0.0), 2),
             "london_range_low": round(london_res.get("london_range_low", 0.0), 2),
             "heikin_ashi_trend": ha_res.get("ha_trend", "CHOPPY"),
-            "heikin_ashi_consecutive": int(ha_res.get("ha_consecutive_bars", 0))
+            "heikin_ashi_consecutive": int(ha_res.get("ha_consecutive_bars", 0)),
+            "wyckoff_structure": wyckoff_res.get("structure_type", "NEUTRAL"),
+            "wyckoff_phase": wyckoff_res.get("phase", "Phase A: Stopping The Prior Trend"),
+            "wyckoff_phase_code": wyckoff_res.get("phase_code", "A"),
+            "wyckoff_bias": wyckoff_res.get("bias", "EQUILIBRIUM"),
+            "wyckoff_signal": wyckoff_res.get("signal", "HOLD"),
+            "wyckoff_creek": wyckoff_res.get("creek_resistance", round(prices[-1] * 1.02, 2)),
+            "wyckoff_ice": wyckoff_res.get("ice_support", round(prices[-1] * 0.98, 2)),
+            "wyckoff_climax_score": wyckoff_res.get("climax_score", 0),
+            "wyckoff_spring_score": wyckoff_res.get("spring_quality_score", 0),
+            "wyckoff_utad_score": wyckoff_res.get("utad_quality_score", 0),
+            "wyckoff_tp1": wyckoff_res.get("trade_setup", {}).get("tp1", round(prices[-1] * 1.01, 2)),
+            "wyckoff_tp2": wyckoff_res.get("trade_setup", {}).get("tp2", round(prices[-1] * 1.02, 2)),
+            "wyckoff_tp3": wyckoff_res.get("trade_setup", {}).get("tp3", round(prices[-1] * 1.03, 2)),
+            "wyckoff_sl": wyckoff_res.get("trade_setup", {}).get("stop_loss", round(prices[-1] * 0.98, 2)),
+            "wyckoff_data": wyckoff_res
         }
 
     def get_news_sentiment(self, symbol: str) -> float:

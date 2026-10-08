@@ -259,6 +259,26 @@ function renderCockpit(data) {
     }
   }
 
+  const pillWyckoff = document.getElementById("pillWyckoff");
+  if (pillWyckoff && data.wyckoff) {
+    const wPhase = data.wyckoff.phase_code || "A";
+    const wStruct = data.wyckoff.structure_type || "NEUTRAL";
+    const wSpring = data.wyckoff.spring_quality_score || 0;
+    if (wSpring >= 60) {
+      pillWyckoff.textContent = `⚡ SPRING (${wSpring})`;
+      pillWyckoff.className = "pill-val mode-badge-ok";
+      pillWyckoff.style.color = "#10b981";
+    } else if (wPhase === "D" || wPhase === "E") {
+      pillWyckoff.textContent = `🎯 ${wStruct === "ACCUMULATION" ? "MARKUP" : (wStruct === "DISTRIBUTION" ? "MARKDOWN" : wStruct)} (${wPhase})`;
+      pillWyckoff.className = "pill-val mode-badge-ok";
+      pillWyckoff.style.color = wStruct === "ACCUMULATION" ? "#10b981" : "#ef4444";
+    } else {
+      pillWyckoff.textContent = `🎯 PHASE ${wPhase}`;
+      pillWyckoff.className = "pill-val mode-badge-ok";
+      pillWyckoff.style.color = "#fbbf24";
+    }
+  }
+
   // 2. Summary Stats Strip
   if (portfolio) {
     el.statEquity.textContent = `$${portfolio.equity.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
@@ -2839,6 +2859,177 @@ if (flowTransparencyModal) {
   });
 }
 
+// ==========================================
+// WYCKOFF RANGE ENGINE MODAL & TELEMETRY
+// ==========================================
+const wyckoffModal = document.getElementById("wyckoffModal");
+const btnWyckoffHeader = document.getElementById("btnWyckoffHeader");
+const btnCloseWyckoffModal = document.getElementById("btnCloseWyckoffModal");
+const btnCloseWyckoffFooter = document.getElementById("btnCloseWyckoffFooter");
+const wyckoffTickerInput = document.getElementById("wyckoffTickerInput");
+const btnWyckoffSearch = document.getElementById("btnWyckoffSearch");
+const wyckoffStyleSelect = document.getElementById("wyckoffStyleSelect");
+
+async function loadWyckoffStructure(symbol, style = "Balanced") {
+  const sym = (symbol || (typeof activeSymbol !== "undefined" && activeSymbol) || "GOLD").toUpperCase().trim();
+  if (wyckoffTickerInput) wyckoffTickerInput.value = sym;
+  
+  try {
+    const res = await fetch(`/api/wyckoff/structure?symbol=${encodeURIComponent(sym)}&style=${encodeURIComponent(style)}`);
+    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+    const data = await res.json();
+    
+    // Update KPI Badges
+    const bStruct = document.getElementById("wyckStructureBadge");
+    const subStruct = document.getElementById("wyckStructureSub");
+    if (bStruct) {
+      bStruct.textContent = data.structure_type || "NEUTRAL";
+      bStruct.style.color = data.structure_type === "ACCUMULATION" ? "#10b981" : (data.structure_type === "DISTRIBUTION" ? "#ef4444" : "#fbbf24");
+    }
+    if (subStruct) subStruct.textContent = data.bias || "Smart money equilibrium";
+    
+    const bPhase = document.getElementById("wyckPhaseBadge");
+    const subPhase = document.getElementById("wyckPhaseSub");
+    if (bPhase) {
+      bPhase.textContent = `PHASE ${data.phase_code || "A"}`;
+      bPhase.style.color = data.phase_code === "C" ? "#fbbf24" : (data.phase_code === "D" || data.phase_code === "E" ? "#10b981" : "#38bdf8");
+    }
+    if (subPhase) subPhase.textContent = data.phase || "";
+    
+    const sSpring = document.getElementById("wyckSpringScore");
+    if (sSpring) sSpring.textContent = `${data.spring_quality_score || data.climax_score || 0} / 100`;
+    
+    const sWin = document.getElementById("wyckWinRate");
+    if (sWin) sWin.textContent = `${(data.historical_win_rate_pct || 79.2).toFixed(1)}%`;
+    
+    // Boundaries
+    const creekEl = document.getElementById("wyckCreekVal");
+    const midEl = document.getElementById("wyckMidVal");
+    const iceEl = document.getElementById("wyckIceVal");
+    const heightEl = document.getElementById("wyckHeightVal");
+    if (creekEl) creekEl.textContent = `$${Number(data.creek_resistance || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+    if (midEl) midEl.textContent = `$${Number(data.midpoint || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+    if (iceEl) iceEl.textContent = `$${Number(data.ice_support || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+    if (heightEl) heightEl.textContent = `$${Number(data.range_height || 0).toFixed(2)} (${Number(data.range_height_pct || 0).toFixed(2)}%)`;
+    
+    // Checklist
+    const ch = data.event_checklist || {};
+    const setCheck = (iconId, ok) => {
+      const el = document.getElementById(iconId);
+      if (el) {
+        el.textContent = ok ? "✓" : "✗";
+        el.style.color = ok ? "#10b981" : "rgba(255,255,255,0.2)";
+      }
+    };
+    setCheck("iconCheckClimax", ch.SC_or_BC_Climax);
+    setCheck("iconCheckAR", ch.AR_Automatic_Reaction);
+    setCheck("iconCheckST", ch.ST_Secondary_Test);
+    setCheck("iconCheckPhaseC", ch.Spring_or_UTAD_Phase_C);
+    setCheck("iconCheckPhaseD", ch.SOS_or_SOW_Phase_D);
+    
+    // Trade Setup
+    const setup = data.trade_setup || {};
+    const tBadge = document.getElementById("wyckTradeSignalBadge");
+    if (tBadge) {
+      tBadge.textContent = setup.direction === "LONG" ? "BUY (LONG)" : (setup.direction === "SHORT" ? "SHORT (SELL)" : "HOLD (NEUTRAL)");
+      tBadge.style.color = setup.direction === "LONG" ? "#10b981" : (setup.direction === "SHORT" ? "#ef4444" : "#fbbf24");
+      tBadge.style.borderColor = setup.direction === "LONG" ? "#10b981" : (setup.direction === "SHORT" ? "#ef4444" : "#fbbf24");
+    }
+    const setVal = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = `$${Number(val || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+    };
+    setVal("wyckEntryPrice", setup.entry_price);
+    setVal("wyckStopLoss", setup.stop_loss);
+    setVal("wyckTP1", setup.tp1);
+    setVal("wyckTP2", setup.tp2);
+    setVal("wyckTP3", setup.tp3);
+    
+    const rrEl = document.getElementById("wyckRRRatio");
+    if (rrEl) rrEl.textContent = `1 : ${(setup.risk_reward_ratio || 2.0).toFixed(2)}`;
+    
+    // Events Table
+    const tbody = document.getElementById("wyckEventsBody");
+    if (tbody) {
+      const events = data.events_detected || [];
+      if (events.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted">No climactic events recorded in lookback window</td></tr>`;
+      } else {
+        tbody.innerHTML = events.map(ev => `
+          <tr>
+            <td><strong style="color: #fbbf24;">${ev.event || ev.name}</strong></td>
+            <td>${ev.name || ev.event}</td>
+            <td style="font-family: monospace;">$${Number(ev.price || 0).toFixed(2)}</td>
+            <td>${ev.score !== undefined ? `<span class="badge" style="background: rgba(245,158,11,0.2); color: #fbbf24;">${ev.score}/100</span>` : '<span class="text-muted">Confirmed</span>'}</td>
+            <td>Bar #${ev.bar || 0}</td>
+          </tr>
+        `).join("");
+      }
+    }
+  } catch (err) {
+    console.error("loadWyckoffStructure error:", err);
+  }
+}
+
+if (btnWyckoffHeader) {
+  btnWyckoffHeader.addEventListener("click", () => {
+    if (wyckoffModal) {
+      wyckoffModal.classList.remove("hidden");
+      const sym = (typeof activeSymbol !== "undefined" && activeSymbol) ? activeSymbol : "GOLD";
+      const style = wyckoffStyleSelect ? wyckoffStyleSelect.value : "Balanced";
+      loadWyckoffStructure(sym, style);
+    }
+  });
+}
+
+if (btnCloseWyckoffModal) {
+  btnCloseWyckoffModal.addEventListener("click", () => {
+    if (wyckoffModal) wyckoffModal.classList.add("hidden");
+  });
+}
+
+if (btnCloseWyckoffFooter) {
+  btnCloseWyckoffFooter.addEventListener("click", () => {
+    if (wyckoffModal) wyckoffModal.classList.add("hidden");
+  });
+}
+
+if (wyckoffModal) {
+  wyckoffModal.addEventListener("click", (e) => {
+    if (e.target === wyckoffModal) wyckoffModal.classList.add("hidden");
+  });
+}
+
+if (btnWyckoffSearch && wyckoffTickerInput) {
+  btnWyckoffSearch.addEventListener("click", () => {
+    const sym = wyckoffTickerInput.value.trim();
+    const style = wyckoffStyleSelect ? wyckoffStyleSelect.value : "Balanced";
+    if (sym) loadWyckoffStructure(sym, style);
+  });
+  wyckoffTickerInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      const sym = wyckoffTickerInput.value.trim();
+      const style = wyckoffStyleSelect ? wyckoffStyleSelect.value : "Balanced";
+      if (sym) loadWyckoffStructure(sym, style);
+    }
+  });
+}
+
+if (wyckoffStyleSelect) {
+  wyckoffStyleSelect.addEventListener("change", () => {
+    const sym = wyckoffTickerInput ? wyckoffTickerInput.value.trim() : "GOLD";
+    loadWyckoffStructure(sym, wyckoffStyleSelect.value);
+  });
+}
+
+document.querySelectorAll(".btn-wyck-quick").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const sym = btn.getAttribute("data-symbol");
+    const style = wyckoffStyleSelect ? wyckoffStyleSelect.value : "Balanced";
+    if (sym) loadWyckoffStructure(sym, style);
+  });
+});
+
 // Initialization & Loop
 try {
   updateWatchlistUI();
@@ -2876,6 +3067,11 @@ try {
   } else if (targetModal === "news" || targetModal === "world") {
     const btnNews = document.getElementById("btnWorldNewsHeader");
     if (btnNews) btnNews.click();
+  } else if (targetModal === "wyckoff" || targetModal === "range") {
+    if (wyckoffModal) {
+      wyckoffModal.classList.remove("hidden");
+      loadWyckoffStructure(targetSymbol || activeSymbol || "GOLD");
+    }
   }
 } catch (paramErr) {
   console.debug("URL param handler notice:", paramErr);

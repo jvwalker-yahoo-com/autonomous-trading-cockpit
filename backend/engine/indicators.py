@@ -468,3 +468,27 @@ class TechnicalIndicators:
             "ha_consecutive_bars": consecutive,
             "ha_bullish": is_bullish
         }
+
+    @staticmethod
+    def calc_wyckoff(
+        prices: np.ndarray,
+        volumes: Optional[np.ndarray] = None,
+        highs: Optional[np.ndarray] = None,
+        lows: Optional[np.ndarray] = None,
+        symbol: str = "ASSET",
+        style: str = "Balanced"
+    ) -> Dict[str, Any]:
+        """
+        Automated Classic Wyckoff Range Engine.
+        Evaluates Accumulation / Distribution ranges, Creek resistance, Ice support,
+        Climax events (0-100), Smart Springs (0-100), UTADs, SOS, SOW, and multi-TP setups.
+        """
+        from .wyckoff import WyckoffRangeEngine
+        return WyckoffRangeEngine.detect_wyckoff_structure(
+            prices=prices,
+            volumes=volumes,
+            highs=highs,
+            lows=lows,
+            symbol=symbol,
+            style=style
+        )

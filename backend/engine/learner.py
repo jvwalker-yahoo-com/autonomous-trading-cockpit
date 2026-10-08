@@ -11,10 +11,11 @@ from .models import TradeRecord, MistakeLogEntry, LearningStatsOutput
 class AdaptiveLearner:
     def __init__(self, initial_weights: Optional[Dict[str, float]] = None):
         self.weights: Dict[str, float] = initial_weights or {
-            "momentum_trend": 0.25,
-            "mean_reversion": 0.25,
-            "volatility_breakout": 0.25,
-            "news_sentiment": 0.25
+            "momentum_trend": 0.20,
+            "mean_reversion": 0.20,
+            "volatility_breakout": 0.20,
+            "pattern_recognition": 0.20,
+            "wyckoff_engine": 0.20
         }
         self.learning_rate: float = 0.08
         self.min_weight: float = 0.05

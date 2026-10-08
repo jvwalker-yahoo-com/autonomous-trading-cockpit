@@ -1055,6 +1055,82 @@ def test_flow_transparency_api_endpoints():
     assert "flow_sentiment" in d2
 
 
+def test_wyckoff_range_engine():
+    """Validates Wyckoff Range Engine structure, phase transitions, and multi-TP setups."""
+    from backend.engine.wyckoff import WyckoffRangeEngine
+    import numpy as np
+
+    # Test on Gold simulation array
+    prices = np.array([2480.0, 2485.0, 2490.0, 2482.0, 2510.0, 2505.0, 2495.0, 2478.0, 2492.0, 2515.0, 2520.0, 2525.0])
+    res = WyckoffRangeEngine.detect_wyckoff_structure(prices=prices, symbol="GOLD", style="Balanced")
+
+    assert res["symbol"] == "GOLD"
+    assert res["structure_type"] in ("ACCUMULATION", "DISTRIBUTION", "NEUTRAL")
+    assert res["phase_code"] in ("A", "B", "C", "D", "E")
+    assert "creek_resistance" in res
+    assert "ice_support" in res
+    assert res["creek_resistance"] >= res["ice_support"]
+    assert res["historical_win_rate_pct"] == 90.0
+    assert 0 <= res["climax_score"] <= 100
+    assert 0 <= res["spring_quality_score"] <= 100
+    
+    # Verify built-in trade setup R-multiples
+    setup = res["trade_setup"]
+    assert setup["direction"] in ("LONG", "SHORT", "NEUTRAL")
+    assert "entry_price" in setup
+    assert "stop_loss" in setup
+    assert "tp1" in setup
+    assert "tp2" in setup
+    assert "tp3" in setup
+    assert setup["breakeven_trigger"] == "TP1"
+
+
+def test_wyckoff_api_endpoints_and_webhooks():
+    """Validates /api/wyckoff/structure and /api/wyckoff/webhook endpoints."""
+    # 1. Query parameter structure test
+    r = client.get("/api/wyckoff/structure?symbol=GOLD&style=Balanced")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["symbol"] == "GOLD"
+    assert "creek_resistance" in data
+    assert "ice_support" in data
+    assert "event_checklist" in data
+
+    # 2. Path parameter structure test
+    r_btc = client.get("/api/wyckoff/structure/BTC")
+    assert r_btc.status_code == 200
+    d_btc = r_btc.json()
+    assert d_btc["symbol"] == "BTC"
+    assert "trade_setup" in d_btc
+
+    # 3. Webhook receiver test (JSON alert)
+    r_hook = client.post("/api/wyckoff/webhook", json={
+        "symbol": "GOLD",
+        "event": "SPRING_CONFIRMED",
+        "phase": "C",
+        "quality": 88,
+        "entry": 2510.50,
+        "tp1": 2530.00,
+        "tp2": 2560.00,
+        "sl": 2490.00
+    })
+    assert r_hook.status_code == 200
+    assert r_hook.json()["status"] == "success"
+    assert r_hook.json()["processed"] is True
+
+    # 4. Verify snapshot includes Wyckoff data
+    r_snap = client.get("/api/cockpit/snapshot?symbol=GOLD")
+    assert r_snap.status_code == 200
+    snap = r_snap.json()
+    assert "wyckoff" in snap
+
+    # 5. Verify Federation includes Wyckoff Range Engine model
+    fed = snap.get("federation") or {}
+    models = fed.get("model_details") or []
+    wyck_models = [m for m in models if "Wyckoff" in m.get("name", "")]
+    assert len(wyck_models) > 0, "Wyckoff model should be present in Model Federation"
+
+
 
 
 

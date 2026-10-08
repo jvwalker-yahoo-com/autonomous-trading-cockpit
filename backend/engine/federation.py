@@ -12,7 +12,9 @@ class FederationModule:
             "momentum_trend",
             "mean_reversion",
             "volatility_breakout",
-            "news_sentiment"
+            "news_sentiment",
+            "pattern_recognition",
+            "wyckoff_engine"
         ]
 
     def score_momentum_trend(self, indicators: Dict[str, float], price: float) -> Tuple[float, str, str]:
@@ -162,6 +164,69 @@ class FederationModule:
 
         return round(score, 3), sig, rat
 
+    def score_wyckoff_engine(self, indicators: Dict[str, Any], price: float) -> Tuple[float, str, str]:
+        """
+        Wyckoff Range Engine Model:
+        Evaluates Accumulation / Distribution ranges, Phase transitions (A -> E),
+        Climax events (SC/BC), Smart Springs (Phase C liquidity sweep), UTADs,
+        and SOS (Sign of Strength) / SOW (Sign of Weakness) breakouts.
+        """
+        struct = str(indicators.get("wyckoff_structure", "NEUTRAL")).upper()
+        phase = str(indicators.get("wyckoff_phase_code", "A"))
+        phase_desc = str(indicators.get("wyckoff_phase", "Phase A"))
+        spring_score = int(indicators.get("wyckoff_spring_score", 0))
+        utad_score = int(indicators.get("wyckoff_utad_score", 0))
+        climax_score = int(indicators.get("wyckoff_climax_score", 0))
+
+        score = 0.0
+        rationale_parts = []
+
+        if "ACCUMULATION" in struct:
+            if phase == "E":
+                score = 0.85
+                rationale_parts.append("Phase E: Active Markup trend confirmed outside range")
+            elif phase == "D":
+                score = 0.75
+                rationale_parts.append("Phase D: Sign of Strength (SOS) range breakout")
+            elif phase == "C" and spring_score >= 40:
+                score = round(0.50 + (spring_score / 100.0) * 0.40, 3)
+                rationale_parts.append(f"Phase C: Smart Spring liquidity sweep confirmed (Quality: {spring_score})")
+            elif phase == "B":
+                score = 0.20
+                rationale_parts.append("Phase B: Building the cause / range absorption")
+            elif climax_score >= 50:
+                score = 0.35
+                rationale_parts.append(f"Selling Climax (SC) effort detected (Score: {climax_score})")
+        elif "DISTRIBUTION" in struct:
+            if phase == "E":
+                score = -0.85
+                rationale_parts.append("Phase E: Active Markdown trend confirmed outside range")
+            elif phase == "D":
+                score = -0.75
+                rationale_parts.append("Phase D: Sign of Weakness (SOW) range breakdown")
+            elif phase == "C" and utad_score >= 40:
+                score = -round(0.50 + (utad_score / 100.0) * 0.40, 3)
+                rationale_parts.append(f"Phase C: UTAD Upthrust distribution test confirmed (Quality: {utad_score})")
+            elif phase == "B":
+                score = -0.20
+                rationale_parts.append("Phase B: Range distribution oscillation")
+            elif climax_score >= 50:
+                score = -0.35
+                rationale_parts.append(f"Buying Climax (BC) effort detected (Score: {climax_score})")
+
+        score = max(-1.0, min(1.0, score))
+        if score >= 0.20:
+            sig = "BUY"
+            rat = "; ".join(rationale_parts) if rationale_parts else f"Bullish Wyckoff structure ({phase_desc})"
+        elif score <= -0.20:
+            sig = "SHORT"
+            rat = "; ".join(rationale_parts) if rationale_parts else f"Bearish Wyckoff structure ({phase_desc})"
+        else:
+            sig = "NEUTRAL"
+            rat = f"Wyckoff structure in equilibrium ({phase_desc})"
+
+        return round(score, 3), sig, rat
+
     def model_federation(
         self,
         indicators: Dict[str, Any],
@@ -172,90 +237,99 @@ class FederationModule:
     ) -> FederationOutput:
         """
         Executes multi-model scoring, applies regime-aware dynamically calibrated weights,
-        and determines consensus winner.
+        and determines consensus winner across 6 strategy models.
         """
         s_mom, sig_mom, rat_mom = self.score_momentum_trend(indicators, price)
         s_mr, sig_mr, rat_mr = self.score_mean_reversion(indicators, price)
         s_bo, sig_bo, rat_bo = self.score_volatility_breakout(indicators, price)
         s_sent, sig_sent, rat_sent = self.score_news_sentiment(sentiment_val)
         s_pat, sig_pat, rat_pat = self.score_pattern_recognition(indicators, price)
+        s_wyck, sig_wyck, rat_wyck = self.score_wyckoff_engine(indicators, price)
 
         strat_names = [
             "momentum_trend",
             "mean_reversion",
             "volatility_breakout",
-            "news_sentiment",
-            "pattern_recognition"
+            "pattern_recognition",
+            "wyckoff_engine",
+            "news_sentiment"
         ]
 
         scores_map = {
             "momentum_trend": s_mom,
             "mean_reversion": s_mr,
             "volatility_breakout": s_bo,
-            "news_sentiment": s_sent,
-            "pattern_recognition": s_pat
+            "pattern_recognition": s_pat,
+            "wyckoff_engine": s_wyck,
+            "news_sentiment": s_sent
         }
 
         # JEV Regime-Aware Strategy Calibration (6 regimes)
         if trend in ("BULL_TREND", "BEAR_TREND"):
-            # Strong directional trend: momentum dominates
+            # Strong directional trend: momentum dominates, Wyckoff markup/markdown confirms
             regime_priors = {
-                "momentum_trend": 0.40,
-                "pattern_recognition": 0.25,
-                "volatility_breakout": 0.18,
-                "news_sentiment": 0.10,
-                "mean_reversion": 0.07
-            }
-        elif trend == "MEAN_REVERSION":
-            # RSI extremes without trend: mean reversion dominates
-            regime_priors = {
-                "mean_reversion": 0.45,
-                "pattern_recognition": 0.25,
+                "momentum_trend": 0.35,
+                "wyckoff_engine": 0.22,
+                "pattern_recognition": 0.18,
                 "volatility_breakout": 0.12,
-                "news_sentiment": 0.10,
-                "momentum_trend": 0.08
-            }
-        elif trend == "VOL_EXPANSION":
-            # Expanding volatility: breakouts and patterns dominate
-            regime_priors = {
-                "volatility_breakout": 0.40,
-                "pattern_recognition": 0.30,
-                "momentum_trend": 0.15,
-                "news_sentiment": 0.10,
+                "news_sentiment": 0.08,
                 "mean_reversion": 0.05
             }
-        elif trend == "VOL_CONTRACTION":
-            # Tight range: pattern breakout setup, reduce momentum
+        elif trend == "MEAN_REVERSION":
+            # RSI extremes and range oscillations: mean reversion and Wyckoff range boundaries dominate
             regime_priors = {
-                "pattern_recognition": 0.35,
-                "mean_reversion": 0.30,
-                "volatility_breakout": 0.20,
-                "news_sentiment": 0.10,
+                "mean_reversion": 0.35,
+                "wyckoff_engine": 0.25,
+                "pattern_recognition": 0.18,
+                "volatility_breakout": 0.10,
+                "news_sentiment": 0.07,
                 "momentum_trend": 0.05
             }
-        elif trend == "CRISIS":
-            # Crisis: news sentiment and anomaly detection most important; reduce all else
+        elif trend == "VOL_EXPANSION":
+            # Expanding volatility: breakouts, patterns, and Wyckoff Phase D/E dominate
             regime_priors = {
-                "news_sentiment": 0.45,
-                "mean_reversion": 0.25,
-                "pattern_recognition": 0.15,
-                "volatility_breakout": 0.10,
+                "volatility_breakout": 0.32,
+                "wyckoff_engine": 0.25,
+                "pattern_recognition": 0.22,
+                "momentum_trend": 0.11,
+                "news_sentiment": 0.06,
+                "mean_reversion": 0.04
+            }
+        elif trend == "VOL_CONTRACTION":
+            # Tight range: Wyckoff Phase C Spring/UTAD setup & Pattern breakout
+            regime_priors = {
+                "wyckoff_engine": 0.32,
+                "pattern_recognition": 0.25,
+                "mean_reversion": 0.20,
+                "volatility_breakout": 0.13,
+                "news_sentiment": 0.06,
+                "momentum_trend": 0.04
+            }
+        elif trend == "CRISIS":
+            # Crisis: news sentiment and anomaly detection most important
+            regime_priors = {
+                "news_sentiment": 0.40,
+                "mean_reversion": 0.20,
+                "wyckoff_engine": 0.15,
+                "pattern_recognition": 0.12,
+                "volatility_breakout": 0.08,
                 "momentum_trend": 0.05
             }
         else:  # CHOPPY
             regime_priors = {
-                "mean_reversion": 0.35,
-                "pattern_recognition": 0.28,
-                "volatility_breakout": 0.15,
-                "news_sentiment": 0.12,
-                "momentum_trend": 0.10
+                "wyckoff_engine": 0.26,
+                "mean_reversion": 0.26,
+                "pattern_recognition": 0.20,
+                "volatility_breakout": 0.12,
+                "news_sentiment": 0.09,
+                "momentum_trend": 0.07
             }
 
         # Blend regime prior with adaptive learner weights
         blended_weights = {}
         for k in strat_names:
-            learner_w = current_weights.get(k, 0.20)
-            prior_w = regime_priors.get(k, 0.20)
+            learner_w = current_weights.get(k, 0.17)
+            prior_w = regime_priors.get(k, 0.17)
             blended_weights[k] = prior_w * 0.7 + learner_w * 0.3
 
         total_w = sum(blended_weights.values())
@@ -277,6 +351,7 @@ class FederationModule:
             ModelSignal(name="Mean Reversion (RSI/BB)", signal=sig_mr, score=s_mr, weight=round(normalized_weights["mean_reversion"], 3), rationale=rat_mr),
             ModelSignal(name="Volatility Breakout", signal=sig_bo, score=s_bo, weight=round(normalized_weights["volatility_breakout"], 3), rationale=rat_bo),
             ModelSignal(name="Pattern Recognition (Breakout/W-M)", signal=sig_pat, score=s_pat, weight=round(normalized_weights["pattern_recognition"], 3), rationale=rat_pat),
+            ModelSignal(name="Wyckoff Range Engine (Phase/Spring)", signal=sig_wyck, score=s_wyck, weight=round(normalized_weights["wyckoff_engine"], 3), rationale=rat_wyck),
             ModelSignal(name="News Sentiment (Finnhub)", signal=sig_sent, score=s_sent, weight=round(normalized_weights["news_sentiment"], 3), rationale=rat_sent),
         ]
 
