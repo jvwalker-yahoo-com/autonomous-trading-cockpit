@@ -17,7 +17,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 class SystemConfig(BaseModel):
     # API credentials & Multi-Provider Data Feeds
-    finnhub_api_key: str = os.getenv("FINNHUB_API_KEY", "da02ec1r01qgk75qq5v0da02ec1r01qgk75qq5vg")
+    finnhub_api_key: str = os.getenv("FINNHUB_API_KEY", "db402p9r01qucqgihnrgdb402p9r01qucqgihns0")
     twelve_data_api_key: str = os.getenv("TWELVE_DATA_API_KEY", "fa5122e69e6346359095fec0581fb72d")
     fmp_api_key: str = os.getenv("FMP_API_KEY", "i2dkmxpEVNF4X5pln0XwwNk0wfwtf9oN")
     alpha_vantage_api_key: str = os.getenv("ALPHA_VANTAGE_API_KEY", "P3I4HA7S9JQHFL8X")
