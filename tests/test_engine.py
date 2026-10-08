@@ -1017,6 +1017,44 @@ def test_world_news_api_endpoint():
     assert isinstance(data["articles"], list)
 
 
+def test_flow_transparency_engine():
+    """Validates 3-way market transparency engine (OpenInsider + Quiver Quant + Finnhub 13F)."""
+    from backend.server import smart_money
+    flow = smart_money.get_unified_flow_transparency("AAPL", current_price=175.50)
+    assert flow["symbol"] == "AAPL"
+    assert flow["price"] == 175.50
+    assert -1.0 <= flow["flow_conviction"] <= 1.0
+    assert flow["flow_sentiment"] in ("BULLISH", "BEARISH", "NEUTRAL")
+    assert "congress" in flow
+    assert "institutional" in flow
+    assert "insiders" in flow
+    assert "summary" in flow
+    assert isinstance(flow["insiders"], list)
+    assert isinstance(flow["congress"], list)
+    assert isinstance(flow["institutional"], list)
+
+    conv = smart_money.get_flow_conviction("AAPL")
+    assert -1.0 <= conv <= 1.0
+
+
+def test_flow_transparency_api_endpoints():
+    """Validates GET /api/flow/transparency and GET /api/flow/transparency/{symbol} endpoints."""
+    # Test query param
+    r1 = client.get("/api/flow/transparency?symbol=NVDA")
+    assert r1.status_code == 200
+    d1 = r1.json()
+    assert d1["symbol"] == "NVDA"
+    assert "flow_conviction" in d1
+    assert "summary" in d1
+
+    # Test path param
+    r2 = client.get("/api/flow/transparency/MSFT")
+    assert r2.status_code == 200
+    d2 = r2.json()
+    assert d2["symbol"] == "MSFT"
+    assert "flow_sentiment" in d2
+
+
 
 
 

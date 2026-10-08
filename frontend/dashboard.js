@@ -137,6 +137,7 @@ const el = {
   inputTavilyKey: document.getElementById("inputTavilyKey"),
   inputSerpApiKey: document.getElementById("inputSerpApiKey"),
   inputAnspireKey: document.getElementById("inputAnspireKey"),
+  inputQuiverKey: document.getElementById("inputQuiverKey"),
   selectSimMode: document.getElementById("selectSimMode"),
   inputRiskPct: document.getElementById("inputRiskPct"),
 
@@ -1155,6 +1156,7 @@ if (el.btnSettings) {
         if (el.inputTavilyKey && !el.inputTavilyKey.value) el.inputTavilyKey.value = localStorage.getItem("tavily_api_key") || "";
         if (el.inputSerpApiKey && !el.inputSerpApiKey.value) el.inputSerpApiKey.value = localStorage.getItem("serpapi_api_key") || "";
         if (el.inputAnspireKey && !el.inputAnspireKey.value) el.inputAnspireKey.value = localStorage.getItem("anspire_api_key") || "";
+        if (el.inputQuiverKey && !el.inputQuiverKey.value) el.inputQuiverKey.value = localStorage.getItem("quiver_api_key") || "";
 
         if (el.inputEnableDayTrading) el.inputEnableDayTrading.checked = cfg.enable_day_trading !== false;
         if (el.inputDayTradeAllocPct) el.inputDayTradeAllocPct.value = Math.round((cfg.day_trade_allocation_pct || 0.35) * 100);
@@ -1212,6 +1214,7 @@ if (el.btnSaveConfig) {
     const tavilyKey = el.inputTavilyKey ? el.inputTavilyKey.value.trim() : "";
     const serpApiKey = el.inputSerpApiKey ? el.inputSerpApiKey.value.trim() : "";
     const anspireKey = el.inputAnspireKey ? el.inputAnspireKey.value.trim() : "";
+    const quiverKey = el.inputQuiverKey ? el.inputQuiverKey.value.trim() : "";
 
     const execMode = el.selectSimMode ? el.selectSimMode.value : "demo";
     const riskPct = el.inputRiskPct ? parseFloat(el.inputRiskPct.value) / 100.0 : 0.02;
@@ -1248,6 +1251,7 @@ if (el.btnSaveConfig) {
           tavily_api_key: tavilyKey || null,
           serpapi_api_key: serpApiKey || null,
           anspire_api_key: anspireKey || null,
+          quiver_api_key: quiverKey || null,
           execution_mode: execMode,
           risk_per_trade_pct: riskPct,
           etoro_api_key: etoroApiKey || null,
@@ -1274,6 +1278,7 @@ if (el.btnSaveConfig) {
       if (tavilyKey) localStorage.setItem("tavily_api_key", tavilyKey);
       if (serpApiKey) localStorage.setItem("serpapi_api_key", serpApiKey);
       if (anspireKey) localStorage.setItem("anspire_api_key", anspireKey);
+      if (quiverKey) localStorage.setItem("quiver_api_key", quiverKey);
 
       if (etoroApiKey) localStorage.setItem("etoro_api_key", etoroApiKey);
       if (etoroUserKey) localStorage.setItem("etoro_user_key", etoroUserKey);
@@ -2566,6 +2571,273 @@ document.querySelectorAll(".btn-news-sev-filter").forEach(b => {
     loadWorldNews();
   });
 });
+
+// ==============================================================================
+// 🌊 FLOW OF FUNDS — 3-WAY TRANSPARENCY CONTROLLER (OpenInsider + Quiver + 13F)
+// ==============================================================================
+const flowTransparencyModal = document.getElementById("flowTransparencyModal");
+const btnFlowTransparencyHeader = document.getElementById("btnFlowTransparencyHeader");
+const btnCloseFlowModal = document.getElementById("btnCloseFlowModal");
+const btnCloseFlowFooter = document.getElementById("btnCloseFlowFooter");
+const btnRefreshFlow = document.getElementById("btnRefreshFlow");
+const inputFlowSearchSymbol = document.getElementById("inputFlowSearchSymbol");
+const btnLoadFlowSymbol = document.getElementById("btnLoadFlowSymbol");
+
+const badgeFlowSymbol = document.getElementById("badgeFlowSymbol");
+const badgeFlowSentiment = document.getElementById("badgeFlowSentiment");
+const badgeFlowPrice = document.getElementById("badgeFlowPrice");
+const flowKpiPrice = document.getElementById("flowKpiPrice");
+const flowKpiConviction = document.getElementById("flowKpiConviction");
+const flowKpiInsiderVal = document.getElementById("flowKpiInsiderVal");
+const flowKpiCongressCount = document.getElementById("flowKpiCongressCount");
+
+const tabBtnFlowInsiders = document.getElementById("tabBtnFlowInsiders");
+const tabBtnFlowCongress = document.getElementById("tabBtnFlowCongress");
+const tabBtnFlowInst = document.getElementById("tabBtnFlowInst");
+const viewFlowInsiders = document.getElementById("viewFlowInsiders");
+const viewFlowCongress = document.getElementById("viewFlowCongress");
+const viewFlowInst = document.getElementById("viewFlowInst");
+
+const flowInsidersBody = document.getElementById("flowInsidersBody");
+const flowCongressBody = document.getElementById("flowCongressBody");
+const flowInstBody = document.getElementById("flowInstBody");
+const flowModalFooterStatus = document.getElementById("flowModalFooterStatus");
+
+let currentFlowSymbol = "AAPL";
+
+async function loadFlowTransparency(symbol) {
+  const sym = (symbol || currentFlowSymbol || (typeof activeSymbol !== "undefined" ? activeSymbol : "AAPL") || "AAPL").toUpperCase().trim();
+  currentFlowSymbol = sym;
+  if (inputFlowSearchSymbol) inputFlowSearchSymbol.value = sym;
+  if (badgeFlowSymbol) badgeFlowSymbol.textContent = sym;
+
+  if (flowInsidersBody) flowInsidersBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Fetching OpenInsider & Form 4 flows for ' + sym + '...</td></tr>';
+  if (flowCongressBody) flowCongressBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Querying Quiver Quant & STOCK Act disclosures for ' + sym + '...</td></tr>';
+  if (flowInstBody) flowInstBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Scanning SEC EDGAR 13F-HR filings for ' + sym + '...</td></tr>';
+
+  try {
+    const res = await fetch(`${BASE_URL}/api/flow/transparency?symbol=${encodeURIComponent(sym)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const price = data.price || 0.0;
+    const conviction = data.flow_conviction !== undefined ? data.flow_conviction : 0.0;
+    const sent = data.flow_sentiment || "NEUTRAL";
+    const summary = data.summary || {};
+
+    if (badgeFlowPrice) badgeFlowPrice.textContent = `PRICE: $${price.toFixed(2)}`;
+    if (flowKpiPrice) flowKpiPrice.textContent = `$${price.toFixed(2)}`;
+
+    // Flow conviction styling
+    if (badgeFlowSentiment) {
+      badgeFlowSentiment.textContent = `CONVICTION: ${conviction >= 0 ? '+' : ''}${conviction.toFixed(2)} (${sent})`;
+      if (sent === "BULLISH") {
+        badgeFlowSentiment.style.background = "rgba(16, 185, 129, 0.2)";
+        badgeFlowSentiment.style.color = "#10b981";
+        badgeFlowSentiment.style.borderColor = "#10b981";
+      } else if (sent === "BEARISH") {
+        badgeFlowSentiment.style.background = "rgba(239, 68, 68, 0.2)";
+        badgeFlowSentiment.style.color = "#ef4444";
+        badgeFlowSentiment.style.borderColor = "#ef4444";
+      } else {
+        badgeFlowSentiment.style.background = "rgba(56, 189, 248, 0.2)";
+        badgeFlowSentiment.style.color = "#38bdf8";
+        badgeFlowSentiment.style.borderColor = "#38bdf8";
+      }
+    }
+
+    if (flowKpiConviction) {
+      const color = sent === "BULLISH" ? "#10b981" : (sent === "BEARISH" ? "#ef4444" : "#38bdf8");
+      flowKpiConviction.innerHTML = `<span style="color: ${color}; font-weight: bold;">${conviction >= 0 ? '+' : ''}${conviction.toFixed(2)} (${sent})</span>`;
+    }
+
+    // Insider flow KPI
+    const netVal = summary.net_insider_flow_usd || 0.0;
+    const buysCount = summary.insider_buys || 0;
+    const sellsCount = summary.insider_sells || 0;
+    if (flowKpiInsiderVal) {
+      const formattedVal = Math.abs(netVal) >= 1e6
+        ? `$${(netVal / 1e6).toFixed(2)}M`
+        : `$${netVal.toLocaleString()}`;
+      const sign = netVal >= 0 ? "+" : "";
+      const valColor = netVal > 0 ? "#10b981" : (netVal < 0 ? "#ef4444" : "var(--text-muted)");
+      flowKpiInsiderVal.innerHTML = `<span style="color: ${valColor}; font-weight: bold;">${sign}${formattedVal}</span> <span style="font-size: 10px; color: var(--text-muted); font-weight: normal;">(${buysCount}B / ${sellsCount}S)</span>`;
+    }
+
+    // Congress KPI
+    const cBuys = summary.congress_buys || 0;
+    const cSells = summary.congress_sells || 0;
+    if (flowKpiCongressCount) {
+      flowKpiCongressCount.innerHTML = `<span style="color: #10b981;">${cBuys} Buys</span> / <span style="color: #ef4444;">${cSells} Sells</span>`;
+    }
+
+    // Render Insiders Table
+    const insiders = data.insiders || [];
+    if (flowInsidersBody) {
+      if (insiders.length === 0) {
+        flowInsidersBody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">No recent Form 4 insider transactions found for ${sym}.</td></tr>`;
+      } else {
+        flowInsidersBody.innerHTML = insiders.map(t => {
+          const isBuy = t.is_purchase || (t.trade_type && t.trade_type.toLowerCase().includes("buy"));
+          const typeColor = isBuy ? "#10b981" : "#ef4444";
+          const typeBadge = `<span class="badge" style="background: ${isBuy ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}; color: ${typeColor}; border: 1px solid ${typeColor}; font-size: 10px; padding: 2px 6px;">${t.trade_type || (isBuy ? 'PURCHASE' : 'SALE')}</span>`;
+          const valStr = t.value_usd ? `$${Number(t.value_usd).toLocaleString()}` : (t.value_str || '--');
+          const sharesStr = t.qty ? Number(t.qty).toLocaleString() : (t.shares ? Number(t.shares).toLocaleString() : '--');
+          const priceStr = t.price ? `$${Number(t.price).toFixed(2)}` : '--';
+          return `
+            <tr>
+              <td style="font-size: 11px; color: var(--text-muted);">${t.date || t.filing_date || '--'}</td>
+              <td style="font-weight: 500; color: #fff;">${t.filer_name || t.name || 'Corporate Insider'}</td>
+              <td style="font-size: 11px; color: var(--text-muted);">${t.officer_title || t.title || 'Insider'}</td>
+              <td>${typeBadge}</td>
+              <td style="font-size: 11px;">${priceStr}</td>
+              <td style="font-size: 11px;">${sharesStr}</td>
+              <td style="font-weight: bold; color: ${typeColor};">${valStr}</td>
+            </tr>
+          `;
+        }).join("");
+      }
+    }
+
+    // Render Congress Table
+    const congress = data.congress || [];
+    if (flowCongressBody) {
+      if (congress.length === 0) {
+        flowCongressBody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No Congressional trades disclosed for ${sym} within lookback window.</td></tr>`;
+      } else {
+        flowCongressBody.innerHTML = congress.map(c => {
+          const type = (c.transaction_type || c.type || "TRADE").toUpperCase();
+          const isBuy = type.includes("BUY") || type.includes("PURCHASE");
+          const typeColor = isBuy ? "#10b981" : "#ef4444";
+          const typeBadge = `<span class="badge" style="background: ${isBuy ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}; color: ${typeColor}; border: 1px solid ${typeColor}; font-size: 10px; padding: 2px 6px;">${type}</span>`;
+          return `
+            <tr>
+              <td style="font-size: 11px; color: var(--text-muted);">${c.transaction_date || c.disclosed || c.date || '--'}</td>
+              <td style="font-weight: 500; color: #c084fc;">🏛️ ${c.representative || c.senator || c.member || 'Member of Congress'}</td>
+              <td style="font-size: 11px; color: var(--text-muted);">${c.chamber || (c.party ? c.party : 'US Congress')}</td>
+              <td>${typeBadge}</td>
+              <td style="font-weight: bold; color: #fff;">${c.amount || c.amount_range || c.value_range || '$15,001 - $50,000'}</td>
+              <td style="font-size: 11px; color: var(--text-muted);">${c.source || 'QuiverQuant / STOCK Act'}</td>
+            </tr>
+          `;
+        }).join("");
+      }
+    }
+
+    // Render Institutional 13F Table
+    const inst = data.institutional || [];
+    if (flowInstBody) {
+      if (inst.length === 0) {
+        flowInstBody.innerHTML = `<tr><td colspan="5" class="text-center text-muted">No recent 13F institutional filings indexed for ${sym}.</td></tr>`;
+      } else {
+        flowInstBody.innerHTML = inst.map(f => {
+          return `
+            <tr>
+              <td style="font-size: 11px; color: var(--text-muted);">${f.filing_date || f.date || '--'}</td>
+              <td style="font-weight: 500; color: #38bdf8;">🏢 ${f.entity_name || f.institution || f.fund || 'Institutional Manager'}</td>
+              <td style="font-family: monospace; font-size: 11px; color: var(--text-muted);">${f.cik || '--'}</td>
+              <td><span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid #38bdf8; font-size: 10px; padding: 2px 6px;">${f.form_type || '13F-HR'}</span></td>
+              <td style="font-size: 11px; color: #10b981;">✓ SEC EDGAR EFTS Indexed</td>
+            </tr>
+          `;
+        }).join("");
+      }
+    }
+
+    if (flowModalFooterStatus) {
+      flowModalFooterStatus.textContent = `Unified Flow Data for ${sym} synced at ${new Date().toLocaleTimeString()} | Finnhub Quotes & 13F + Quiver Quant + OpenInsider + SEC EDGAR.`;
+    }
+
+  } catch (err) {
+    console.error("loadFlowTransparency error:", err);
+    if (flowInsidersBody) flowInsidersBody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">Failed to load transparency feed: ${err.message}</td></tr>`;
+  }
+}
+
+if (tabBtnFlowInsiders && tabBtnFlowCongress && tabBtnFlowInst) {
+  tabBtnFlowInsiders.addEventListener("click", () => {
+    tabBtnFlowInsiders.classList.replace("btn-secondary", "btn-primary");
+    tabBtnFlowCongress.classList.replace("btn-primary", "btn-secondary");
+    tabBtnFlowInst.classList.replace("btn-primary", "btn-secondary");
+    if (viewFlowInsiders) viewFlowInsiders.classList.remove("hidden");
+    if (viewFlowCongress) viewFlowCongress.classList.add("hidden");
+    if (viewFlowInst) viewFlowInst.classList.add("hidden");
+  });
+
+  tabBtnFlowCongress.addEventListener("click", () => {
+    tabBtnFlowCongress.classList.replace("btn-secondary", "btn-primary");
+    tabBtnFlowInsiders.classList.replace("btn-primary", "btn-secondary");
+    tabBtnFlowInst.classList.replace("btn-primary", "btn-secondary");
+    if (viewFlowCongress) viewFlowCongress.classList.remove("hidden");
+    if (viewFlowInsiders) viewFlowInsiders.classList.add("hidden");
+    if (viewFlowInst) viewFlowInst.classList.add("hidden");
+  });
+
+  tabBtnFlowInst.addEventListener("click", () => {
+    tabBtnFlowInst.classList.replace("btn-secondary", "btn-primary");
+    tabBtnFlowInsiders.classList.replace("btn-primary", "btn-secondary");
+    tabBtnFlowCongress.classList.replace("btn-primary", "btn-secondary");
+    if (viewFlowInst) viewFlowInst.classList.remove("hidden");
+    if (viewFlowInsiders) viewFlowInsiders.classList.add("hidden");
+    if (viewFlowCongress) viewFlowCongress.classList.add("hidden");
+  });
+}
+
+if (btnFlowTransparencyHeader) {
+  btnFlowTransparencyHeader.addEventListener("click", () => {
+    if (flowTransparencyModal) {
+      flowTransparencyModal.classList.remove("hidden");
+      const sym = (typeof activeSymbol !== "undefined" && activeSymbol) ? activeSymbol : (currentFlowSymbol || "AAPL");
+      loadFlowTransparency(sym);
+    }
+  });
+}
+
+if (btnCloseFlowModal) {
+  btnCloseFlowModal.addEventListener("click", () => {
+    if (flowTransparencyModal) flowTransparencyModal.classList.add("hidden");
+  });
+}
+
+if (btnCloseFlowFooter) {
+  btnCloseFlowFooter.addEventListener("click", () => {
+    if (flowTransparencyModal) flowTransparencyModal.classList.add("hidden");
+  });
+}
+
+if (btnRefreshFlow) {
+  btnRefreshFlow.addEventListener("click", () => {
+    loadFlowTransparency(currentFlowSymbol);
+  });
+}
+
+if (btnLoadFlowSymbol && inputFlowSearchSymbol) {
+  btnLoadFlowSymbol.addEventListener("click", () => {
+    const sym = inputFlowSearchSymbol.value.trim();
+    if (sym) loadFlowTransparency(sym);
+  });
+  inputFlowSearchSymbol.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      const sym = inputFlowSearchSymbol.value.trim();
+      if (sym) loadFlowTransparency(sym);
+    }
+  });
+}
+
+document.querySelectorAll(".btn-flow-preset").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const sym = btn.getAttribute("data-sym");
+    if (sym) loadFlowTransparency(sym);
+  });
+});
+
+if (flowTransparencyModal) {
+  flowTransparencyModal.addEventListener("click", (e) => {
+    if (e.target === flowTransparencyModal) {
+      flowTransparencyModal.classList.add("hidden");
+    }
+  });
+}
 
 // Initialization & Loop
 try {

@@ -87,6 +87,7 @@
         <button id="btnScreenerModal" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981, #059669);" title="Market Screener & Universal Stock Universe">🔍 SCREENER / STOCKS</button>
         <button id="btnSmartMoneyHeader" class="btn btn-outline" style="border-color: #a855f7; color: #c084fc; font-weight: bold; font-size: 11px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px;" title="View Congressional STOCK Act Trades & Smart Money Opportunities">🏛️ CONGRESS TRADES</button>
         <button id="btnWorldNewsHeader" class="btn btn-outline" style="border-color: #38bdf8; color: #38bdf8; font-weight: bold; font-size: 11px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px;" title="Global Breaking Market News & Worldwide Macro Risk Radar">🌍 WORLD NEWS</button>
+        <button id="btnFlowTransparencyHeader" class="btn btn-outline" style="border-color: #06b6d4; color: #06b6d4; font-weight: bold; font-size: 11px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px;" title="View 3-Way Market Transparency Feed (OpenInsider + Quiver Quant + Finnhub 13F)">🌊 FLOW TRANSPARENCY</button>
         <button id="btnDailyReport" class="btn btn-primary" title="View Full Day Performance & Learning Audit">📊 DAILY REPORT</button>
         <button id="btnBacktestModal" class="btn btn-secondary" title="Quantitative Backtester & Parameter Optimizer">🧪 BACKTEST</button>
         <button id="btnHeaderTestEtoro" class="btn btn-outline" style="border-color: #06b6d4; color: #06b6d4; font-weight: bold; font-size: 11px;" title="Test eToro API Connection (Read-Only)">🧪 TEST ETORO</button>
@@ -676,6 +677,10 @@
                 <label for="inputAnspireKey" style="font-size: 10px;">Anspire API Key:</label>
                 <input type="password" id="inputAnspireKey" class="cyber-input" placeholder="PrR9nw3YnOMTdmjk3uvA0yLOvoBuEAoD">
               </div>
+              <div class="form-group" style="margin-bottom: 8px;">
+                <label for="inputQuiverKey" style="font-size: 10px;">Quiver Quant Token (Congressional STOCK Act Feed):</label>
+                <input type="password" id="inputQuiverKey" class="cyber-input" placeholder="Optional Quiver Quant Token (Default: Open Free Access)">
+              </div>
               <div class="form-group">
                 <label for="inputRiskPct">Risk Per Trade (% of Capital):</label>
                 <input type="number" id="inputRiskPct" class="cyber-input" step="0.5" min="0.5" max="10" value="2.0">
@@ -1057,6 +1062,151 @@
           Ingesting live streams: Finnhub General Wire, SerpApi Google News, Tavily AI Search & Global RSS Feeds (BBC, Yahoo, CNBC).
         </span>
         <button id="btnCloseWorldNewsFooter" class="btn btn-secondary">CLOSE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3-WAY MARKET FLOW TRANSPARENCY MODAL (OPENINSIDER + QUIVER QUANT + FINNHUB 13F) -->
+  <div id="flowTransparencyModal" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width: 1150px; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding: 14px 18px;">
+        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+          <h3 style="margin: 0; font-size: 15px; font-weight: bold; color: #06b6d4; display: flex; align-items: center; gap: 8px;">
+            <span>🌊</span> FLOW OF FUNDS — 3-WAY MARKET TRANSPARENCY STACK
+          </h3>
+          <span id="badgeFlowSymbol" class="badge" style="background: rgba(6, 182, 212, 0.2); color: #06b6d4; border: 1px solid #06b6d4; font-size: 12px; font-weight: bold; padding: 3px 9px; border-radius: 4px;">
+            AAPL
+          </span>
+          <span id="badgeFlowSentiment" class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; font-size: 11px; padding: 3px 8px; border-radius: 4px;">
+            CONVICTION: +0.00 (NEUTRAL)
+          </span>
+          <span id="badgeFlowPrice" class="badge" style="background: rgba(255, 255, 255, 0.08); color: #fff; font-size: 11px; padding: 3px 8px; border-radius: 4px;">
+            PRICE: $0.00
+          </span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button id="btnRefreshFlow" class="btn btn-outline" style="border-color: #06b6d4; color: #06b6d4; font-size: 11px; padding: 4px 10px;">🔄 REFRESH FEED</button>
+          <button id="btnCloseFlowModal" class="btn-close">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body" style="overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px;">
+        
+        <!-- Ticker Selector Bar & Quick Presets -->
+        <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <label for="inputFlowSearchSymbol" style="font-size: 11px; color: var(--text-muted); font-weight: bold;">TICKER:</label>
+            <input type="text" id="inputFlowSearchSymbol" class="cyber-input" placeholder="e.g. AAPL, NVDA, TSLA..." style="width: 140px; text-transform: uppercase; font-size: 12px; font-weight: bold;">
+            <button id="btnLoadFlowSymbol" class="btn btn-primary" style="font-size: 11px; padding: 5px 12px; background: linear-gradient(135deg, #06b6d4, #0284c7);">⚡ INSPECT FLOW</button>
+          </div>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+            <span style="font-size: 10px; color: var(--text-muted); margin-right: 4px;">QUICK AUDIT:</span>
+            <button class="btn btn-secondary btn-flow-preset" data-sym="AAPL" style="font-size: 10px; padding: 3px 8px;">AAPL</button>
+            <button class="btn btn-secondary btn-flow-preset" data-sym="NVDA" style="font-size: 10px; padding: 3px 8px;">NVDA</button>
+            <button class="btn btn-secondary btn-flow-preset" data-sym="TSLA" style="font-size: 10px; padding: 3px 8px;">TSLA</button>
+            <button class="btn btn-secondary btn-flow-preset" data-sym="MSFT" style="font-size: 10px; padding: 3px 8px;">MSFT</button>
+            <button class="btn btn-secondary btn-flow-preset" data-sym="AMZN" style="font-size: 10px; padding: 3px 8px;">AMZN</button>
+            <button class="btn btn-secondary btn-flow-preset" data-sym="PLTR" style="font-size: 10px; padding: 3px 8px;">PLTR</button>
+            <button class="btn btn-secondary btn-flow-preset" data-sym="SPY" style="font-size: 10px; padding: 3px 8px;">SPY</button>
+            <button class="btn btn-secondary btn-flow-preset" data-sym="QQQ" style="font-size: 10px; padding: 3px 8px;">QQQ</button>
+          </div>
+        </div>
+
+        <!-- 4 Summary KPI Cards -->
+        <div class="portfolio-stats-bar" style="margin-bottom: 0;">
+          <div class="stat-card">
+            <span class="stat-title">FINNHUB REAL-TIME QUOTE</span>
+            <span class="stat-number stat-highlight" id="flowKpiPrice">$0.00</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-title">FLOW OF FUNDS CONVICTION</span>
+            <span class="stat-number" id="flowKpiConviction">0.00 (NEUTRAL)</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-title">OPENINSIDER FORM 4 NET FLOW</span>
+            <span class="stat-number" id="flowKpiInsiderVal">$0.00</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-title">CONGRESS TRADES (STOCK ACT)</span>
+            <span class="stat-number stat-highlight" id="flowKpiCongressCount">0 Buys / 0 Sells</span>
+          </div>
+        </div>
+
+        <!-- Feed Sub-Tabs -->
+        <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+          <button id="tabBtnFlowInsiders" class="btn btn-primary" style="font-size: 11px;">💼 1. OPENINSIDER & FORM 4 TRADES</button>
+          <button id="tabBtnFlowCongress" class="btn btn-secondary" style="font-size: 11px;">🏛️ 2. QUIVER QUANT & CONGRESS DISCLOSURES</button>
+          <button id="tabBtnFlowInst" class="btn btn-secondary" style="font-size: 11px;">🏢 3. SEC EDGAR & 13F INSTITUTIONAL FILINGS</button>
+        </div>
+
+        <!-- VIEW 1: OPENINSIDER FORM 4 TRANSACTIONS -->
+        <div id="viewFlowInsiders">
+          <div class="table-responsive" style="max-height: 340px; overflow-y: auto;">
+            <table class="cyber-table">
+              <thead>
+                <tr>
+                  <th>FILING DATE</th>
+                  <th>INSIDER / FILER</th>
+                  <th>TITLE / RELATION</th>
+                  <th>TYPE</th>
+                  <th>PRICE ($)</th>
+                  <th>SHARES (QTY)</th>
+                  <th>VALUE ($)</th>
+                </tr>
+              </thead>
+              <tbody id="flowInsidersBody">
+                <tr><td colspan="7" class="text-center text-muted">Awaiting feed query...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- VIEW 2: QUIVER QUANT CONGRESSIONAL TRADES -->
+        <div id="viewFlowCongress" class="hidden">
+          <div class="table-responsive" style="max-height: 340px; overflow-y: auto;">
+            <table class="cyber-table">
+              <thead>
+                <tr>
+                  <th>DISCLOSED DATE</th>
+                  <th>MEMBER / OFFICIAL</th>
+                  <th>CHAMBER / PARTY</th>
+                  <th>TRANSACTION</th>
+                  <th>AMOUNT ESTIMATE</th>
+                  <th>SOURCE</th>
+                </tr>
+              </thead>
+              <tbody id="flowCongressBody">
+                <tr><td colspan="6" class="text-center text-muted">Awaiting feed query...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- VIEW 3: SEC EDGAR & 13F INSTITUTIONAL FILINGS -->
+        <div id="viewFlowInst" class="hidden">
+          <div class="table-responsive" style="max-height: 340px; overflow-y: auto;">
+            <table class="cyber-table">
+              <thead>
+                <tr>
+                  <th>FILING DATE</th>
+                  <th>INSTITUTIONAL FUND / ENTITY</th>
+                  <th>CIK CODE</th>
+                  <th>FORM TYPE</th>
+                  <th>INDEX / VERIFIED</th>
+                </tr>
+              </thead>
+              <tbody id="flowInstBody">
+                <tr><td colspan="5" class="text-center text-muted">Awaiting feed query...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer" style="justify-content: space-between; border-top: 1px solid var(--border-color); padding: 10px 18px;">
+        <span id="flowModalFooterStatus" class="text-muted" style="font-size: 11px;">
+          Bloomberg-Equivalent Open Flow: OpenInsider Form 4 + Quiver Quant Congress + Finnhub 13F + SEC EDGAR EFTS.
+        </span>
+        <button id="btnCloseFlowFooter" class="btn btn-secondary">CLOSE</button>
       </div>
     </div>
   </div>

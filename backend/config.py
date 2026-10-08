@@ -24,6 +24,7 @@ class SystemConfig(BaseModel):
     tavily_api_key: str = os.getenv("TAVILY_API_KEY", "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")
     serpapi_api_key: str = os.getenv("SERPAPI_API_KEY", "572f3ee5596cb17ee970fd360dfc8a36e8b8cba99c27b88d6362db83f76b30db")
     anspire_api_key: str = os.getenv("ANSPIRE_API_KEY", "PrR9nw3YnOMTdmjk3uvA0yLOvoBuEAoD")
+    quiver_api_key: str = os.getenv("QUIVER_API_KEY", "")
 
     
     # Official eToro API Credentials

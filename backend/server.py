@@ -94,7 +94,9 @@ smart_money = SmartMoneyEngine(
     congress_invests_url=config.congress_invests_url,
     tavily_api_key=config.tavily_api_key,
     serpapi_api_key=config.serpapi_api_key,
-    anspire_api_key=config.anspire_api_key
+    anspire_api_key=config.anspire_api_key,
+    finnhub_api_key=config.finnhub_api_key,
+    quiver_api_key=config.quiver_api_key
 )
 
 
@@ -389,6 +391,7 @@ class ConfigUpdateRequest(BaseModel):
     tavily_api_key: Optional[str] = None
     serpapi_api_key: Optional[str] = None
     anspire_api_key: Optional[str] = None
+    quiver_api_key: Optional[str] = None
     active_symbol: Optional[str] = None
     simulation_mode: Optional[bool] = None
     risk_per_trade_pct: Optional[float] = None
@@ -437,16 +440,16 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     quote = data_feed.get_latest_quote(symbol)
     indicators = data_feed.get_technical_indicators(symbol)
     
-    # Blend DataFeed sentiment with NewsIntel catalyst score, SmartMoney Congressional conviction, and Worldwide Macro Sentiment
+    # Blend DataFeed sentiment with NewsIntel catalyst score, SmartMoney Flow/Congressional conviction, and Worldwide Macro Sentiment
     base_sentiment = data_feed.get_news_sentiment(symbol)
     catalyst_score = news_intel.get_catalyst_score(symbol)
-    congress_score = smart_money.get_congress_conviction(symbol)
+    flow_score = smart_money.get_flow_conviction(symbol)
     macro_state = news_intel.get_macro_risk_state()
     macro_sentiment = float(macro_state.get("macro_sentiment", 0.0))
     macro_risk = str(macro_state.get("macro_risk_level", "NORMAL"))
     
     if config.enable_smart_money:
-        sentiment = round(base_sentiment * 0.40 + catalyst_score * 0.30 + congress_score * 0.15 + macro_sentiment * 0.15, 3)
+        sentiment = round(base_sentiment * 0.40 + catalyst_score * 0.30 + flow_score * 0.15 + macro_sentiment * 0.15, 3)
     else:
         sentiment = round(base_sentiment * 0.50 + catalyst_score * 0.35 + macro_sentiment * 0.15, 3)
     
@@ -456,9 +459,9 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
         _last_catalyst_log[symbol] = now_ts
         logger.info(f"🔥 [CATALYST ALERT] {symbol}: catalyst_score={catalyst_score:+.2f} (EDGAR+RSS+Finnhub) | blended_sentiment={sentiment:+.2f}")
     
-    if abs(congress_score) >= 0.20 and (now_ts - _last_congress_log.get(symbol, 0.0) >= 600.0):
+    if abs(flow_score) >= 0.20 and (now_ts - _last_congress_log.get(symbol, 0.0) >= 600.0):
         _last_congress_log[symbol] = now_ts
-        logger.info(f"🏛️ [CONGRESS TRADE] {symbol}: conviction={congress_score:+.2f} (CongressInvests + Equibles MCP) | blended_sentiment={sentiment:+.2f}")
+        logger.info(f"🏛️ [FLOW & CONGRESS CONVICTION] {symbol}: conviction={flow_score:+.2f} (Quiver/Congress + OpenInsider + 13F) | blended_sentiment={sentiment:+.2f}")
 
     if macro_risk in ("CRITICAL", "ELEVATED") and (now_ts - _last_macro_log.get("risk", 0.0) >= 600.0):
         _last_macro_log["risk"] = now_ts
@@ -1150,6 +1153,7 @@ def get_system_config():
         "tavily_api_key_configured": bool(config.tavily_api_key and len(config.tavily_api_key) > 5),
         "serpapi_api_key_configured": bool(config.serpapi_api_key and len(config.serpapi_api_key) > 5),
         "anspire_api_key_configured": bool(config.anspire_api_key and len(config.anspire_api_key) > 5),
+        "quiver_api_key_configured": bool(config.quiver_api_key and len(config.quiver_api_key) > 5),
         "active_feed_source": data_feed.active_feed_source,
         "etoro_api_key_configured": bool(config.etoro_api_key and len(config.etoro_api_key) > 5),
         "etoro_user_key_configured": bool(config.etoro_user_key and len(config.etoro_user_key) > 5),
@@ -1205,6 +1209,9 @@ def update_system_config(req: ConfigUpdateRequest, background_tasks: BackgroundT
     if req.anspire_api_key is not None:
         config.anspire_api_key = req.anspire_api_key.strip()
         smart_money.anspire_api_key = config.anspire_api_key
+    if req.quiver_api_key is not None:
+        config.quiver_api_key = req.quiver_api_key.strip()
+        smart_money.quiver_api_key = config.quiver_api_key
 
     if req.etoro_api_key is not None:
         config.etoro_api_key = req.etoro_api_key.strip()
@@ -2072,6 +2079,37 @@ def force_smart_money_refresh(background_tasks: BackgroundTasks):
 
     background_tasks.add_task(_do_refresh)
     return {"status": "refresh_triggered", "timestamp": time.time()}
+
+
+# ==========================================
+# 3-WAY MARKET FLOW TRANSPARENCY ENDPOINTS
+# (OpenInsider + Quiver Quant + Finnhub 13F)
+# ==========================================
+
+@app.get("/api/flow/transparency", tags=["Intelligence"])
+def get_flow_transparency(symbol: str = "AAPL"):
+    """
+    Returns the unified 3-way flow transparency feed for a given symbol:
+    - Finnhub: Real-time price quote & Form 4 insider transactions
+    - QuiverQuant: Congressional trades (Senate & House)
+    - OpenInsider: Form 4 officer/director trades & institutional accumulation
+    - SEC EDGAR / Finnhub: 13F institutional holdings
+    """
+    sym = (symbol or active_symbol or "AAPL").upper().strip()
+    try:
+        quote = data_feed.get_latest_quote(sym)
+        price = float(quote.price) if quote and quote.price > 0 else 0.0
+    except Exception:
+        price = 0.0
+    return smart_money.get_unified_flow_transparency(sym, current_price=price)
+
+
+@app.get("/api/flow/transparency/{symbol}", tags=["Intelligence"])
+def get_flow_transparency_ticker(symbol: str):
+    """
+    Path parameter alias for the unified 3-way flow transparency feed.
+    """
+    return get_flow_transparency(symbol=symbol)
 
 
 # ==========================================
