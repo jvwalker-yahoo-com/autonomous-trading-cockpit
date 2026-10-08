@@ -2858,6 +2858,29 @@ try {
   console.error("fetchCockpitData error on boot:", e);
 }
 
+try {
+  const urlParams = new URLSearchParams(window.location.search);
+  const targetModal = urlParams.get("modal") || urlParams.get("view");
+  const targetSymbol = (urlParams.get("symbol") || urlParams.get("ticker") || "").toUpperCase().trim();
+  if (targetSymbol) {
+    activeSymbol = targetSymbol;
+  }
+  if (targetModal === "flow" || targetModal === "transparency") {
+    if (flowTransparencyModal) {
+      flowTransparencyModal.classList.remove("hidden");
+      loadFlowTransparency(targetSymbol || activeSymbol || "AAPL");
+    }
+  } else if (targetModal === "congress") {
+    const btnSmart = document.getElementById("btnSmartMoneyHeader");
+    if (btnSmart) btnSmart.click();
+  } else if (targetModal === "news" || targetModal === "world") {
+    const btnNews = document.getElementById("btnWorldNewsHeader");
+    if (btnNews) btnNews.click();
+  }
+} catch (paramErr) {
+  console.debug("URL param handler notice:", paramErr);
+}
+
 pollTimer = setInterval(() => {
   fetchCockpitData().catch(e => console.warn("Poll interval error:", e));
 }, 3500);

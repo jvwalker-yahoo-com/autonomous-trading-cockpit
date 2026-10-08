@@ -13,8 +13,22 @@ from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, RedirectResponse
 from pydantic import BaseModel
+
+def get_frontend_dir() -> Path:
+    candidates = [
+        Path(__file__).resolve().parent.parent / "frontend",
+        Path.cwd() / "frontend",
+        Path(__file__).resolve().parent / "frontend",
+        Path("/opt/render/project/src/frontend"),
+    ]
+    for p in candidates:
+        if (p / "index.html").exists():
+            return p
+    return candidates[0]
+
+FRONTEND_DIR = get_frontend_dir()
 
 from .config import config
 from .engine.data_feed import DataFeedManager
@@ -2087,15 +2101,19 @@ def force_smart_money_refresh(background_tasks: BackgroundTasks):
 # ==========================================
 
 @app.get("/api/flow/transparency", tags=["Intelligence"])
-def get_flow_transparency(symbol: str = "AAPL"):
+def get_flow_transparency(request: Request, symbol: str = "AAPL"):
     """
     Returns the unified 3-way flow transparency feed for a given symbol:
     - Finnhub: Real-time price quote & Form 4 insider transactions
     - QuiverQuant: Congressional trades (Senate & House)
     - OpenInsider: Form 4 officer/director trades & institutional accumulation
     - SEC EDGAR / Finnhub: 13F institutional holdings
+    If accessed directly in a browser without application/json, redirects to the Cockpit flow viewer.
     """
     sym = (symbol or active_symbol or "AAPL").upper().strip()
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept and "application/json" not in accept:
+        return RedirectResponse(url=f"/?modal=flow&symbol={sym}", status_code=307)
     try:
         quote = data_feed.get_latest_quote(sym)
         price = float(quote.price) if quote and quote.price > 0 else 0.0
@@ -2105,21 +2123,26 @@ def get_flow_transparency(symbol: str = "AAPL"):
 
 
 @app.get("/api/flow/transparency/{symbol}", tags=["Intelligence"])
-def get_flow_transparency_ticker(symbol: str):
+def get_flow_transparency_ticker(request: Request, symbol: str):
     """
     Path parameter alias for the unified 3-way flow transparency feed.
     """
-    return get_flow_transparency(symbol=symbol)
+    return get_flow_transparency(request=request, symbol=symbol)
+
+
+@app.get("/flow", include_in_schema=False)
+@app.get("/transparency", include_in_schema=False)
+def serve_flow_page(symbol: Optional[str] = None):
+    sym = (symbol or "AAPL").upper().strip()
+    return RedirectResponse(url=f"/?modal=flow&symbol={sym}", status_code=307)
 
 
 # ==========================================
 # STATIC UI FILE SERVING (For Render & Local)
 # ==========================================
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
-@app.get("/", include_in_schema=False)
 @app.get("/cockpit", include_in_schema=False)
 @app.get("/app", include_in_schema=False)
 async def serve_cockpit_ui():
