@@ -122,6 +122,7 @@ const el = {
   btnTickStep: document.getElementById("btnTickStep"),
   btnSettings: document.getElementById("btnSettings"),
   btnResetPortfolio: document.getElementById("btnResetPortfolio"),
+  btnPruneShortTerm: document.getElementById("btnPruneShortTerm"),
   btnResetCircuitBreaker: document.getElementById("btnResetCircuitBreaker"),
   btnManualBuy: document.getElementById("btnManualBuy"),
   btnManualShort: document.getElementById("btnManualShort"),
@@ -738,6 +739,29 @@ if (el.btnResetPortfolio) {
     if (confirm("Reset simulation portfolio back to initial capital and clear open positions?")) {
       await fetch(`${BASE_URL}/api/portfolio/reset`, { method: "POST" });
       await fetchCockpitData();
+    }
+  });
+}
+
+if (el.btnPruneShortTerm) {
+  el.btnPruneShortTerm.addEventListener("click", async () => {
+    if (!confirm("🧹 Operate like a Day Trader:\nPrune and liquidate positions held for >= 5-7 days (1 week) that are losing or stagnant (<1.0%), freeing capital immediately for day trading?\n\nProceed?")) {
+      return;
+    }
+    const orig = el.btnPruneShortTerm.textContent;
+    el.btnPruneShortTerm.textContent = "⏳ PRUNING...";
+    el.btnPruneShortTerm.disabled = true;
+    try {
+      const res = await fetch(`${BASE_URL}/api/portfolio/prune_short_term`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      alert(data.message || `Pruning complete. ${data.pruned_count} positions closed.`);
+      await fetchCockpitData();
+    } catch (e) {
+      alert("Prune failed: " + e.message);
+    } finally {
+      el.btnPruneShortTerm.textContent = orig;
+      el.btnPruneShortTerm.disabled = false;
     }
   });
 }

@@ -234,20 +234,20 @@ class SimulatedBroker:
         self,
         current_prices: Optional[Dict[str, float]] = None,
         exit_rationale: str = "EOD Auto-Flatten: Closing intraday day trade before market close",
-        data_feed = None
+        data_feed = None,
+        etoro_client = None,
+        is_live: bool = False
     ) -> List[TradeRecord]:
         """
         Auto-liquidates all active positions with horizon == 'day' before market close.
         Crucially:
-        - NEVER closes long-term / swing positions (horizon == 'swing').
-        - NEVER closes core manual holdings (AAPL, NVDA).
+        - Frees capital so no intraday day trade carries overnight gap or financing risk.
+        - Supports both simulation and live eToro execution.
         """
         closed_trades = []
-        # Find all day trade symbols
         day_symbols = [
             sym for sym, pos in list(self.positions.items())
             if getattr(pos, "horizon", "swing") == "day"
-            and sym not in ("AAPL", "NVDA") # Core holdings permanent safeguard
         ]
 
         for sym in day_symbols:
@@ -264,9 +264,98 @@ class SimulatedBroker:
                         price = quote.price
                 except Exception:
                     pass
+
+            if is_live and etoro_client and etoro_client.is_configured():
+                try:
+                    inst_id = etoro_client.resolve_instrument_id(sym)
+                    etoro_client.close_position(position_id=str(pos.id), mode="real", instrument_id=inst_id)
+                except Exception as ex:
+                    logger.warning(f"Live auto-flatten eToro close error for {sym}: {ex}")
+
             tr = self.close_position(sym, price, exit_rationale=exit_rationale)
             if tr:
                 closed_trades.append(tr)
+
+        if closed_trades:
+            self.save_state()
+        return closed_trades
+
+    def prune_decaying_short_term_positions(
+        self,
+        min_days_held: float = 5.0,
+        data_feed = None,
+        etoro_client = None,
+        is_live: bool = False
+    ) -> List[TradeRecord]:
+        """
+        Operates like a disciplined day trader:
+        Sells ANY open position (even at a loss) that has been held for >= min_days_held (5-7 days / 1 week)
+        and is:
+        1. At a loss (unrealized_pnl_usd < 0), OR
+        2. Stagnant dead money (unrealized_pnl_pct < 1.0%), OR
+        3. Showing weak momentum with no expectation of short-term profit.
+        Frees capital immediately to deploy into high-velocity intraday setups.
+        """
+        closed_trades = []
+        now_dt = datetime.now(timezone.utc)
+
+        for sym, pos in list(self.positions.items()):
+            days_held = 0.0
+            if pos.entry_time:
+                try:
+                    clean_time = str(pos.entry_time).replace("Z", "+00:00")
+                    if "+" not in clean_time and "-" in clean_time:
+                        entry_dt = datetime.fromisoformat(clean_time).replace(tzinfo=timezone.utc)
+                    else:
+                        entry_dt = datetime.fromisoformat(clean_time)
+                    days_held = max(0.0, (now_dt - entry_dt).total_seconds() / 86400.0)
+                except Exception:
+                    days_held = 7.0
+            
+            pnl_pct = pos.unrealized_pnl_pct
+            pnl_usd = pos.unrealized_pnl_usd
+            
+            should_prune = False
+            reason = ""
+            
+            # Condition 1: Held for >= min_days_held (5-7 days / 1 week) and is losing or flat (< 1.0%)
+            if days_held >= min_days_held:
+                if pnl_usd < 0 or pnl_pct <= 0.0:
+                    should_prune = True
+                    reason = f"1-Week Prune: Selling losing position ({pnl_pct:+.2f}%) held for {days_held:.1f} days to operate like a day trader"
+                elif pnl_pct < 1.0:
+                    should_prune = True
+                    reason = f"1-Week Prune: Selling stagnant dead money (+{pnl_pct:.2f}%) held for {days_held:.1f} days to free capital"
+            
+            # Condition 2: Day trade position with expired hold window
+            if getattr(pos, "horizon", "swing") == "day" and pos.max_hold_until:
+                if now_dt.isoformat() >= pos.max_hold_until:
+                    should_prune = True
+                    reason = f"Day Trade Prune: Intraday holding duration expired"
+
+            if should_prune:
+                cur_p = pos.current_price
+                if data_feed is not None:
+                    try:
+                        q = data_feed.get_latest_quote(sym)
+                        if q and q.price > 0:
+                            cur_p = q.price
+                    except Exception:
+                        pass
+                
+                # In live mode, dispatch close order to eToro
+                if is_live and etoro_client and etoro_client.is_configured():
+                    try:
+                        inst_id = etoro_client.resolve_instrument_id(sym)
+                        etoro_res = etoro_client.close_position(position_id=str(pos.id), mode="real", instrument_id=inst_id)
+                        logger.info(f"⚡ [eToro Live Prune Order] Closed {sym} (ID: {pos.id}) -> {etoro_res.get('success')}")
+                    except Exception as e:
+                        logger.warning(f"Error closing live position {sym} on eToro: {e}")
+
+                tr = self.close_position(sym, cur_p, exit_rationale=reason)
+                if tr:
+                    closed_trades.append(tr)
+                    logger.info(f"🧹 [1-WEEK PRUNER] Sold {sym} (PnL: ${tr.realized_pnl_usd:+.2f} / {tr.realized_pnl_pct:+.2f}%) held {days_held:.1f} days. Reason: {reason}")
 
         if closed_trades:
             self.save_state()

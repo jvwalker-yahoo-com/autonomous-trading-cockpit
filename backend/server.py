@@ -223,12 +223,19 @@ async def start_autonomous_background_worker():
     """Starts the continuous background autonomous execution loop."""
     asyncio.create_task(autonomous_background_worker_loop())
 
-# Permanent Core Anchor Assets — European Morning (UK100, GER40) + US Tech Titans ($10 min, 0 crypto, 0 PRIIPs block)
+# Permanent Core Anchor Assets — European Morning (UK100, GER40) + US Tech Titans & High-Beta Day Trading Leaders
 CORE_ANCHOR_SYMBOLS = [
     "UK100", "GER40",
-    "NVDA", "AAPL", "MSFT", "TSLA", "META", "AMZN", "GOOGL",
-    "AMD", "PLTR", "ARM", "SMCI", "COIN", "MSTR", "HOOD",
-    "SOFI", "ASTS", "RKLB", "LLY", "NFLX", "IREN"
+    "NVDA", "AAPL", "MSFT", "TSLA", "META", "AMZN", "GOOGL", "NFLX",
+    "AMD", "AVGO", "ARM", "SMCI", "QCOM", "MU", "MRVL", "ALAB", "VRT", "DELL",
+    "PLTR", "CRWD", "PANW", "NET", "DDOG", "SNOW", "MDB", "AI",
+    "COIN", "MSTR", "MARA", "RIOT", "CLSK", "CIFR", "IREN", "CORZ", "WULF",
+    "HOOD", "SOFI", "PYPL", "SQ", "UPST", "AFRM", "NU",
+    "ASTS", "RKLB", "KTOS", "BA", "LUNR",
+    "IONQ", "RGTI", "QBTS",
+    "CEG", "VST", "TLN", "CCJ", "SMR", "OKLO",
+    "SHOP", "SE", "UBER", "DASH", "CVNA", "CAVA", "CELH", "DKNG", "SPOT",
+    "LLY", "NVO", "ISRG", "VRTX"
 ]
 
 # Cryptocurrency assets permanently prohibited from trading due to excessive spread costs
@@ -249,6 +256,7 @@ async def autonomous_background_worker_loop():
     last_smart_money_refresh = 0.0
     last_nightly_sync_date = ""
     last_auth_warn = 0.0
+    last_prune_check = 0.0
 
     # Ensure core anchor assets are in watchlist on boot (strictly excluding any crypto)
     config.watchlist = [s for s in dict.fromkeys(CORE_ANCHOR_SYMBOLS + config.watchlist) if s not in CRYPTO_SYMBOLS]
@@ -351,24 +359,50 @@ async def autonomous_background_worker_loop():
 
                 if should_eod_flatten or has_expired_day_trades:
                     reason = "EOD Auto-Flatten: Approaching market close" if should_eod_flatten else "Day Trade Max Hold Duration Expired"
-                    flattened = await asyncio.to_thread(broker.auto_flatten_day_trades, None, reason, data_feed)
+                    flattened = await asyncio.to_thread(
+                        broker.auto_flatten_day_trades,
+                        None,
+                        reason,
+                        data_feed,
+                        etoro_client,
+                        (config.execution_mode == "live")
+                    )
                     if flattened:
                         logger.info(f"☀️ [EOD AUTO-FLATTEN] Liquidated {len(flattened)} intraday day trades ({[t.symbol for t in flattened]}). Long-term holdings preserved.")
 
-            # Dynamic multi-asset discovery across tradable US Equities (Crypto & structural non-tradables excluded)
+            # Autonomous Short-Term / 1-Week Position Decaying Pruning Routine:
+            # Operates like a disciplined day trader: automatically liquidates any holding held for >= 5-7 days (1 week)
+            # that is at a loss, stagnant (<1.0%), or showing weak momentum, freeing capital for intraday setups.
+            if config.enable_day_trading and (now - last_prune_check >= 30.0):
+                last_prune_check = now
+                try:
+                    pruned = await asyncio.to_thread(
+                        broker.prune_decaying_short_term_positions,
+                        5.0, # 5 market days / 1 calendar week
+                        data_feed,
+                        etoro_client,
+                        (config.execution_mode == "live")
+                    )
+                    if pruned:
+                        logger.info(f"🧹 [AUTONOMOUS 1-WEEK PRUNER] Sold {len(pruned)} stagnant/losing positions: {[t.symbol for t in pruned]}")
+                except Exception as pr_err:
+                    logger.warning(f"Autonomous 1-week pruning notice: {pr_err}")
+
+            # Dynamic multi-asset discovery across tradable US Equities & Breakout Runners (Crypto & structural non-tradables excluded)
             if config.auto_rotate_universe and (now - last_universe_scan > config.universe_scan_interval_sec):
                 last_universe_scan = now
                 try:
-                    top_screened = await asyncio.to_thread(screener.scan_universe, data_feed, "Stock", 25, True, False, smart_money)
-                    smart_buys = [c["symbol"] for c in smart_money.get_trade_candidates() if c.get("conviction_score", 0) >= 0.20 and c.get("symbol") in MASTER_STOCK_UNIVERSE]
-                    screened_syms = [s["symbol"] for s in top_screened if s.get("opportunity_score", 0) >= 50 and s["symbol"] not in CRYPTO_SYMBOLS]
-                    if smart_buys:
-                        screened_syms = list(dict.fromkeys(smart_buys + screened_syms))
-                    if screened_syms:
+                    top_screened = await asyncio.to_thread(screener.scan_universe, data_feed, "Stock", 50, True, False, smart_money)
+                    smart_buys = [c["symbol"] for c in smart_money.get_trade_candidates() if c.get("conviction_score", 0) >= 0.15 and c.get("symbol") in MASTER_STOCK_UNIVERSE]
+                    tv_breakouts = [b["symbol"] for b in screener.scan_tradingview_volume_breakouts(1.3, 5.0, 30, False) if b.get("symbol") and b["symbol"] not in CRYPTO_SYMBOLS]
+                    screened_syms = [s["symbol"] for s in top_screened if s.get("opportunity_score", 0) >= 45 and s["symbol"] not in CRYPTO_SYMBOLS]
+                    
+                    all_candidates = list(dict.fromkeys(smart_buys + tv_breakouts + screened_syms))
+                    if all_candidates:
                         clean_watchlist = [s for s in config.watchlist if s not in CRYPTO_SYMBOLS]
-                        combined = list(dict.fromkeys(CORE_ANCHOR_SYMBOLS + screened_syms + clean_watchlist))[:40]
+                        combined = list(dict.fromkeys(CORE_ANCHOR_SYMBOLS + all_candidates + clean_watchlist))[:75]
                         config.watchlist = combined
-                        logger.info(f"✨ [AUTONOMOUS ASSET SELECTION] Rotated active universe to {len(screened_syms)} top opportunities: {screened_syms[:8]} (Total active: {len(config.watchlist)})")
+                        logger.info(f"✨ [AUTONOMOUS ASSET SELECTION] Rotated active universe to {len(combined)} opportunities (Screened: {len(screened_syms)}, TV Breakouts: {len(tv_breakouts)}, Smart Money: {len(smart_buys)}). Top: {combined[:10]}")
                 except Exception as ex:
                     logger.warning(f"Dynamic asset discovery notice: {ex}")
 
@@ -1359,16 +1393,42 @@ def toggle_day_trading():
 
 @app.post("/api/day_trading/flatten", tags=["Day Trading"])
 def manual_flatten_day_trades():
-    """Manually triggers immediate EOD liquidation of all active day trades, preserving swing positions."""
+    """Manually triggers immediate liquidation of all active day trades, preserving swing positions."""
     flattened = broker.auto_flatten_day_trades(
         exit_rationale="User manually triggered Day Trades Flatten",
-        data_feed=data_feed
+        data_feed=data_feed,
+        etoro_client=etoro_client,
+        is_live=(config.execution_mode == "live")
     )
+    if config.execution_mode == "live":
+        sync_live_etoro_portfolio_if_live(force=True)
     return {
         "status": "success",
         "flattened_count": len(flattened),
         "flattened_symbols": [t.symbol for t in flattened],
         "message": f"Successfully liquidated {len(flattened)} day trades. Long-term positions preserved."
+    }
+
+@app.post("/api/portfolio/prune_short_term", tags=["Day Trading"])
+def prune_short_term_positions_endpoint(min_days: float = 5.0):
+    """
+    Evaluates and liquidates any holding held for >= 5 days (1 week) that is losing or stagnant (<1.0%).
+    Frees up capital to operate like a high-velocity day trader.
+    """
+    pruned = broker.prune_decaying_short_term_positions(
+        min_days_held=min_days,
+        data_feed=data_feed,
+        etoro_client=etoro_client,
+        is_live=(config.execution_mode == "live")
+    )
+    if config.execution_mode == "live":
+        sync_live_etoro_portfolio_if_live(force=True)
+    return {
+        "status": "success",
+        "pruned_count": len(pruned),
+        "pruned_symbols": [t.symbol for t in pruned],
+        "available_cash_usd": round(broker.cash, 2),
+        "message": f"Sold {len(pruned)} short-term decaying/losing positions. Capital freed for day trading: ${broker.cash:.2f}."
     }
 
 # ==========================================
@@ -2235,6 +2295,42 @@ def serve_wyckoff_page(symbol: Optional[str] = None):
     sym = (symbol or "GOLD").upper().strip()
     return RedirectResponse(url=f"/?modal=wyckoff&symbol={sym}", status_code=307)
 
+
+# =========================================================================
+# GLOBAL MARKET INTELLIGENCE (Frankfurter, CoinGecko, FRED, SEC, Polygon)
+# =========================================================================
+from .engine.market_intel import MarketIntelSuite
+market_intel_engine = MarketIntelSuite(
+    finnhub_key=config.finnhub_api_key,
+    polygon_key=os.getenv("POLYGON_API_KEY", ""),
+    fred_key=os.getenv("FRED_API_KEY", ""),
+    av_key=config.alpha_vantage_api_key
+)
+
+@app.get("/api/macro/forex", tags=["Global Market Intelligence"])
+async def get_macro_forex(base: str = "USD"):
+    """Real-time and historical currency exchange rates via Frankfurter (No Auth)."""
+    return await asyncio.to_thread(market_intel_engine.get_forex_rates, base)
+
+@app.get("/api/macro/crypto", tags=["Global Market Intelligence"])
+async def get_macro_crypto():
+    """Real-time cryptocurrency quotes, 24h volume & change via CoinGecko (No Auth)."""
+    return await asyncio.to_thread(market_intel_engine.get_crypto_prices)
+
+@app.get("/api/macro/fred", tags=["Global Market Intelligence"])
+async def get_macro_fred():
+    """Federal Reserve Economic Data, macroeconomic indicators, CPI, yields via FRED."""
+    return await asyncio.to_thread(market_intel_engine.get_fred_macro_indicators)
+
+@app.get("/api/sec/filings/{symbol}", tags=["Global Market Intelligence"])
+async def get_sec_filings(symbol: str, limit: int = 10):
+    """Direct corporate public filings (10-K, 10-Q, 8-K, Form 4) from SEC EDGAR."""
+    return await asyncio.to_thread(market_intel_engine.get_sec_edgar_filings, symbol, limit)
+
+@app.get("/api/market/ticks/{symbol}", tags=["Global Market Intelligence"])
+async def get_market_ticks(symbol: str):
+    """Historical and intraday stock ticks, quote, and spread from Polygon.io / Finnhub."""
+    return await asyncio.to_thread(market_intel_engine.get_stock_ticks_and_quote, symbol)
 
 
 # ==========================================

@@ -239,7 +239,7 @@ class TelemetryModule:
         elif current_mins >= close_mins:
             return False, f"Market Closed ({exch['name']} closed at {close_h:02d}:{close_m:02d} UK)"
         else:
-            return True, f"eToro UK Active Session ({open_h:02d}:{open_m:02d} - {close_h:02d}:{close_m:02d} UK)"
+            return True, f"eToro UK Active Session ({exch['name']}: {open_h:02d}:{open_m:02d} - {close_h:02d}:{close_m:02d} UK)"
 
     def check_trading_hours_before_trade(self, symbol: str) -> Tuple[bool, str]:
         """

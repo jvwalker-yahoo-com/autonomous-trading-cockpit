@@ -39,7 +39,7 @@ INITIAL_SEED_INSTRUMENTS: List[Dict[str, Any]] = [
     {"symbol": "SHIB", "instrument_id": 100024, "name": "Shiba Inu", "category": "Crypto", "asset_class": "Crypto", "trading_hours": "24/7"},
     {"symbol": "PEPE", "instrument_id": 100025, "name": "Pepe", "category": "Crypto", "asset_class": "Crypto", "trading_hours": "24/7"},
 
-    # === 2. US EQUITIES (Tech, AI, Growth & Blue Chips) ===
+    # === 2. US EQUITIES (Tech, AI, Growth, High-Beta & Blue Chips) ===
     {"symbol": "AAPL", "instrument_id": 1001, "name": "Apple Inc", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "NVDA", "instrument_id": 1137, "name": "NVIDIA Corporation", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "MSFT", "instrument_id": 1004, "name": "Microsoft Corp", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
@@ -49,17 +49,119 @@ INITIAL_SEED_INSTRUMENTS: List[Dict[str, Any]] = [
     {"symbol": "GOOGL", "instrument_id": 6434, "name": "Alphabet Inc Class A", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "AMD", "instrument_id": 1832, "name": "Advanced Micro Devices Inc", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "NFLX", "instrument_id": 1127, "name": "Netflix, Inc.", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "PLTR", "instrument_id": 7991, "name": "Palantir Technologies Inc.", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "ARM", "instrument_id": 1365, "name": "ARM Holdings PLC", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "SMCI", "instrument_id": 1069, "name": "Super Micro Computer, Inc", "category": "AI & Tech Titans", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "IREN", "instrument_id": 10736, "name": "Iris Energy Ltd", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "ORCL", "instrument_id": 1016, "name": "Oracle Corp", "category": "AI & Cloud Enterprise", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "CRM", "instrument_id": 1017, "name": "Salesforce Inc", "category": "AI & Cloud Enterprise", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "IBM", "instrument_id": 1018, "name": "IBM Corp", "category": "AI & Quantum Enterprise", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "ADBE", "instrument_id": 1019, "name": "Adobe Inc", "category": "AI & Creative Software", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "NOW", "instrument_id": 1020, "name": "ServiceNow Inc", "category": "AI Enterprise Cloud", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # Semis & Hardware Leaders
+    {"symbol": "AVGO", "instrument_id": 1012, "name": "Broadcom Inc", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "ARM", "instrument_id": 1365, "name": "ARM Holdings PLC", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "SMCI", "instrument_id": 1069, "name": "Super Micro Computer, Inc", "category": "AI Servers", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "TSM", "instrument_id": 1026, "name": "Taiwan Semiconductor", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "QCOM", "instrument_id": 1011, "name": "Qualcomm Inc", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "INTC", "instrument_id": 1010, "name": "Intel Corp", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "MU", "instrument_id": 1014, "name": "Micron Technology", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "ASML", "instrument_id": 1015, "name": "ASML Holding NV", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "AMAT", "instrument_id": 1030, "name": "Applied Materials", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "LRCX", "instrument_id": 1031, "name": "Lam Research Corp", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "MRVL", "instrument_id": 1032, "name": "Marvell Technology", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "ALAB", "instrument_id": 1033, "name": "Astera Labs", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "VRT", "instrument_id": 1034, "name": "Vertiv Holdings", "category": "Data Center Liquid Cooling", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "DELL", "instrument_id": 1035, "name": "Dell Technologies", "category": "AI Servers", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "ANET", "instrument_id": 1036, "name": "Arista Networks", "category": "Networking", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "KLAC", "instrument_id": 1037, "name": "KLA Corp", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # AI Platforms, Cloud & Cyber
+    {"symbol": "PLTR", "instrument_id": 7991, "name": "Palantir Technologies Inc.", "category": "AI Platforms", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "SNOW", "instrument_id": 1040, "name": "Snowflake Inc", "category": "Cloud & Data", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "DDOG", "instrument_id": 1041, "name": "Datadog Inc", "category": "Cloud & Data", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "NET", "instrument_id": 1042, "name": "Cloudflare Inc", "category": "Cloud & Security", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "CRWD", "instrument_id": 1028, "name": "CrowdStrike Holdings", "category": "Cybersecurity", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "PANW", "instrument_id": 1043, "name": "Palo Alto Networks", "category": "Cybersecurity", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "MDB", "instrument_id": 1044, "name": "MongoDB Inc", "category": "Cloud & Data", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "AI", "instrument_id": 1045, "name": "C3.ai Inc", "category": "AI Software", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "BBAI", "instrument_id": 1046, "name": "BigBear.ai Holdings", "category": "AI Software", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "SOUN", "instrument_id": 1047, "name": "SoundHound AI", "category": "AI Voice", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # High-Beta Crypto Proxies & Miners
     {"symbol": "COIN", "instrument_id": 6168, "name": "Coinbase Global Inc", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "MSTR", "instrument_id": 6473, "name": "Strategy Inc", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "MARA", "instrument_id": 1051, "name": "Marathon Digital", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "IREN", "instrument_id": 10736, "name": "Iris Energy Ltd", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "APLD", "instrument_id": 1052, "name": "Applied Digital", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "RIOT", "instrument_id": 1053, "name": "Riot Platforms", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "CLSK", "instrument_id": 1029, "name": "CleanSpark Inc", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "CIFR", "instrument_id": 1054, "name": "Cipher Mining", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "HUT", "instrument_id": 1055, "name": "Hut 8 Corp", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "CORZ", "instrument_id": 1056, "name": "Core Scientific", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "WULF", "instrument_id": 1057, "name": "TeraWulf Inc", "category": "Crypto Runners", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # Fintech, Neobanks & High-Growth
     {"symbol": "HOOD", "instrument_id": 9272, "name": "Robinhood Markets Inc.", "category": "Fintech & Growth", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "SOFI", "instrument_id": 9255, "name": "SoFi Technologies Inc", "category": "Fintech & Growth", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "PYPL", "instrument_id": 1060, "name": "PayPal Holdings", "category": "Fintech & Growth", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "SQ", "instrument_id": 1061, "name": "Block Inc", "category": "Fintech & Growth", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "UPST", "instrument_id": 1062, "name": "Upstart Holdings", "category": "Fintech & Growth", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "AFRM", "instrument_id": 1063, "name": "Affirm Holdings", "category": "Fintech & Growth", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "NU", "instrument_id": 1064, "name": "Nu Holdings", "category": "Fintech & Growth", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # Space, Aerospace & Defense
     {"symbol": "ASTS", "instrument_id": 10088, "name": "AST SpaceMobile Inc", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "RKLB", "instrument_id": 9085, "name": "Rocket Lab Corp", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "LMT", "instrument_id": 1070, "name": "Lockheed Martin", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "RTX", "instrument_id": 1071, "name": "RTX Corp", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "BA", "instrument_id": 1072, "name": "Boeing Co", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "KTOS", "instrument_id": 1073, "name": "Kratos Defense", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "PL", "instrument_id": 1074, "name": "Planet Labs PBC", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "LUNR", "instrument_id": 1075, "name": "Intuitive Machines", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # Quantum Computing
+    {"symbol": "IONQ", "instrument_id": 1080, "name": "IonQ Inc", "category": "Quantum Computing", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "RGTI", "instrument_id": 1081, "name": "Rigetti Computing", "category": "Quantum Computing", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "QBTS", "instrument_id": 1082, "name": "D-Wave Quantum", "category": "Quantum Computing", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # Clean Energy, Nuclear & Next-Gen Power
+    {"symbol": "CEG", "instrument_id": 1085, "name": "Constellation Energy", "category": "Nuclear & Power", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "VST", "instrument_id": 1086, "name": "Vistra Corp", "category": "Nuclear & Power", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "TLN", "instrument_id": 1087, "name": "Talen Energy", "category": "Nuclear & Power", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "CCJ", "instrument_id": 1088, "name": "Cameco Corp", "category": "Nuclear & Power", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "SMR", "instrument_id": 1089, "name": "NuScale Power Corp", "category": "Nuclear & Power", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "OKLO", "instrument_id": 1090, "name": "Oklo Inc", "category": "Nuclear & Power", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "FSLR", "instrument_id": 1091, "name": "First Solar Inc", "category": "Clean Tech & Solar", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "RIVN", "instrument_id": 1022, "name": "Rivian Automotive", "category": "EVs & Clean Tech", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # High-Growth Consumer, E-Commerce & Retail
+    {"symbol": "SHOP", "instrument_id": 1092, "name": "Shopify Inc", "category": "E-Commerce", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "SE", "instrument_id": 1093, "name": "Sea Limited", "category": "E-Commerce", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "BABA", "instrument_id": 1025, "name": "Alibaba Group", "category": "Global Blue Chips", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "MELI", "instrument_id": 1094, "name": "MercadoLibre Inc", "category": "E-Commerce", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "UBER", "instrument_id": 1095, "name": "Uber Technologies", "category": "Platform & Mobility", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "DASH", "instrument_id": 1096, "name": "DoorDash Inc", "category": "Platform & Delivery", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "ABNB", "instrument_id": 1097, "name": "Airbnb Inc", "category": "Travel & Platform", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "CVNA", "instrument_id": 1098, "name": "Carvana Co", "category": "Retail Momentum", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "CAVA", "instrument_id": 1099, "name": "CAVA Group", "category": "Consumer Growth", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "CELH", "instrument_id": 1102, "name": "Celsius Holdings", "category": "Consumer Growth", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "DKNG", "instrument_id": 1103, "name": "DraftKings Inc", "category": "Gaming & Sports", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "SPOT", "instrument_id": 1104, "name": "Spotify Technology", "category": "Streaming Media", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "PDD", "instrument_id": 1105, "name": "PDD Holdings", "category": "E-Commerce", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # Healthcare, GLP-1 & Biotech
     {"symbol": "LLY", "instrument_id": 1567, "name": "Eli Lilly & Co", "category": "Global Blue Chips", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "NVO", "instrument_id": 1106, "name": "Novo Nordisk", "category": "Healthcare", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "UNH", "instrument_id": 1107, "name": "UnitedHealth Group", "category": "Healthcare", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "ISRG", "instrument_id": 1108, "name": "Intuitive Surgical", "category": "MedTech Robotics", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "VRTX", "instrument_id": 1109, "name": "Vertex Pharmaceuticals", "category": "Biotech", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "MRNA", "instrument_id": 1110, "name": "Moderna Inc", "category": "Biotech", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # Industrial & Energy Titans
+    {"symbol": "CAT", "instrument_id": 1112, "name": "Caterpillar Inc", "category": "Industrial", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "DE", "instrument_id": 1113, "name": "Deere & Company", "category": "Industrial", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "GE", "instrument_id": 1114, "name": "GE Aerospace", "category": "Aerospace", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "XOM", "instrument_id": 1115, "name": "Exxon Mobil Corp", "category": "Energy", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "CVX", "instrument_id": 1116, "name": "Chevron Corp", "category": "Energy", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "OXY", "instrument_id": 1117, "name": "Occidental Petroleum", "category": "Energy", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
 
     # === 3. BENCHMARK & LEVERAGED ETFS ===
     {"symbol": "SPY", "instrument_id": 2001, "name": "SPDR S&P 500 ETF", "category": "ETFs", "asset_class": "ETF", "trading_hours": "14:30 - 21:00 UK"},

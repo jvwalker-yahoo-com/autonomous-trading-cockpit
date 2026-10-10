@@ -1,0 +1,61 @@
+
+
+free GitHub repos for trading on Polymarket…
+ 
+Here’s everything you need to automate and make your trading more efficient:
+ 
+1. A bot with 118 ready to use trading strategies and tools for prediction markets (arbitrage between Polymarket and Kalshi, Binance-Polymarket latency, DCA bots, Mean Reversion, Penny Clipper and more).
+ 
+http://github.com/recogardtech/A%E2%80%A6
+ 
+2. The largest Polymarket dataset with over 107 GB of real trading data, based on more than 1 billion trades.
+ 
+It was analyzed by 5 professors from Shanghai University.
+ 
+http://github.com/SII-WANGZJ/Pol%E2%80%A6
+ 
+3. A backtesting simulator that lets you test any of your own ideas and strategies on real historical markets.
+ 
+It simulates your trades and shows your potential pnl, win rate and all possible risks.
+ 
+http://github.com/evan-kolberg/p%E2%80%A6
+ 
+4. This bot can automatically manage all your limit orders on Polymarket to maximize liquidity rewards.
+ 
+http://github.com/lihanyu81/poly%E2%80%A6
+ 
+5. A tool for analyzing the trading behavior of any Polymarket trader.
+ 
+It finds repeated patterns in his trades, shows which strategies he uses and how you could adapt them to your own trading.
+ 
+http://github.com/ent0n29/polybot
+ 
+6. A trading bot toolkit that includes arbitrage, copy trading, market making, whale alerts, spread farming, sports trading and more.
+ 
+http://github.com/HarrierOnChain%E2%80%A6
+ 
+ 
+8. A Claude powered trading terminal that connects directly to Polymarket.
+ 
+It can analyze markets in real time, track prices, suggest possible trades or even trade for you.
+ 
+http://github.com/caiovicentino/%E2%80%A6
+ 
+9. This repo will help you to build your own AI agents.
+ 
+http://github.com/pydantic/pydan%E2%80%A6
+ 
+10. A huge collection of more than 150 useful tools and materials for prediction markets (from analytics dashboards and AI agents to trading bots and educational resources).
+ 
+http://github.com/aarora4/Awesom%E2%80%A6
+ 
+All of these repos come with a detailed step by step setup and usage guide in English.
+
+https://github.com/myhhub/stock
+https://github.com/ccxt/ccxt
+https://x.com/x_insider4/status/2094086302849179706
+https://x.com/RohOnChain/status/2101311813908652069
+
+
+
+

@@ -19,6 +19,7 @@ from backend.engine.quadrant import QuadrantModule
 from backend.engine.telemetry import TelemetryModule
 from backend.engine.learner import AdaptiveLearner
 from backend.engine.broker import SimulatedBroker
+from backend.engine.market_intel import MarketIntelSuite
 
 st.set_page_config(
     page_title="Predictive Execution Cockpit",
@@ -135,9 +136,16 @@ kpi6.metric(f"{sel_symbol} PRICE", f"${quote.price:.2f}", f"{quote.change_pct:+.
 st.divider()
 
 # Main Cockpit Tabs
-tab_cockpit, tab_positions, tab_learning, tab_daily_report = st.tabs([
+market_intel = MarketIntelSuite(
+    finnhub_key=config.finnhub_api_key,
+    polygon_key=config.alpha_vantage_api_key,
+    av_key=config.alpha_vantage_api_key
+)
+
+tab_cockpit, tab_positions, tab_macro, tab_learning, tab_daily_report = st.tabs([
     "📡 Live Cockpit (9 Panels)",
     "💼 Active Positions",
+    "🌍 Global Macro & Market Intel",
     "🧠 Self-Learning & Mistake Audit",
     "📊 End-of-Day Audit Report"
 ])
@@ -198,6 +206,52 @@ with tab_positions:
         st.dataframe(pd.DataFrame(pos_data), use_container_width=True)
     else:
         st.info("No active open positions. Scanner is evaluating market opportunities.")
+
+with tab_macro:
+    st.subheader(f"🌍 Global Macro, Forex, Crypto & SEC EDGAR • {sel_symbol}")
+    
+    # 1. Macro & FX
+    m1, m2, m3 = st.columns(3)
+    macro_data = market_intel.get_fred_macro_indicators()
+    ffr = macro_data.get("fed_funds_rate", {}).get("value", 3.75)
+    t10 = macro_data.get("treasury_10y", {}).get("value", 4.12)
+    spread = macro_data.get("yield_curve_spread", 0.37)
+    m1.metric("FED FUNDS RATE (FRED)", f"{ffr:.2f}%")
+    m2.metric("10-YEAR TREASURY (FRED)", f"{t10:.2f}%")
+    m3.metric("YIELD SPREAD (10Y - FFR)", f"{spread:+.2f}%", f"CPI: {macro_data.get('cpi_inflation', {}).get('value', 314.8)}")
+
+    st.markdown("##### 💱 Foreign Exchange Rates (Frankfurter)")
+    fx = market_intel.get_forex_rates("USD", ["EUR", "GBP", "JPY", "CAD", "AUD", "CHF"])
+    rates = fx.get("rates", {})
+    fx_cols = st.columns(6)
+    for i, (k, v) in enumerate(rates.items()):
+        fx_cols[i % 6].metric(f"USD/{k}", f"{v:.4f}")
+
+    st.markdown("##### 🪙 Cryptocurrency Pulse (CoinGecko)")
+    crypto = market_intel.get_crypto_prices(["bitcoin", "ethereum", "solana", "ripple"])
+    c_cols = st.columns(4)
+    for i, (cid, cdata) in enumerate(crypto.get("data", {}).items()):
+        c_cols[i % 4].metric(cdata["symbol"], f"${cdata['price_usd']:,.2f}", f"{cdata['change_24h_pct']:+.2f}%")
+
+    st.markdown("---")
+    sec_col1, sec_col2 = st.columns([1.5, 2.5])
+    with sec_col1:
+        st.markdown(f"##### ⚡ Polygon.io / Finnhub Ticks ({sel_symbol})")
+        ticks = market_intel.get_stock_ticks_and_quote(sel_symbol)
+        if ticks.get("price", 0) > 0:
+            st.write(f"• **Price:** ${ticks['price']:.2f} ({ticks.get('change_pct', 0):+.2f}%)")
+            st.write(f"• **Day Range:** ${ticks.get('low', 0):.2f} - ${ticks.get('high', 0):.2f}")
+            st.write(f"• **Open / Prev Close:** ${ticks.get('open', 0):.2f} / ${ticks.get('prev_close', 0):.2f}")
+            st.caption(f"Source: {ticks.get('source', 'Finnhub').upper()}")
+        else:
+            st.info("No tick feed for this asset.")
+    with sec_col2:
+        st.markdown(f"##### 📄 Direct SEC EDGAR Corporate Filings ({sel_symbol})")
+        filings = market_intel.get_sec_edgar_filings(sel_symbol, limit=8)
+        if filings:
+            st.dataframe(pd.DataFrame(filings), use_container_width=True, hide_index=True)
+        else:
+            st.info("No SEC EDGAR filings available.")
 
 with tab_learning:
     st.subheader("🧠 Adaptive Strategy Re-Calibration")

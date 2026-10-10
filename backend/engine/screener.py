@@ -103,8 +103,9 @@ MASTER_STOCK_UNIVERSE: Dict[str, Dict[str, Any]] = {
     "TLT": {"name": "iShares 20+ Year Treasury", "category": "ETFs", "base_price": 98.40, "asset_class": "ETF", "trading_hours": "14:30 - 21:00 UK"},
 
     # =========================================================================
-    # 5. HIGH-GROWTH & MEGA-CAP EQUITIES
+    # 5. HIGH-GROWTH, HIGH-BETA & MEGA-CAP EQUITIES (Expanded Universe)
     # =========================================================================
+    # Mega-Cap Tech & AI Titans
     "NVDA": {"name": "NVIDIA Corp", "category": "AI & Tech Titans", "base_price": 128.80, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     "AAPL": {"name": "Apple Inc", "category": "AI & Tech Titans", "base_price": 224.50, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     "MSFT": {"name": "Microsoft Corp", "category": "AI & Tech Titans", "base_price": 448.20, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
@@ -112,24 +113,121 @@ MASTER_STOCK_UNIVERSE: Dict[str, Dict[str, Any]] = {
     "GOOGL": {"name": "Alphabet Inc", "category": "AI & Tech Titans", "base_price": 165.70, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     "META": {"name": "Meta Platforms", "category": "AI & Tech Titans", "base_price": 512.90, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     "TSLA": {"name": "Tesla Inc", "category": "AI & Tech Titans", "base_price": 215.30, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    "AMD": {"name": "Advanced Micro Devices", "category": "AI & Tech Titans", "base_price": 146.50, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    "AVGO": {"name": "Broadcom Inc", "category": "AI & Tech Titans", "base_price": 158.20, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    "PLTR": {"name": "Palantir Tech", "category": "AI & Tech Titans", "base_price": 31.40, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    "ARM": {"name": "Arm Holdings", "category": "AI & Tech Titans", "base_price": 132.80, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    "SMCI": {"name": "Super Micro Computer", "category": "AI & Tech Titans", "base_price": 435.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    "MARA": {"name": "Marathon Digital", "category": "Crypto Runners", "base_price": 18.50, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    "IREN": {"name": "Iris Energy", "category": "Crypto Runners", "base_price": 9.80, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "NFLX": {"name": "Netflix Inc", "category": "AI & Tech Titans", "base_price": 698.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "ORCL": {"name": "Oracle Corp", "category": "AI & Cloud Enterprise", "base_price": 172.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "CRM": {"name": "Salesforce Inc", "category": "AI & Cloud Enterprise", "base_price": 288.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "IBM": {"name": "IBM Corp", "category": "AI & Quantum Enterprise", "base_price": 218.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "ADBE": {"name": "Adobe Inc", "category": "AI & Creative Software", "base_price": 510.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "NOW": {"name": "ServiceNow Inc", "category": "AI Enterprise Cloud", "base_price": 915.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # Semiconductors & Hardware Leaders
+    "AMD": {"name": "Advanced Micro Devices", "category": "Semiconductors", "base_price": 146.50, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "AVGO": {"name": "Broadcom Inc", "category": "Semiconductors", "base_price": 158.20, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "ARM": {"name": "Arm Holdings", "category": "Semiconductors", "base_price": 132.80, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "SMCI": {"name": "Super Micro Computer", "category": "AI Servers", "base_price": 435.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "TSM": {"name": "Taiwan Semiconductor", "category": "Semiconductors", "base_price": 172.50, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "QCOM": {"name": "Qualcomm Inc", "category": "Semiconductors", "base_price": 168.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "INTC": {"name": "Intel Corp", "category": "Semiconductors", "base_price": 22.80, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "MU": {"name": "Micron Technology", "category": "Memory & HBM Semi", "base_price": 105.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "ASML": {"name": "ASML Holding NV", "category": "Semiconductor Equipment", "base_price": 820.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "AMAT": {"name": "Applied Materials", "category": "Semiconductor Equipment", "base_price": 204.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "LRCX": {"name": "Lam Research Corp", "category": "Semiconductor Equipment", "base_price": 81.50, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "MRVL": {"name": "Marvell Technology", "category": "Custom AI & Networking", "base_price": 78.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "ALAB": {"name": "Astera Labs", "category": "AI Connectivity & Cloud", "base_price": 64.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "VRT": {"name": "Vertiv Holdings", "category": "Data Center Liquid Cooling", "base_price": 98.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "DELL": {"name": "Dell Technologies", "category": "AI Servers & Hardware", "base_price": 122.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "ANET": {"name": "Arista Networks", "category": "AI Cloud Networking", "base_price": 380.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "KLAC": {"name": "KLA Corp", "category": "Semiconductor Metrology", "base_price": 720.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # AI Software, Cloud & Cybersecurity
+    "PLTR": {"name": "Palantir Tech", "category": "AI Platforms & Defense", "base_price": 31.40, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "SNOW": {"name": "Snowflake Inc", "category": "Data Cloud & Analytics", "base_price": 118.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "DDOG": {"name": "Datadog Inc", "category": "Cloud Monitoring", "base_price": 116.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "NET": {"name": "Cloudflare Inc", "category": "Edge Cloud & Security", "base_price": 82.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "CRWD": {"name": "CrowdStrike Holdings", "category": "Cybersecurity", "base_price": 298.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "PANW": {"name": "Palo Alto Networks", "category": "Cybersecurity", "base_price": 348.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "MDB": {"name": "MongoDB Inc", "category": "Modern Database Cloud", "base_price": 275.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "AI": {"name": "C3.ai Inc", "category": "Enterprise AI Software", "base_price": 24.50, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "BBAI": {"name": "BigBear.ai Holdings", "category": "Defense AI Analytics", "base_price": 1.95, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "SOUN": {"name": "SoundHound AI", "category": "Voice AI Platforms", "base_price": 5.20, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # High-Beta Crypto Proxies & Data Center Miners
     "COIN": {"name": "Coinbase Global", "category": "Crypto Runners", "base_price": 218.40, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     "MSTR": {"name": "MicroStrategy", "category": "Crypto Runners", "base_price": 134.20, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "MARA": {"name": "Marathon Digital", "category": "Crypto Runners", "base_price": 18.50, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "IREN": {"name": "Iris Energy", "category": "Crypto Runners", "base_price": 9.80, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     "APLD": {"name": "Applied Digital", "category": "Crypto Runners", "base_price": 8.70, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "RIOT": {"name": "Riot Platforms", "category": "Crypto Runners", "base_price": 7.80, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "CLSK": {"name": "CleanSpark Inc", "category": "Crypto Runners", "base_price": 10.40, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "CIFR": {"name": "Cipher Mining", "category": "Crypto Runners", "base_price": 4.10, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "HUT": {"name": "Hut 8 Corp", "category": "Crypto Runners", "base_price": 12.30, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "CORZ": {"name": "Core Scientific", "category": "AI Hosting & HPC", "base_price": 12.80, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "WULF": {"name": "TeraWulf Inc", "category": "AI Data Centers", "base_price": 5.10, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # Fintech, Neobanks & High-Growth
     "HOOD": {"name": "Robinhood Markets", "category": "Fintech & Growth", "base_price": 22.40, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     "SOFI": {"name": "SoFi Technologies", "category": "Fintech & Growth", "base_price": 7.90, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    "RIVN": {"name": "Rivian Automotive", "category": "EVs & Clean Tech", "base_price": 13.80, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "PYPL": {"name": "PayPal Holdings", "category": "Fintech & Growth", "base_price": 72.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "SQ": {"name": "Block Inc", "category": "Fintech & Growth", "base_price": 68.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "UPST": {"name": "Upstart Holdings", "category": "AI Lending & Growth", "base_price": 38.50, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "AFRM": {"name": "Affirm Holdings", "category": "BNPL Fintech", "base_price": 41.20, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "NU": {"name": "Nu Holdings", "category": "Digital Banking", "base_price": 14.50, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # Space, Aerospace & Defense
     "ASTS": {"name": "AST SpaceMobile", "category": "Space & Defense", "base_price": 28.50, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     "RKLB": {"name": "Rocket Lab USA", "category": "Space & Defense", "base_price": 6.80, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "LMT": {"name": "Lockheed Martin", "category": "Space & Defense", "base_price": 585.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "RTX": {"name": "RTX Corp", "category": "Space & Defense", "base_price": 124.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "BA": {"name": "Boeing Co", "category": "Space & Defense", "base_price": 155.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "KTOS": {"name": "Kratos Defense", "category": "Space & Defense", "base_price": 24.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "PL": {"name": "Planet Labs PBC", "category": "Space & Defense", "base_price": 2.50, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "LUNR": {"name": "Intuitive Machines", "category": "Space & Defense", "base_price": 8.40, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # Quantum Computing
+    "IONQ": {"name": "IonQ Inc", "category": "Quantum Computing", "base_price": 9.20, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "RGTI": {"name": "Rigetti Computing", "category": "Quantum Computing", "base_price": 0.85, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "QBTS": {"name": "D-Wave Quantum", "category": "Quantum Computing", "base_price": 1.15, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # Clean Energy, Nuclear & Next-Gen Power
+    "CEG": {"name": "Constellation Energy", "category": "Nuclear & Power", "base_price": 268.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "VST": {"name": "Vistra Corp", "category": "Nuclear & Power", "base_price": 124.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "TLN": {"name": "Talen Energy", "category": "Nuclear & Power", "base_price": 178.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "CCJ": {"name": "Cameco Corp", "category": "Nuclear & Power", "base_price": 54.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "SMR": {"name": "NuScale Power Corp", "category": "Nuclear & Power", "base_price": 11.80, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "OKLO": {"name": "Oklo Inc", "category": "Nuclear & Power", "base_price": 9.60, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "FSLR": {"name": "First Solar Inc", "category": "Clean Tech & Solar", "base_price": 210.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "RIVN": {"name": "Rivian Automotive", "category": "EVs & Clean Tech", "base_price": 13.80, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # High-Growth Consumer, E-Commerce & Retail Runners
+    "SHOP": {"name": "Shopify Inc", "category": "E-Commerce & Retail", "base_price": 78.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "SE": {"name": "Sea Limited", "category": "E-Commerce & Retail", "base_price": 84.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     "BABA": {"name": "Alibaba Group", "category": "Global Blue Chips", "base_price": 82.40, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    "TSM": {"name": "Taiwan Semiconductor", "category": "Global Blue Chips", "base_price": 172.50, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    "LLY": {"name": "Eli Lilly and Co", "category": "Global Blue Chips", "base_price": 948.50, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"}
+    "MELI": {"name": "MercadoLibre Inc", "category": "E-Commerce & Retail", "base_price": 2040.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "UBER": {"name": "Uber Technologies", "category": "Mobility & Platform", "base_price": 76.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "DASH": {"name": "DoorDash Inc", "category": "Delivery & Platform", "base_price": 142.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "ABNB": {"name": "Airbnb Inc", "category": "Travel & Platform", "base_price": 128.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "CVNA": {"name": "Carvana Co", "category": "E-Commerce & Retail", "base_price": 185.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "CAVA": {"name": "CAVA Group", "category": "Consumer Growth", "base_price": 125.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "CELH": {"name": "Celsius Holdings", "category": "Consumer Growth", "base_price": 31.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "DKNG": {"name": "DraftKings Inc", "category": "Consumer & Entertainment", "base_price": 42.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "SPOT": {"name": "Spotify Technology", "category": "Media & Streaming", "base_price": 365.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "PDD": {"name": "PDD Holdings", "category": "E-Commerce & Retail", "base_price": 145.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # Healthcare, GLP-1 & Biotech Leaders
+    "LLY": {"name": "Eli Lilly and Co", "category": "Healthcare & Biotech", "base_price": 948.50, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "NVO": {"name": "Novo Nordisk", "category": "Healthcare & Biotech", "base_price": 118.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "UNH": {"name": "UnitedHealth Group", "category": "Healthcare & Biotech", "base_price": 585.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "ISRG": {"name": "Intuitive Surgical", "category": "Robotics & MedTech", "base_price": 485.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "VRTX": {"name": "Vertex Pharmaceuticals", "category": "Healthcare & Biotech", "base_price": 470.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "MRNA": {"name": "Moderna Inc", "category": "Healthcare & Biotech", "base_price": 56.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+
+    # Industrial, Defense & Energy Titans
+    "CAT": {"name": "Caterpillar Inc", "category": "Industrial & Machinery", "base_price": 395.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "DE": {"name": "Deere & Company", "category": "Industrial & Machinery", "base_price": 405.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "GE": {"name": "GE Aerospace", "category": "Aerospace & Defense", "base_price": 188.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "XOM": {"name": "Exxon Mobil Corp", "category": "Energy & Oil", "base_price": 122.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "CVX": {"name": "Chevron Corp", "category": "Energy & Oil", "base_price": 150.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "OXY": {"name": "Occidental Petroleum", "category": "Energy & Oil", "base_price": 52.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"}
 }
 
 # Pre-Built Preset Watchlists for 1-Click Multi-Asset Loading
@@ -187,11 +285,12 @@ UNTRADABLE_RETAIL_SYMBOLS = {
 class MarketScreener:
     """Scans all multi-asset instruments across Commodities, Indices, ETFs, and Equities (Crypto Deactivated)."""
 
-    @staticmethod
+    @classmethod
     def scan_universe(
+        cls,
         data_feed_manager=None,
         category_filter: Optional[str] = None,
-        top_n: int = 35,
+        top_n: int = 60,
         tradable_only: bool = False,
         day_trade_only: bool = False,
         smart_money_engine=None
@@ -210,9 +309,25 @@ class MarketScreener:
             from .data_feed import DataFeedManager
             data_feed_manager = DataFeedManager()
 
+        # Dynamically ingest live TradingView volume breakout runners into universe
+        try:
+            tv_breakouts = cls.scan_tradingview_volume_breakouts(min_rvol=1.3, min_price=5.0, top_n=35)
+            for tv in tv_breakouts:
+                sym = tv.get("symbol")
+                if sym and sym not in MASTER_STOCK_UNIVERSE and sym not in PROHIBITED_CRYPTO:
+                    MASTER_STOCK_UNIVERSE[sym] = {
+                        "name": tv.get("name", sym),
+                        "category": "Volume Breakout Movers",
+                        "base_price": tv.get("price", 50.0),
+                        "asset_class": "Stock",
+                        "trading_hours": "14:30 - 21:00 UK"
+                    }
+        except Exception as e:
+            logger.debug(f"TradingView dynamic ingestion notice: {e}")
+
         results = []
 
-        for symbol, info in MASTER_STOCK_UNIVERSE.items():
+        for symbol, info in list(MASTER_STOCK_UNIVERSE.items()):
             # Permanent exclusion of Crypto per user mandate
             if symbol in PROHIBITED_CRYPTO or info.get("category", "").lower() == "crypto" or info.get("asset_class", "").lower() == "crypto":
                 continue

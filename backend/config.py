@@ -48,19 +48,19 @@ class SystemConfig(BaseModel):
     # Trading Rules (Long-Term / Swing Trades)
     default_stop_loss_pct: float = float(os.getenv("DEFAULT_STOP_LOSS_PCT", "0.025")) # 2.5%
     default_take_profit_pct: float = float(os.getenv("DEFAULT_TAKE_PROFIT_PCT", "0.050")) # 5.0%
-    min_conviction_score: float = float(os.getenv("MIN_CONVICTION_SCORE", "0.60"))  # JEV confidence gate: 60% calibrated probability
-    jev_confidence_gate: float = float(os.getenv("JEV_CONFIDENCE_GATE", "0.60"))  # JEV: minimum calibrated probability to trade
+    min_conviction_score: float = float(os.getenv("MIN_CONVICTION_SCORE", "0.50"))  # JEV confidence gate calibrated for day trading responsiveness
+    jev_confidence_gate: float = float(os.getenv("JEV_CONFIDENCE_GATE", "0.50"))  # JEV: minimum calibrated probability to trade
     jev_kelly_fraction_cap: float = float(os.getenv("JEV_KELLY_FRACTION_CAP", "0.25"))  # Max Kelly fraction (quarter-Kelly)
     slippage_bps: float = float(os.getenv("SIM_SLIPPAGE_BPS", "5.0")) # 5 bps simulated slippage
     spread_pct: float = float(os.getenv("SIM_SPREAD_PCT", "0.0005")) # 0.05% eToro spread simulation
     
-    # Day Trading & Intraday Execution Options (Integrated alongside Long-Term Trades)
+    # Day Trading & Intraday Execution Options (Operating Primarily as a Day Trader)
     enable_day_trading: bool = os.getenv("ENABLE_DAY_TRADING", "true").lower() in ("true", "1", "yes")
-    day_trade_allocation_pct: float = float(os.getenv("DAY_TRADE_ALLOCATION_PCT", "0.50")) # Max 50% of capital for day trades
-    day_trade_max_active: int = int(os.getenv("DAY_TRADE_MAX_ACTIVE", "8")) # Max 8 simultaneous active day trades
-    day_trade_stop_loss_pct: float = float(os.getenv("DAY_TRADE_STOP_LOSS_PCT", "0.012")) # 1.2% tighter stop for day trades
-    day_trade_take_profit_pct: float = float(os.getenv("DAY_TRADE_TAKE_PROFIT_PCT", "0.024")) # 2.4% take profit for 2:1 R:R
-    day_trade_max_hold_hours: float = float(os.getenv("DAY_TRADE_MAX_HOLD_HOURS", "6.0")) # Max 6 hours holding time
+    day_trade_allocation_pct: float = float(os.getenv("DAY_TRADE_ALLOCATION_PCT", "0.75")) # Max 75% of capital for active day trades
+    day_trade_max_active: int = int(os.getenv("DAY_TRADE_MAX_ACTIVE", "12")) # Max 12 simultaneous active day trades
+    day_trade_stop_loss_pct: float = float(os.getenv("DAY_TRADE_STOP_LOSS_PCT", "0.015")) # 1.5% tighter stop for day trades
+    day_trade_take_profit_pct: float = float(os.getenv("DAY_TRADE_TAKE_PROFIT_PCT", "0.030")) # 3.0% take profit for 2:1 R:R
+    day_trade_max_hold_hours: float = float(os.getenv("DAY_TRADE_MAX_HOLD_HOURS", "4.0")) # Max 4 hours holding time for day trades
     day_trade_eod_flatten_minutes_before_close: int = int(os.getenv("DAY_TRADE_EOD_FLATTEN_MINS", "15")) # 15 mins before market close
     
     # News & Smart Money Intelligence
@@ -82,15 +82,22 @@ class SystemConfig(BaseModel):
     market_close_hour_utc: int = 20 # 20:00 UTC = 21:00 UK BST (16:00 US EST)
     market_close_minute_utc: int = 0
     
-    # Target Watchlist — European Morning Coverage (UK100, GER40) + US Mega-Cap Tech Titans ($10 min, 0 crypto, 0 PRIIPs block)
+    # Target Watchlist — European Morning Coverage + Multi-Sector US High-Beta Day Trading Leaders
     watchlist: List[str] = [
         "UK100", "GER40",
-        "NVDA", "AAPL", "MSFT", "TSLA", "META", "AMZN", "GOOGL",
-        "AMD", "PLTR", "ARM", "SMCI", "COIN", "MSTR", "HOOD",
-        "SOFI", "ASTS", "RKLB", "LLY", "NFLX", "IREN"
+        "NVDA", "AAPL", "MSFT", "TSLA", "META", "AMZN", "GOOGL", "NFLX",
+        "AMD", "AVGO", "ARM", "SMCI", "QCOM", "MU", "MRVL", "ALAB", "VRT", "DELL",
+        "PLTR", "CRWD", "PANW", "NET", "DDOG", "SNOW", "MDB", "AI",
+        "COIN", "MSTR", "MARA", "RIOT", "CLSK", "CIFR", "IREN", "CORZ", "WULF",
+        "HOOD", "SOFI", "PYPL", "SQ", "UPST", "AFRM", "NU",
+        "ASTS", "RKLB", "KTOS", "BA", "LUNR",
+        "IONQ", "RGTI", "QBTS",
+        "CEG", "VST", "TLN", "CCJ", "SMR", "OKLO",
+        "SHOP", "SE", "UBER", "DASH", "CVNA", "CAVA", "CELH", "DKNG", "SPOT",
+        "LLY", "NVO", "ISRG", "VRTX"
     ]
     auto_rotate_universe: bool = os.getenv("AUTO_ROTATE_UNIVERSE", "true").lower() in ("true", "1", "yes")
-    universe_scan_interval_sec: float = float(os.getenv("UNIVERSE_SCAN_INTERVAL_SEC", "60.0"))
+    universe_scan_interval_sec: float = float(os.getenv("UNIVERSE_SCAN_INTERVAL_SEC", "45.0"))
     
     # Email Reporting (PDF Delivery to lisawalker6898@gmail.com)
     report_recipient_email: str = os.getenv("REPORT_RECIPIENT_EMAIL", "lisawalker6898@gmail.com")
