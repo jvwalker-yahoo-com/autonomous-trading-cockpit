@@ -1131,11 +1131,60 @@ def test_wyckoff_api_endpoints_and_webhooks():
     assert len(wyck_models) > 0, "Wyckoff model should be present in Model Federation"
 
 
+def test_circuit_breaker_health_diagnostic_and_auto_reset():
+    """
+    Validates Circuit Breaker diagnostics and automated self-healing:
+    1. Tests broker.check_circuit_breaker_health() with healthy vs phantom vs real drawdown.
+    2. Tests GET /api/circuit_breaker/test endpoint response schema.
+    3. Tests POST /api/circuit_breaker/auto_reset endpoint.
+    4. Confirms that frozen_cash and live_total_equity prevent phantom drawdown trip.
+    """
+    from backend.engine.broker import SimulatedBroker
+    b = SimulatedBroker(initial_capital=1000.0)
+    b.cash = 1000.0
+    b.peak_equity = 1000.0
 
+    # 1. Healthy state
+    h1 = b.check_circuit_breaker_health(max_drawdown_limit_pct=0.15)
+    assert h1["circuit_breaker_tripped"] is False
+    assert h1["reset_required"] is False
+    assert h1["is_phantom_drawdown"] is False
 
+    # 2. Phantom drawdown state (elevated watermark with cash intact)
+    b.peak_equity = 2000.0 # Stale peak
+    b.cash = 990.0
+    h2 = b.check_circuit_breaker_health(max_drawdown_limit_pct=0.15)
+    assert h2["circuit_breaker_tripped"] is True
+    assert h2["reset_required"] is True
+    assert h2["is_phantom_drawdown"] is True
+    assert "Phantom drawdown" in h2["diagnosis"]
 
+    # 3. Test API diagnostic endpoint
+    r_test = client.get("/api/circuit_breaker/test")
+    assert r_test.status_code == 200
+    data = r_test.json()
+    assert "circuit_breaker_tripped" in data
+    assert "reset_required" in data
+    assert "diagnosis" in data
 
+    # 4. Test API auto-reset endpoint
+    r_reset = client.post("/api/circuit_breaker/auto_reset")
+    assert r_reset.status_code == 200
+    assert r_reset.json()["status"] == "success"
+    assert "health" in r_reset.json()
 
-
-
-
+    # 5. Verify frozen_cash prevents phantom drawdown
+    b_live = SimulatedBroker(initial_capital=1291.15)
+    b_live.sync_live_etoro_portfolio({
+        "totals": {
+            "totalValue": 1279.30,
+            "availableCash": 986.58,
+            "frozenCash": 292.72,
+            "balance": 1279.30
+        },
+        "holdings": []
+    })
+    # Equity should reflect full totalValue (1279.30), NOT just availableCash (986.58)
+    assert b_live.get_equity() == 1279.30
+    h3 = b_live.check_circuit_breaker_health(max_drawdown_limit_pct=0.15)
+    assert h3["circuit_breaker_tripped"] is False

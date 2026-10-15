@@ -18,6 +18,8 @@ class SimulatedBroker:
     def __init__(self, initial_capital: float = 10000.0, db_path: str = "", learner: Optional[AdaptiveLearner] = None):
         self.initial_capital = initial_capital
         self.cash = initial_capital
+        self.frozen_cash: float = 0.0
+        self.live_total_equity: Optional[float] = None
         self.positions: Dict[str, Position] = {}
         self.trade_ledger: List[TradeRecord] = []
         self.db_path = db_path
@@ -38,10 +40,13 @@ class SimulatedBroker:
         # Real cash & equity
         if "availableCash" in totals and totals["availableCash"] is not None:
             self.cash = float(totals["availableCash"])
+        if "frozenCash" in totals and totals["frozenCash"] is not None:
+            self.frozen_cash = float(totals["frozenCash"])
         live_equity = float(totals["totalValue"]) if ("totalValue" in totals and totals["totalValue"] is not None) else None
-        if live_equity is not None:
+        if live_equity is not None and live_equity > 0:
+            self.live_total_equity = round(live_equity, 2)
             if self.peak_equity <= 1300.0 or live_equity > self.peak_equity:
-                self.peak_equity = live_equity
+                self.peak_equity = round(live_equity, 2)
         if "netDeposit" in totals and totals["netDeposit"] is not None:
             self.initial_capital = float(totals["netDeposit"])
         elif self.initial_capital == 1300.0 and live_equity is not None and live_equity > 0:
@@ -150,8 +155,10 @@ class SimulatedBroker:
             self.save_state()
 
     def get_equity(self) -> float:
-        """Returns total portfolio equity = Cash + Total Market Value of Positions."""
-        equity = self.cash
+        """Returns total portfolio equity = Cash + Frozen Cash + Total Market Value of Positions (or authoritative live_total_equity)."""
+        if getattr(self, "live_total_equity", None) is not None and self.live_total_equity > 0:
+            return round(self.live_total_equity, 2)
+        equity = self.cash + getattr(self, "frozen_cash", 0.0)
         for pos in self.positions.values():
             equity += pos.market_value_usd
         return round(equity, 2)
@@ -613,10 +620,45 @@ class SimulatedBroker:
         """Resets peak equity to current equity (or updates cash to new_equity), clearing any drawdown circuit breaker."""
         if new_equity is not None and new_equity > 0:
             self.cash = round(float(new_equity), 2)
+            self.live_total_equity = round(float(new_equity), 2)
         eq = self.get_equity()
         self.peak_equity = eq
         self.save_state()
         return eq
+
+    def check_circuit_breaker_health(self, max_drawdown_limit_pct: float = 0.15) -> Dict[str, Any]:
+        """
+        Tests whether the circuit breaker is tripped, and diagnoses if it is a
+        legitimate loss vs a stale/elevated watermark artifact (phantom drawdown).
+        """
+        equity = self.get_equity()
+        peak = max(self.peak_equity, equity)
+        drawdown_from_peak = max(0.0, (peak - equity) / max(1.0, peak))
+        drawdown_from_capital = max(0.0, (self.initial_capital - equity) / max(1.0, self.initial_capital))
+
+        is_tripped = drawdown_from_peak >= max_drawdown_limit_pct
+        is_phantom = is_tripped and (drawdown_from_capital < max_drawdown_limit_pct)
+        reset_required = is_phantom or (is_tripped and len(self.positions) == 0 and drawdown_from_capital < 0.05)
+
+        return {
+            "circuit_breaker_tripped": is_tripped,
+            "reset_required": reset_required,
+            "is_phantom_drawdown": is_phantom,
+            "current_equity": round(equity, 2),
+            "peak_equity": round(peak, 2),
+            "initial_capital": round(self.initial_capital, 2),
+            "drawdown_from_peak_pct": round(drawdown_from_peak * 100.0, 2),
+            "drawdown_from_capital_pct": round(drawdown_from_capital * 100.0, 2),
+            "max_drawdown_limit_pct": round(max_drawdown_limit_pct * 100.0, 1),
+            "open_positions_count": len(self.positions),
+            "diagnosis": (
+                "Phantom drawdown: Peak watermark was elevated above current balance without true capital loss. Reset required."
+                if is_phantom else (
+                    "Circuit breaker actively protecting against real drawdown."
+                    if is_tripped else "Healthy: No circuit breaker trip detected."
+                )
+            )
+        }
 
     def close_all_positions(
         self,

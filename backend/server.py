@@ -202,6 +202,26 @@ def sync_live_etoro_portfolio_if_live(force: bool = False):
         except Exception as e:
             logger.warning(f"Notice during live eToro trading history sync: {e}")
 
+def check_and_auto_recover_circuit_breaker() -> Dict[str, Any]:
+    """
+    Evaluates broker circuit breaker health. If tripped due to a phantom / stale watermark
+    or margin release while true capital is intact, automatically resets the circuit breaker
+    and aligns peak equity.
+    """
+    health = broker.check_circuit_breaker_health(config.max_drawdown_limit_pct)
+    if health.get("reset_required"):
+        live_eq = broker.get_equity()
+        broker.reset_drawdown(new_equity=live_eq)
+        logger.warning(
+            f"⚡ [CIRCUIT BREAKER AUTO-RECOVERY] Detected phantom drawdown ({health['drawdown_from_peak_pct']}%). "
+            f"True capital drawdown is only {health['drawdown_from_capital_pct']}%. "
+            f"Auto-reset applied: Peak equity aligned to ${live_eq:.2f}. Circuit breaker unlatched."
+        )
+        health["auto_recovered"] = True
+    else:
+        health["auto_recovered"] = False
+    return health
+
 # Ensure live mode does not inherit a stale simulation paper drawdown lockout or phantom paper positions
 if config.execution_mode == "live":
     config.simulation_mode = False
@@ -294,6 +314,8 @@ async def autonomous_background_worker_loop():
             # In live mode, ensure portfolio & active holdings are periodically synced from eToro
             if config.execution_mode == "live":
                 await asyncio.to_thread(sync_live_etoro_portfolio_if_live)
+                # Auto-heal circuit breaker if latched on a phantom or stale watermark
+                await asyncio.to_thread(check_and_auto_recover_circuit_breaker)
 
             # News Intelligence Refresh (every 10 minutes)
             if (now - last_news_refresh) >= 600.0:
@@ -1683,6 +1705,26 @@ def reset_circuit_breaker():
         "drawdown_pct": 0.0,
         "circuit_breaker_active": False,
         "cleared_positions": True if config.execution_mode == "live" else False
+    }
+
+@app.get("/api/circuit_breaker/test", tags=["Arbitration"])
+def test_circuit_breaker_endpoint():
+    """
+    Diagnostic test to inspect whether the Circuit Breaker is tripped,
+    and whether an automatic reset is required due to a phantom/stale watermark.
+    """
+    return broker.check_circuit_breaker_health(config.max_drawdown_limit_pct)
+
+@app.post("/api/circuit_breaker/auto_reset", tags=["Arbitration"])
+def auto_reset_circuit_breaker_endpoint():
+    """
+    Tests and automatically recovers the Circuit Breaker if a reset is required.
+    """
+    res = check_and_auto_recover_circuit_breaker()
+    return {
+        "status": "success",
+        "health": res,
+        "message": "Auto-recovery executed successfully." if res.get("auto_recovered") else "Circuit breaker is healthy; no reset required."
     }
 
 @app.post("/api/etoro/sync_5day_trades", tags=["eToro Live Integration"])

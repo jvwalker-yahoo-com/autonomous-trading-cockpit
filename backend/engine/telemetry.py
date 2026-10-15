@@ -235,7 +235,7 @@ class TelemetryModule:
             mins_left = open_mins - current_mins
             hrs = mins_left // 60
             mins = mins_left % 60
-            return False, f"Pre-Market (Opens at {open_h:02d}:{open_m:02d} UK in {hrs}h {mins}m)"
+            return False, f"Pre-Market (Opens at {open_h:02d}:{open_m:02d} UK in {hrs}h {mins}m) ({exch['name']})"
         elif current_mins >= close_mins:
             return False, f"Market Closed ({exch['name']} closed at {close_h:02d}:{close_m:02d} UK)"
         else:
