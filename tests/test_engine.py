@@ -1188,3 +1188,224 @@ def test_circuit_breaker_health_diagnostic_and_auto_reset():
     assert b_live.get_equity() == 1279.30
     h3 = b_live.check_circuit_breaker_health(max_drawdown_limit_pct=0.15)
     assert h3["circuit_breaker_tripped"] is False
+
+
+def test_authoritative_etoro_instrument_ids_and_no_crypto_collision():
+    """
+    Verifies that eToro instrument IDs match authoritative eToro catalog IDs
+    and never collide with wrong instruments (e.g. BA!=1072/AMR, UK100!=2104/NETC.CO, GOLD!=3001/EEM)
+    or crypto IDs (>=100000) for equities.
+    """
+    from src.services.etoro.client import SYMBOL_TO_ETORO_ID
+    from backend.engine.instruments_db import INITIAL_SEED_INSTRUMENTS, InstrumentsDBManager
+    import tempfile
+    from pathlib import Path
+
+    assert SYMBOL_TO_ETORO_ID["UK100"] == 30
+    assert SYMBOL_TO_ETORO_ID["GER40"] == 32
+    assert SYMBOL_TO_ETORO_ID["SPX500"] == 27
+    assert SYMBOL_TO_ETORO_ID["NSDQ100"] == 28
+    assert SYMBOL_TO_ETORO_ID["DJ30"] == 29
+    assert SYMBOL_TO_ETORO_ID["GOLD"] == 18
+    assert SYMBOL_TO_ETORO_ID["SILVER"] == 19
+    assert SYMBOL_TO_ETORO_ID["OIL"] == 17
+    assert SYMBOL_TO_ETORO_ID["BA"] == 1010
+    assert SYMBOL_TO_ETORO_ID["SPY"] == 3000
+    assert SYMBOL_TO_ETORO_ID["QQQ"] == 3006
+
+    seed_map = {item["symbol"]: item["instrument_id"] for item in INITIAL_SEED_INSTRUMENTS}
+    assert seed_map["UK100"] == 30
+    assert seed_map["GOLD"] == 18
+    assert seed_map["BA"] == 1010
+    for item in INITIAL_SEED_INSTRUMENTS:
+        if item.get("asset_class") != "Crypto":
+            assert item["instrument_id"] < 100000, f"Non-crypto {item['symbol']} has crypto ID {item['instrument_id']}"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = InstrumentsDBManager(db_path=Path(tmpdir) / "test_instruments.db")
+        assert db.get_instrument_id("UK100") == 30
+        assert db.get_instrument_id("GOLD") == 18
+        assert db.get_instrument_id("BA") == 1010
+
+
+def test_create_order_attaches_stop_loss_on_short_and_prevents_rapid_duplicates(monkeypatch):
+    """
+    Verifies that:
+    1. SHORT orders at leverage=1 ALWAYS include stopLossRate / TakeProfitRate (so eToro never defaults to -50% SL).
+    2. Rapid duplicate orders on the same symbol/instrument within cooldown window are blocked.
+    """
+    from src.services.etoro.client import EToroClient
+
+    et = EToroClient(api_key="test_api_key", user_key="ey_test_user_key")
+    et._recent_order_timestamps.clear() if hasattr(et, "_recent_order_timestamps") else None
+
+    captured_payloads = []
+
+    def fake_mcp_trade(*args, **kwargs):
+        return {"success": False, "error": "fallback to v2"}
+
+    def fake_request(method, endpoint, params=None, json_data=None, **kwargs):
+        captured_payloads.append((method, endpoint, json_data))
+        return True, 200, {"orderId": 12345}
+
+    monkeypatch.setattr(et, "execute_mcp_trade", fake_mcp_trade)
+    monkeypatch.setattr(et, "_request", fake_request)
+
+    res1 = et.create_order(
+        instrument_id=30,
+        direction="SHORT",
+        amount_usd=150.0,
+        stop_loss_rate=8400.0,
+        take_profit_rate=8100.0,
+        leverage=1,
+        mode="real",
+        symbol="UK100"
+    )
+    assert res1["success"] is True
+    assert len(captured_payloads) == 1
+    v2_body = captured_payloads[0][2]
+    assert v2_body["transaction"] == "sellShort"
+    assert v2_body.get("stopLossRate") == 8400.0
+    assert v2_body.get("takeProfitRate") == 8100.0
+
+    # Immediate duplicate order on same symbol/instrument must be blocked by rapid-fire guard
+    res2 = et.create_order(
+        instrument_id=30,
+        direction="SHORT",
+        amount_usd=150.0,
+        stop_loss_rate=8400.0,
+        take_profit_rate=8100.0,
+        leverage=1,
+        mode="real",
+        symbol="UK100"
+    )
+    assert res2["success"] is False
+    assert "duplicate" in str(res2.get("error", "")).lower() or "cooldown" in str(res2.get("error", "")).lower()
+    assert len(captured_payloads) == 1
+
+
+def test_sync_live_etoro_portfolio_preserves_metadata_all_position_ids_and_short_units():
+    """
+    Verifies that sync_live_etoro_portfolio:
+    1. Converts negative units on short holdings to positive shares and sets direction='SHORT'.
+    2. Captures all underlying eToro positionIds in Position.etoro_position_ids.
+    3. Replaces eToro's -50% default stop-loss with tight risk-managed stop-loss and preserves horizon='day'.
+    """
+    from backend.engine.broker import SimulatedBroker
+    from backend.engine.models import Position
+
+    b = SimulatedBroker(initial_capital=1200.0)
+    # Pre-existing local day trade metadata
+    b.positions["NETC.CO"] = Position(
+        id="3606518052",
+        symbol="NETC.CO",
+        direction="SHORT",
+        horizon="day",
+        shares=5.601546,
+        entry_price=348.0,
+        current_price=348.0,
+        cost_basis_usd=292.28,
+        market_value_usd=292.28,
+        unrealized_pnl_usd=0.0,
+        unrealized_pnl_pct=0.0,
+        stop_loss=352.18,
+        take_profit=339.65,
+        entry_time="2026-10-15T07:00:02.057",
+        max_hold_until="2026-10-15T11:00:02.057",
+        rationale="Day short"
+    )
+
+    b.sync_live_etoro_portfolio({
+        "totals": {"totalValue": 1224.96, "availableCash": 0.0, "frozenCash": 0.0},
+        "holdings": [
+            {
+                "market": {"instrumentId": 2104, "symbol": "NETC.CO", "name": "Netcompany Group A/S"},
+                "invested": 292.28,
+                "value": 266.21,
+                "pnl": -26.07,
+                "pnlPercent": -8.92,
+                "units": -5.601546,
+                "avgOpenRate": 348.0,
+                "currentRate": 379.0,
+                "positions": [
+                    {
+                        "positionId": 3606518052,
+                        "openTime": "2026-10-15T07:00:04.6",
+                        "openRate": 348.0,
+                        "currentRate": 379.0,
+                        "units": 2.800773,
+                        "invested": 146.14,
+                        "pnl": -13.04,
+                        "pnlPercent": -8.92,
+                        "direction": "short",
+                        "stopLossRate": 522.0
+                    },
+                    {
+                        "positionId": 3606518023,
+                        "openTime": "2026-10-15T07:00:02.057",
+                        "openRate": 348.0,
+                        "currentRate": 379.0,
+                        "units": 2.800773,
+                        "invested": 146.14,
+                        "pnl": -13.04,
+                        "pnlPercent": -8.92,
+                        "direction": "short",
+                        "stopLossRate": 522.0
+                    }
+                ]
+            }
+        ]
+    })
+
+    pos = b.positions["NETC.CO"]
+    assert pos.direction == "SHORT"
+    assert pos.shares == 5.601546
+    assert pos.horizon == "day"
+    assert pos.etoro_position_ids == ["3606518052", "3606518023"]
+    # Must NOT keep eToro's 522.0 (-50%) stop loss; must preserve/enforce tight stop (352.18)
+    assert pos.stop_loss < 360.0
+
+
+def test_live_mode_enforces_stop_loss_and_closes_all_etoro_lots():
+    """
+    Verifies that enforce_live_stops actively closes all underlying eToro positionIds
+    when a live position breaches its stop-loss price or max stop-loss percentage.
+    """
+    from backend.engine.broker import SimulatedBroker
+    from backend.engine.models import Position
+
+    b = SimulatedBroker(initial_capital=1200.0)
+    b.positions["NETC.CO"] = Position(
+        id="3606518052",
+        etoro_position_ids=["3606518052", "3606518023"],
+        symbol="NETC.CO",
+        direction="SHORT",
+        horizon="swing",
+        shares=5.601546,
+        entry_price=348.0,
+        current_price=379.0,
+        cost_basis_usd=292.28,
+        market_value_usd=266.21,
+        unrealized_pnl_usd=-26.07,
+        unrealized_pnl_pct=-8.92,
+        stop_loss=356.70,
+        take_profit=330.60,
+        entry_time="2026-10-15T07:00:02.057",
+        rationale="Active Live eToro Holding"
+    )
+
+    closed_ids = []
+    class DummyEtoroClient:
+        def is_configured(self):
+            return True
+        def resolve_instrument_id(self, sym):
+            return 2104
+        def close_position(self, position_id, mode="real", instrument_id=None):
+            closed_ids.append(str(position_id))
+            return {"success": True}
+
+    records = b.enforce_live_stops(etoro_client=DummyEtoroClient(), max_loss_pct=2.5)
+    assert len(records) == 1
+    assert closed_ids == ["3606518052", "3606518023"]
+    assert "NETC.CO" not in b.positions
+

@@ -129,7 +129,8 @@ SYMBOL_TO_ETORO_ID: Dict[str, int] = {
     "NSDQ100":  2101,     # NASDAQ 100 (alias)
     "DJ30":     2102,     # Dow Jones 30
     "GER40":    2103,     # Germany DAX
-    "UK100":    2104,     # FTSE 100
+    "UK100":    30,       # FTSE 100 Index (CONFIRMED: 30, not 2104 which is NETC.CO)
+    "NETC.CO":  2104,     # Netcompany Group A/S (Copenhagen)
     "AUS200":   2105,     # ASX 200
     "FRA40":    2106,     # France CAC 40
     "ESP35":    2107,     # Spain IBEX 35
