@@ -16,3 +16,5 @@ htmlcov/
 
 # Data & Logs (Local runtime state)
 *.log
+
+data/reports/

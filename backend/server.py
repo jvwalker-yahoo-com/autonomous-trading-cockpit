@@ -49,6 +49,7 @@ from .engine.instruments_db import get_instruments_db, get_etoro_id
 from .engine.data_feed import BASE_PRICES
 from .engine.news_intel import NewsIntelligenceEngine
 from .engine.smart_money import SmartMoneyEngine
+from .engine.ai_committee import get_ai_committee_engine, AICommitteeDossier
 from .engine.models import (
     RegimeState, FederationOutput, ArbitrationOutput,
     DecisionOutput, AnomalyDetectorOutput, QuadrantOutput,
@@ -556,8 +557,13 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     quadrant = quadrant_module.quadrant(metrics["risk"], metrics["impact"])
 
     # 7. Model Federation (Multi-Strategy Scoring + Adaptive Weights + Regime Awareness)
+    ai_committee = get_ai_committee_engine()
+    dossier = ai_committee.get_dossier(symbol)
+    ac_score = dossier.conviction_score if dossier else None
+    ac_rat = dossier.pm_rationale if dossier else None
     federation = federation_module.model_federation(
-        indicators, quote.price, sentiment, learner.weights, trend=regime.trend
+        indicators, quote.price, sentiment, learner.weights, trend=regime.trend,
+        ai_committee_score=ac_score, ai_committee_rationale=ac_rat
     )
 
     # 8. Arbitration & Risk Gates (including eToro UK Market Hours gate, Daily Drawdown & Spread Filter)
@@ -2418,3 +2424,63 @@ async def serve_js():
     if js_file.exists():
         return FileResponse(js_file, media_type="application/javascript")
     return JSONResponse({"error": "dashboard.js not found"}, status_code=404)
+
+# ==========================================
+# TRADINGAGENTS AI INVESTMENT COMMITTEE APIS
+# ==========================================
+
+@app.get("/api/research/{symbol}", tags=["AI Committee"])
+def get_ai_committee_dossier(symbol: str):
+    """
+    Returns the full TradingAgents institutional research dossier for a symbol
+    (Analyst reports, Bull vs Bear debate transcript, Risk desk evaluation, and PM verdict).
+    """
+    sym = symbol.upper().strip()
+    ai_committee = get_ai_committee_engine()
+    dossier = ai_committee.get_dossier(sym)
+    if not dossier:
+        quote = data_feed.get_latest_quote(sym)
+        price = quote.price if quote and quote.price > 0 else 100.0
+        inds = data_feed.get_technical_indicators(sym)
+        news_items = news_intel.get_symbol_news(sym)
+        headlines = [item.get("headline", "") for item in news_items[:5]]
+        sm_conv = smart_money.get_flow_conviction(sym)
+        dossier = ai_committee.evaluate(
+            symbol=sym,
+            price=price,
+            indicators=inds,
+            sentiment_score=data_feed.get_news_sentiment(sym),
+            headlines=headlines,
+            smart_money_conviction=sm_conv
+        )
+    return dossier
+
+@app.post("/api/research/evaluate", tags=["AI Committee"])
+def evaluate_symbol_committee(symbol: str):
+    """Forces a fresh multi-agent debate and evaluation cycle for a symbol."""
+    sym = symbol.upper().strip()
+    ai_committee = get_ai_committee_engine()
+    quote = data_feed.get_latest_quote(sym)
+    price = quote.price if quote and quote.price > 0 else 100.0
+    inds = indicators_module.compute_all(
+        data_feed.history_windows.get(sym, [price]),
+        data_feed.volume_windows.get(sym, [1000.0])
+    )
+    news_items = news_intel.get_symbol_news(sym)
+    headlines = [item.get("headline", "") for item in news_items[:5]]
+    sm_conv = smart_money.get_flow_conviction(sym)
+    dossier = ai_committee.evaluate(
+        symbol=sym,
+        price=price,
+        indicators=inds,
+        sentiment_score=data_feed.get_news_sentiment(sym),
+        headlines=headlines,
+        smart_money_conviction=sm_conv
+    )
+    return {
+        "status": "success",
+        "symbol": sym,
+        "verdict": dossier.verdict,
+        "conviction_score": dossier.conviction_score,
+        "dossier": dossier
+    }

@@ -233,7 +233,9 @@ class FederationModule:
         price: float,
         sentiment_val: float,
         current_weights: Dict[str, float],
-        trend: str = "CHOPPY"
+        trend: str = "CHOPPY",
+        ai_committee_score: Optional[float] = None,
+        ai_committee_rationale: Optional[str] = None
     ) -> FederationOutput:
         """
         Executes multi-model scoring, applies regime-aware dynamically calibrated weights,
@@ -263,6 +265,10 @@ class FederationModule:
             "wyckoff_engine": s_wyck,
             "news_sentiment": s_sent
         }
+
+        if ai_committee_score is not None:
+            strat_names.append("ai_committee")
+            scores_map["ai_committee"] = round(max(-1.0, min(1.0, ai_committee_score)), 3)
 
         # JEV Regime-Aware Strategy Calibration (6 regimes)
         if trend in ("BULL_TREND", "BEAR_TREND"):
@@ -328,8 +334,9 @@ class FederationModule:
         # Blend regime prior with adaptive learner weights
         blended_weights = {}
         for k in strat_names:
-            learner_w = current_weights.get(k, 0.17)
-            prior_w = regime_priors.get(k, 0.17)
+            default_prior = 0.20 if k == "ai_committee" else 0.17
+            learner_w = current_weights.get(k, default_prior)
+            prior_w = regime_priors.get(k, default_prior)
             blended_weights[k] = prior_w * 0.7 + learner_w * 0.3
 
         total_w = sum(blended_weights.values())
@@ -354,6 +361,19 @@ class FederationModule:
             ModelSignal(name="Wyckoff Range Engine (Phase/Spring)", signal=sig_wyck, score=s_wyck, weight=round(normalized_weights["wyckoff_engine"], 3), rationale=rat_wyck),
             ModelSignal(name="News Sentiment (Finnhub)", signal=sig_sent, score=s_sent, weight=round(normalized_weights["news_sentiment"], 3), rationale=rat_sent),
         ]
+
+        if ai_committee_score is not None and "ai_committee" in normalized_weights:
+            ac_sig = "BUY" if ai_committee_score >= 0.15 else ("SHORT" if ai_committee_score <= -0.15 else "NEUTRAL")
+            ac_rat = ai_committee_rationale or f"Institutional Multi-Agent Committee Consensus ({ai_committee_score:+.2f})"
+            model_details.append(
+                ModelSignal(
+                    name="AI Committee (TradingAgents)",
+                    signal=ac_sig,
+                    score=scores_map["ai_committee"],
+                    weight=round(normalized_weights["ai_committee"], 3),
+                    rationale=ac_rat
+                )
+            )
 
         # JEV Calibration: convert raw score to calibrated probability p ∈ [0,1]
         # Uses logistic mapping: p = 1 / (1 + exp(-k * score)) with k=4

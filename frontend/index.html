@@ -161,6 +161,7 @@
         </button>
         <button id="btnPruneShortTerm" class="btn btn-outline" style="border-color: #f59e0b; color: #f59e0b; font-weight: bold; font-size: 11px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px;" title="Operate like a Day Trader: Sell stagnant/losing positions held for > 1 week to free capital">🧹 PRUNE 1-WEEK</button>
         <button id="btnWyckoffHeader" class="btn btn-outline" style="border-color: #fbbf24; color: #fbbf24; font-weight: bold; font-size: 11px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px;" title="Wyckoff Range Engine (Accumulation, Spring, Climax, Multi-TP, 90% Win Rate on Gold)">🎯 WYCKOFF ENGINE</button>
+        <button id="btnAiCommitteeHeader" class="btn btn-outline" style="border-color: #ec4899; color: #f472b6; font-weight: bold; font-size: 11px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px;" title="TradingAgents AI Investment Committee (Analysts + Bull/Bear Debate + Risk Desk)">🤖 AI COMMITTEE</button>
         <button id="btnScreenerModal" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981, #059669);" title="Market Screener & Universal Stock Universe">🔍 SCREENER / STOCKS</button>
         <button id="btnSmartMoneyHeader" class="btn btn-outline" style="border-color: #a855f7; color: #c084fc; font-weight: bold; font-size: 11px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px;" title="View Congressional STOCK Act Trades & Smart Money Opportunities">🏛️ CONGRESS TRADES</button>
         <button id="btnWorldNewsHeader" class="btn btn-outline" style="border-color: #38bdf8; color: #38bdf8; font-weight: bold; font-size: 11px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px;" title="Global Breaking Market News & Worldwide Macro Risk Radar">🌍 WORLD NEWS</button>
@@ -1470,6 +1471,127 @@
           🔔 Webhook Integration: Send TradingView alerts to <code style="color: #fbbf24;">/api/wyckoff/webhook</code>
         </span>
         <button id="btnCloseWyckoffFooter" class="btn btn-secondary">CLOSE</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- AI COMMITTEE MODAL (TradingAgents Architecture) -->
+  <div id="aiCommitteeModal" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width: 1080px; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding: 12px 20px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <h3 style="margin: 0; font-size: 15px; letter-spacing: 0.5px; color: #f472b6;">🤖 AI INVESTMENT COMMITTEE // TAURIC MULTI-AGENT FRAMEWORK</h3>
+          <span class="badge" style="background: rgba(236, 72, 153, 0.2); color: #f472b6; border: 1px solid #ec4899; font-size: 11px; padding: 2px 8px; border-radius: 4px;">LANGGRAPH DEBATE</span>
+          <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; font-size: 11px; padding: 2px 8px; border-radius: 4px;">5-TIER HEDGE FUND DESK</span>
+        </div>
+        <button id="btnCloseAiCommitteeModal" class="btn-close">&times;</button>
+      </div>
+
+      <div class="modal-body" style="overflow-y: auto; gap: 14px; padding: 16px 20px; display: flex; flex-direction: column;">
+        <!-- Search & Control Bar -->
+        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 11px; font-weight: bold; color: var(--text-muted); text-transform: uppercase;">Symbol:</span>
+            <input type="text" id="aiCommitteeTickerInput" value="NVDA" style="background: rgba(0,0,0,0.4); border: 1px solid var(--border-color); color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 12px; width: 85px; font-weight: bold; text-transform: uppercase;" />
+            <button id="btnAiCommitteeSearch" class="btn btn-primary" style="font-size: 11px; padding: 4px 12px;">INSPECT</button>
+            <button id="btnAiCommitteeRunDebate" class="btn btn-outline" style="border-color: #ec4899; color: #f472b6; font-size: 11px; padding: 4px 12px;" title="Trigger a fresh multi-turn debate cycle">🔄 RE-DEBATE</button>
+            <div style="display: flex; gap: 4px; margin-left: 6px;">
+              <button class="btn btn-outline btn-ai-comm-quick" data-symbol="NVDA" style="font-size: 10px; padding: 3px 8px; border-color: #f472b6; color: #f472b6;">NVDA</button>
+              <button class="btn btn-outline btn-ai-comm-quick" data-symbol="TSLA" style="font-size: 10px; padding: 3px 8px;">TSLA</button>
+              <button class="btn btn-outline btn-ai-comm-quick" data-symbol="AAPL" style="font-size: 10px; padding: 3px 8px;">AAPL</button>
+              <button class="btn btn-outline btn-ai-comm-quick" data-symbol="MSFT" style="font-size: 10px; padding: 3px 8px;">MSFT</button>
+              <button class="btn btn-outline btn-ai-comm-quick" data-symbol="PLTR" style="font-size: 10px; padding: 3px 8px;">PLTR</button>
+            </div>
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);" id="aiCommitteeLastUpdated">
+            Awaiting deliberation...
+          </div>
+        </div>
+
+        <!-- KPI Summary Cards -->
+        <div class="portfolio-stats-bar" style="margin-bottom: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+          <div class="stat-card" style="padding: 10px 14px;">
+            <span class="stat-title">PM FINAL VERDICT</span>
+            <span class="stat-number stat-highlight" id="aiCommVerdictBadge" style="color: #10b981; font-size: 16px;">STRONG BUY</span>
+            <span style="font-size: 10px; color: var(--text-muted);" id="aiCommVerdictSub">Consensus clearance</span>
+          </div>
+          <div class="stat-card" style="padding: 10px 14px;">
+            <span class="stat-title">CONVICTION SCORE</span>
+            <span class="stat-number" id="aiCommConvictionBadge" style="color: #38bdf8; font-size: 16px;">+0.75</span>
+            <span style="font-size: 10px; color: var(--text-muted);">Range: -1.0 to +1.0</span>
+          </div>
+          <div class="stat-card" style="padding: 10px 14px;">
+            <span class="stat-title">RECOMMENDED HORIZON</span>
+            <span class="stat-number" id="aiCommHorizonBadge" style="color: #fbbf24; font-size: 16px;">SWING</span>
+            <span style="font-size: 10px; color: var(--text-muted);" id="aiCommHorizonSub">Multi-day hold</span>
+          </div>
+          <div class="stat-card" style="padding: 10px 14px;">
+            <span class="stat-title">TARGET UPSIDE / RISK</span>
+            <span class="stat-number" id="aiCommTargetBadge" style="color: #10b981; font-size: 16px;">+4.5% / -1.2%</span>
+            <span style="font-size: 10px; color: var(--text-muted);">Defined Stop-Loss & TP</span>
+          </div>
+        </div>
+
+        <!-- Tab Controls -->
+        <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; margin-top: 4px;">
+          <button class="btn btn-outline ai-comm-tab-btn active" data-tab="aiTabDebate" style="font-size: 11px; padding: 4px 12px;">⚖️ BULL VS BEAR DEBATE</button>
+          <button class="btn btn-outline ai-comm-tab-btn" data-tab="aiTabAnalysts" style="font-size: 11px; padding: 4px 12px;">📊 ANALYST TEAM</button>
+          <button class="btn btn-outline ai-comm-tab-btn" data-tab="aiTabRisk" style="font-size: 11px; padding: 4px 12px;">🛡️ RISK MANAGEMENT DESK</button>
+          <button class="btn btn-outline ai-comm-tab-btn" data-tab="aiTabDossier" style="font-size: 11px; padding: 4px 12px;">📜 FULL REPORT TREE</button>
+        </div>
+
+        <!-- Tab 1: Debate Transcript -->
+        <div id="aiTabDebate" class="ai-comm-tab-content">
+          <div id="aiCommDebateTranscript" style="display: flex; flex-direction: column; gap: 10px;">
+            <!-- Rendered debate rounds -->
+          </div>
+        </div>
+
+        <!-- Tab 2: Analyst Reports -->
+        <div id="aiTabAnalysts" class="ai-comm-tab-content hidden" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+          <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px;">
+            <h4 style="margin: 0 0 8px 0; font-size: 13px; color: #38bdf8;">📈 TECHNICAL ANALYST</h4>
+            <div id="aiCommAnalystTech" style="font-size: 11px; line-height: 1.5; color: var(--text-muted); white-space: pre-wrap;"></div>
+          </div>
+          <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px;">
+            <h4 style="margin: 0 0 8px 0; font-size: 13px; color: #10b981;">🏢 FUNDAMENTAL ANALYST</h4>
+            <div id="aiCommAnalystFund" style="font-size: 11px; line-height: 1.5; color: var(--text-muted); white-space: pre-wrap;"></div>
+          </div>
+          <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px;">
+            <h4 style="margin: 0 0 8px 0; font-size: 13px; color: #fbbf24;">📰 SENTIMENT & NEWS</h4>
+            <div id="aiCommAnalystSent" style="font-size: 11px; line-height: 1.5; color: var(--text-muted); white-space: pre-wrap;"></div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Risk Desk -->
+        <div id="aiTabRisk" class="ai-comm-tab-content hidden" style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; padding: 12px;">
+            <strong style="color: #ef4444; font-size: 12px;">AGGRESSIVE DESK DIRECTIVE:</strong>
+            <p id="aiCommRiskAggressive" style="margin: 4px 0 0 0; font-size: 11px; color: #e2e8f0;"></p>
+          </div>
+          <div style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; padding: 12px;">
+            <strong style="color: #38bdf8; font-size: 12px;">NEUTRAL DESK DIRECTIVE:</strong>
+            <p id="aiCommRiskNeutral" style="margin: 4px 0 0 0; font-size: 11px; color: #e2e8f0;"></p>
+          </div>
+          <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; padding: 12px;">
+            <strong style="color: #10b981; font-size: 12px;">CONSERVATIVE DESK DIRECTIVE:</strong>
+            <p id="aiCommRiskConservative" style="margin: 4px 0 0 0; font-size: 11px; color: #e2e8f0;"></p>
+          </div>
+        </div>
+
+        <!-- Tab 4: Full Report Tree -->
+        <div id="aiTabDossier" class="ai-comm-tab-content hidden">
+          <pre id="aiCommCompleteReport" style="background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); border-radius: 6px; padding: 14px; font-size: 11px; color: #e2e8f0; white-space: pre-wrap; max-height: 400px; overflow-y: auto; font-family: monospace;"></pre>
+        </div>
+
+      </div>
+
+      <div class="modal-footer" style="justify-content: space-between; border-top: 1px solid var(--border-color); padding: 10px 18px;">
+        <span class="text-muted" style="font-size: 11px;">
+          📂 On-Disk Reports synced to: <code style="color: #f472b6;">data/reports/[TICKER]/</code> (TradingAgents format)
+        </span>
+        <button id="btnCloseAiCommitteeFooter" class="btn btn-secondary">CLOSE</button>
       </div>
     </div>
   </div>

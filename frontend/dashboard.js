@@ -3104,3 +3104,156 @@ try {
 pollTimer = setInterval(() => {
   fetchCockpitData().catch(e => console.warn("Poll interval error:", e));
 }, 3500);
+
+
+// ==========================================
+// AI INVESTMENT COMMITTEE (TradingAgents) UI
+// ==========================================
+
+const aiCommitteeModal = document.getElementById("aiCommitteeModal");
+const btnAiCommitteeHeader = document.getElementById("btnAiCommitteeHeader");
+const btnCloseAiCommitteeModal = document.getElementById("btnCloseAiCommitteeModal");
+const btnCloseAiCommitteeFooter = document.getElementById("btnCloseAiCommitteeFooter");
+const btnAiCommitteeSearch = document.getElementById("btnAiCommitteeSearch");
+const btnAiCommitteeRunDebate = document.getElementById("btnAiCommitteeRunDebate");
+const aiCommitteeTickerInput = document.getElementById("aiCommitteeTickerInput");
+
+async function loadAiCommitteeDossier(symbol, forceRefresh = false) {
+  const sym = (symbol || (symbolSelect ? symbolSelect.value : "NVDA")).toUpperCase().trim();
+  if (aiCommitteeTickerInput) aiCommitteeTickerInput.value = sym;
+  
+  const statusEl = document.getElementById("aiCommitteeLastUpdated");
+  if (statusEl) statusEl.textContent = forceRefresh ? "🔄 Running multi-agent debate..." : "⏳ Loading dossier...";
+
+  try {
+    const url = forceRefresh ? `/api/research/evaluate?symbol=${encodeURIComponent(sym)}` : `/api/research/${encodeURIComponent(sym)}`;
+    const method = forceRefresh ? "POST" : "GET";
+    const res = await fetch(url, { method });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rawData = await res.json();
+    const data = rawData.dossier || rawData;
+
+    // Update KPI badges
+    const verdictEl = document.getElementById("aiCommVerdictBadge");
+    if (verdictEl) {
+      verdictEl.textContent = data.verdict || "NEUTRAL";
+      verdictEl.style.color = (data.conviction_score > 0) ? "#10b981" : ((data.conviction_score < 0) ? "#ef4444" : "#fbbf24");
+    }
+    const scoreEl = document.getElementById("aiCommConvictionBadge");
+    if (scoreEl) {
+      scoreEl.textContent = (data.conviction_score >= 0 ? "+" : "") + Number(data.conviction_score || 0).toFixed(2);
+      scoreEl.style.color = (data.conviction_score > 0) ? "#10b981" : ((data.conviction_score < 0) ? "#ef4444" : "#94a3b8");
+    }
+    const horizonEl = document.getElementById("aiCommHorizonBadge");
+    if (horizonEl) {
+      horizonEl.textContent = (data.horizon || "swing").toUpperCase();
+      horizonEl.style.color = (data.horizon === "day") ? "#f59e0b" : "#38bdf8";
+    }
+    const targetEl = document.getElementById("aiCommTargetBadge");
+    if (targetEl) {
+      targetEl.textContent = `+${Number(data.target_upside_pct || 0).toFixed(1)}% / -${Number(data.target_downside_pct || 0).toFixed(1)}%`;
+    }
+
+    // Render Tab 1: Debate Transcript
+    const debateContainer = document.getElementById("aiCommDebateTranscript");
+    if (debateContainer) {
+      debateContainer.innerHTML = "";
+      (data.debate_transcript || []).forEach(item => {
+        const card = document.createElement("div");
+        const isBull = item.role && item.role.includes("Bull");
+        const isBear = item.role && item.role.includes("Bear");
+        const bg = isBull ? "rgba(16, 185, 129, 0.08)" : (isBear ? "rgba(239, 68, 68, 0.08)" : "rgba(244, 114, 182, 0.08)");
+        const border = isBull ? "rgba(16, 185, 129, 0.3)" : (isBear ? "rgba(239, 68, 68, 0.3)" : "rgba(244, 114, 182, 0.3)");
+        const color = isBull ? "#10b981" : (isBear ? "#ef4444" : "#f472b6");
+        
+        card.style.cssText = `background: ${bg}; border: 1px solid ${border}; border-radius: 6px; padding: 10px 14px; font-size: 11px;`;
+        card.innerHTML = `<strong style="color: ${color};">${item.role}:</strong> <span style="color: #e2e8f0;">${item.content.replace(/\*\*[^*]+\*\*:/, '')}</span>`;
+        debateContainer.appendChild(card);
+      });
+    }
+
+    // Render Tab 2: Analyst Reports
+    const techEl = document.getElementById("aiCommAnalystTech");
+    const fundEl = document.getElementById("aiCommAnalystFund");
+    const sentEl = document.getElementById("aiCommAnalystSent");
+    if (techEl) techEl.textContent = data.analyst_reports?.technical || "N/A";
+    if (fundEl) fundEl.textContent = data.analyst_reports?.fundamental || "N/A";
+    if (sentEl) sentEl.textContent = data.analyst_reports?.sentiment || "N/A";
+
+    // Render Tab 3: Risk Desk
+    const riskAgg = document.getElementById("aiCommRiskAggressive");
+    const riskNeu = document.getElementById("aiCommRiskNeutral");
+    const riskCon = document.getElementById("aiCommRiskConservative");
+    if (riskAgg) riskAgg.textContent = data.risk_evaluation?.aggressive || "N/A";
+    if (riskNeu) riskNeu.textContent = data.risk_evaluation?.neutral || "N/A";
+    if (riskCon) riskCon.textContent = data.risk_evaluation?.conservative || "N/A";
+
+    // Render Tab 4: Full Markdown Dossier
+    const reportPre = document.getElementById("aiCommCompleteReport");
+    if (reportPre) reportPre.textContent = data.complete_report_md || JSON.stringify(data, null, 2);
+
+    if (statusEl) {
+      statusEl.textContent = `✓ Deliberation completed: ${new Date(data.timestamp).toLocaleTimeString()}`;
+    }
+  } catch (err) {
+    console.error("loadAiCommitteeDossier error:", err);
+    if (statusEl) statusEl.textContent = `❌ Error: ${err.message}`;
+  }
+}
+
+// Wire modal buttons
+if (btnAiCommitteeHeader) {
+  btnAiCommitteeHeader.addEventListener("click", () => {
+    if (aiCommitteeModal) {
+      aiCommitteeModal.classList.remove("hidden");
+      const currentSym = (symbolSelect ? symbolSelect.value : "NVDA");
+      loadAiCommitteeDossier(currentSym);
+    }
+  });
+}
+
+if (btnCloseAiCommitteeModal) {
+  btnCloseAiCommitteeModal.addEventListener("click", () => {
+    if (aiCommitteeModal) aiCommitteeModal.classList.add("hidden");
+  });
+}
+
+if (btnCloseAiCommitteeFooter) {
+  btnCloseAiCommitteeFooter.addEventListener("click", () => {
+    if (aiCommitteeModal) aiCommitteeModal.classList.add("hidden");
+  });
+}
+
+if (btnAiCommitteeSearch) {
+  btnAiCommitteeSearch.addEventListener("click", () => {
+    const sym = aiCommitteeTickerInput ? aiCommitteeTickerInput.value : "NVDA";
+    loadAiCommitteeDossier(sym, false);
+  });
+}
+
+if (btnAiCommitteeRunDebate) {
+  btnAiCommitteeRunDebate.addEventListener("click", () => {
+    const sym = aiCommitteeTickerInput ? aiCommitteeTickerInput.value : "NVDA";
+    loadAiCommitteeDossier(sym, true);
+  });
+}
+
+// Quick Ticker buttons
+document.querySelectorAll(".btn-ai-comm-quick").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const sym = btn.getAttribute("data-symbol");
+    loadAiCommitteeDossier(sym, false);
+  });
+});
+
+// Tab switching
+document.querySelectorAll(".ai-comm-tab-btn").forEach(tabBtn => {
+  tabBtn.addEventListener("click", () => {
+    document.querySelectorAll(".ai-comm-tab-btn").forEach(b => b.classList.remove("active"));
+    tabBtn.classList.add("active");
+    const targetTabId = tabBtn.getAttribute("data-tab");
+    document.querySelectorAll(".ai-comm-tab-content").forEach(c => c.classList.add("hidden"));
+    const targetContent = document.getElementById(targetTabId);
+    if (targetContent) targetContent.classList.remove("hidden");
+  });
+});
