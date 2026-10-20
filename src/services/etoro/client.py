@@ -63,7 +63,8 @@ SYMBOL_TO_ETORO_ID: Dict[str, int] = {
     "PEPE":     100025,   # Pepe
 
     # === US EQUITIES (Tech, AI, Growth, Blue Chips) ===
-    "AAPL":     1001,     # Apple — CONFIRMED from official eToro API docs
+    "AAPL":     1001,
+    "BA":       1010,     # Apple — CONFIRMED from official eToro API docs
     "NVDA":     1137,     # NVIDIA Corp — CONFIRMED via MCP
     "MSFT":     1004,     # Microsoft — CONFIRMED via MCP
     "TSLA":     1111,     # Tesla Motors — CONFIRMED via MCP
@@ -94,8 +95,8 @@ SYMBOL_TO_ETORO_ID: Dict[str, int] = {
     "APLD":     1052,     # Applied Digital
 
     # === ETFs (Leveraged, Thematic & Benchmark) ===
-    "SPY":      2001,     # S&P 500 ETF
-    "QQQ":      2002,     # Nasdaq ETF
+    "SPY":      3000,     # S&P 500 ETF
+    "QQQ":      3006,     # Nasdaq ETF
     "SQQQ":     2003,     # ProShares UltraPro Short QQQ
     "FNGU":     2004,     # FNG Ultra ETF
     "SOXL":     2005,     # Direxion Semiconductor Bull 3X
@@ -124,11 +125,11 @@ SYMBOL_TO_ETORO_ID: Dict[str, int] = {
     "TLT":      2028,     # iShares 20+ Year Treasury
 
     # === BENCHMARK INDICES ===
-    "SPX500":   2100,     # S&P 500 Index
-    "NDX100":   2101,     # NASDAQ 100
-    "NSDQ100":  2101,     # NASDAQ 100 (alias)
-    "DJ30":     2102,     # Dow Jones 30
-    "GER40":    2103,     # Germany DAX
+    "SPX500":   27,     # S&P 500 Index
+    "NDX100":   28,     # NASDAQ 100
+    "NSDQ100":  28,     # NASDAQ 100 (alias)
+    "DJ30":     29,     # Dow Jones 30
+    "GER40":    32,     # Germany DAX
     "UK100":    30,       # FTSE 100 Index (CONFIRMED: 30, not 2104 which is NETC.CO)
     "NETC.CO":  2104,     # Netcompany Group A/S (Copenhagen)
     "AUS200":   2105,     # ASX 200
@@ -141,9 +142,9 @@ SYMBOL_TO_ETORO_ID: Dict[str, int] = {
     "VIX":      2112,     # CBOE Volatility Index
 
     # === COMMODITIES (Metals, Energy, Agriculture) ===
-    "GOLD":     3001,     # Gold (Spot Non-Expiry)
-    "SILVER":   3002,     # Silver
-    "OIL":      3003,     # Crude Oil
+    "GOLD":     18,     # Gold (Spot Non-Expiry)
+    "SILVER":   19,     # Silver
+    "OIL":      17,     # Crude Oil
     "NGAS":     3004,     # Natural Gas
     "NATGAS":   3004,     # Natural Gas (alias)
     "COPPER":   3005,     # Copper
@@ -202,6 +203,8 @@ class EToroClient:
         self._prefer_swapped: bool = False  # Set by test_connection if swapped orientation works
         self._auth_cooldown_until: float = 0.0
         self._last_auth_error: str = ""
+        self._recent_order_timestamps: Dict[str, float] = {}
+        self._order_duplicate_window_sec: float = 15.0
 
     def is_in_auth_cooldown(self) -> bool:
         """Returns True if client is in cooldown following an HTTP 401 Unauthorized rejection."""
@@ -1483,6 +1486,20 @@ class EToroClient:
         is_buy = direction.upper() in ("BUY", "LONG")
         sym = (symbol or "").strip().upper()
 
+        # Rapid-fire duplicate guard: block immediate duplicate orders on same symbol/instrument
+        order_key = f"{sym or instrument_id}:{direction.upper()}"
+        now_ts = time.time()
+        last_order_ts = self._recent_order_timestamps.get(order_key, 0.0)
+        if now_ts - last_order_ts < getattr(self, "_order_duplicate_window_sec", 15.0):
+            rem_cd = int(getattr(self, "_order_duplicate_window_sec", 15.0) - (now_ts - last_order_ts))
+            logger.warning(f"🚫 [eToro] Duplicate order blocked for {sym or instrument_id}: cooldown active ({rem_cd}s remaining).")
+            return {
+                "success": False,
+                "status_code": 429,
+                "error": f"Duplicate order blocked: cooldown active for {sym or instrument_id} ({rem_cd}s remaining)."
+            }
+        self._recent_order_timestamps[order_key] = now_ts
+
         # Suppress order attempts during auth failure cooldown to prevent API hammering and 429 rate limit locks
         if self.is_in_auth_cooldown():
             rem = max(1, int(self._auth_cooldown_until - time.time()))
@@ -1550,7 +1567,8 @@ class EToroClient:
         # cannot be attached at open (CFD features prohibited on spot).
         # Only attach SL/TP when leverage > 1 or for non-crypto CFD assets.
         is_crypto = sym in CRYPTO_SYMBOLS or (instrument_id and instrument_id >= 100000)
-        if not (is_crypto or leverage == 1):
+        is_spot_long = (leverage == 1 and is_buy)
+        if not (is_crypto or is_spot_long):
             if stop_loss_rate is not None:
                 v2_payload["stopLossRate"] = round(float(stop_loss_rate), 4)
             if take_profit_rate is not None:
@@ -1576,11 +1594,11 @@ class EToroClient:
                 "IsBuy": is_buy,
                 "Amount": round(float(amount_usd), 2),
                 "Leverage": int(leverage),
-                "IsNoStopLoss": True if (is_crypto or leverage == 1 or stop_loss_rate is None) else False,
-                "IsNoTakeProfit": True if (is_crypto or leverage == 1 or take_profit_rate is None) else False,
+                "IsNoStopLoss": True if (is_crypto or is_spot_long or stop_loss_rate is None) else False,
+                "IsNoTakeProfit": True if (is_crypto or is_spot_long or take_profit_rate is None) else False,
                 "IsTslEnabled": False
             }
-            if not (is_crypto or leverage == 1):
+            if not (is_crypto or is_spot_long):
                 if stop_loss_rate is not None:
                     v1_payload["StopLossRate"] = round(float(stop_loss_rate), 4)
                 if take_profit_rate is not None:

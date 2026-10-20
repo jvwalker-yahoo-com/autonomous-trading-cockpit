@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 """
 SQLite Instruments Database Engine for eToro Trading.
 Provides fast ticker-to-ID resolution, persistent storage, dynamic discovery caching,
@@ -112,7 +113,7 @@ INITIAL_SEED_INSTRUMENTS: List[Dict[str, Any]] = [
     {"symbol": "RKLB", "instrument_id": 9085, "name": "Rocket Lab Corp", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "LMT", "instrument_id": 1070, "name": "Lockheed Martin", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "RTX", "instrument_id": 1071, "name": "RTX Corp", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "BA", "instrument_id": 1072, "name": "Boeing Co", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "BA", "instrument_id": 1010, "name": "Boeing Co", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "KTOS", "instrument_id": 1073, "name": "Kratos Defense", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "PL", "instrument_id": 1074, "name": "Planet Labs PBC", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "LUNR", "instrument_id": 1075, "name": "Intuitive Machines", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
@@ -164,8 +165,8 @@ INITIAL_SEED_INSTRUMENTS: List[Dict[str, Any]] = [
     {"symbol": "OXY", "instrument_id": 1117, "name": "Occidental Petroleum", "category": "Energy", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
 
     # === 3. BENCHMARK & LEVERAGED ETFS ===
-    {"symbol": "SPY", "instrument_id": 2001, "name": "SPDR S&P 500 ETF", "category": "ETFs", "asset_class": "ETF", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "QQQ", "instrument_id": 2002, "name": "Invesco QQQ Trust", "category": "ETFs", "asset_class": "ETF", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "SPY", "instrument_id": 3000, "name": "SPDR S&P 500 ETF", "category": "ETFs", "asset_class": "ETF", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "QQQ", "instrument_id": 3006, "name": "Invesco QQQ Trust", "category": "ETFs", "asset_class": "ETF", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "SQQQ", "instrument_id": 2003, "name": "ProShares UltraPro Short QQQ", "category": "Leveraged ETFs", "asset_class": "ETF", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "FNGU", "instrument_id": 2004, "name": "MicroSectors FANG+ 3X", "category": "Leveraged ETFs", "asset_class": "ETF", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "SOXL", "instrument_id": 2005, "name": "Direxion Semiconductor Bull 3X", "category": "Leveraged ETFs", "asset_class": "ETF", "trading_hours": "14:30 - 21:00 UK"},
@@ -194,11 +195,11 @@ INITIAL_SEED_INSTRUMENTS: List[Dict[str, Any]] = [
     {"symbol": "TLT", "instrument_id": 2028, "name": "iShares 20+ Year Treasury", "category": "ETFs", "asset_class": "ETF", "trading_hours": "14:30 - 21:00 UK"},
 
     # === 4. BENCHMARK INDICES ===
-    {"symbol": "SPX500", "instrument_id": 2100, "name": "S&P 500 Index", "category": "Indices", "asset_class": "Index", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
+    {"symbol": "SPX500", "instrument_id": 27, "name": "S&P 500 Index", "category": "Indices", "asset_class": "Index", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
     {"symbol": "NDX100", "instrument_id": 2101, "name": "Nasdaq 100 Index", "category": "Indices", "asset_class": "Index", "trading_hours": "24/7 (Break 22:00-23:00)"},
-    {"symbol": "NSDQ100", "instrument_id": 2101, "name": "Nasdaq 100 Index", "category": "Indices", "asset_class": "Index", "trading_hours": "24/7 (Break 22:00-23:00)"},
-    {"symbol": "DJ30", "instrument_id": 2102, "name": "Dow Jones 30", "category": "Indices", "asset_class": "Index", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
-    {"symbol": "GER40", "instrument_id": 2103, "name": "Germany DAX 40", "category": "Indices", "asset_class": "Index", "trading_hours": "Mon 08:00 - Fri 16:30 UK"},
+    {"symbol": "NSDQ100", "instrument_id": 28, "name": "Nasdaq 100 Index", "category": "Indices", "asset_class": "Index", "trading_hours": "24/7 (Break 22:00-23:00)"},
+    {"symbol": "DJ30", "instrument_id": 29, "name": "Dow Jones 30", "category": "Indices", "asset_class": "Index", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
+    {"symbol": "GER40", "instrument_id": 32, "name": "Germany DAX 40", "category": "Indices", "asset_class": "Index", "trading_hours": "Mon 08:00 - Fri 16:30 UK"},
     {"symbol": "UK100", "instrument_id": 30, "name": "FTSE 100 (UK)", "category": "Indices", "asset_class": "Index", "trading_hours": "Mon 08:00 - Fri 16:30 UK"},
     {"symbol": "NETC.CO", "instrument_id": 2104, "name": "Netcompany Group A/S", "category": "Stocks", "asset_class": "Stock", "trading_hours": "Mon 08:00 - Fri 16:00 CET"},
     {"symbol": "AUS200", "instrument_id": 2105, "name": "ASX 200 (Australia)", "category": "Indices", "asset_class": "Index", "trading_hours": "Mon 01:00 - Fri 07:00 UK"},
@@ -211,9 +212,9 @@ INITIAL_SEED_INSTRUMENTS: List[Dict[str, Any]] = [
     {"symbol": "VIX", "instrument_id": 2112, "name": "CBOE Volatility Index", "category": "Indices", "asset_class": "Index", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
 
     # === 5. COMMODITIES (Metals, Energy, Agriculture) ===
-    {"symbol": "GOLD", "instrument_id": 3001, "name": "Gold (Spot Non-Expiry)", "category": "Commodities", "asset_class": "Commodity", "trading_hours": "24/7 (Break 22:00-23:00)"},
-    {"symbol": "SILVER", "instrument_id": 3002, "name": "Silver (Spot Non-Expiry)", "category": "Commodities", "asset_class": "Commodity", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
-    {"symbol": "OIL", "instrument_id": 3003, "name": "Crude Oil (Brent/WTI)", "category": "Commodities", "asset_class": "Commodity", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
+    {"symbol": "GOLD", "instrument_id": 18, "name": "Gold (Spot Non-Expiry)", "category": "Commodities", "asset_class": "Commodity", "trading_hours": "24/7 (Break 22:00-23:00)"},
+    {"symbol": "SILVER", "instrument_id": 19, "name": "Silver (Spot Non-Expiry)", "category": "Commodities", "asset_class": "Commodity", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
+    {"symbol": "OIL", "instrument_id": 17, "name": "Crude Oil (Brent/WTI)", "category": "Commodities", "asset_class": "Commodity", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
     {"symbol": "NGAS", "instrument_id": 3004, "name": "Natural Gas", "category": "Commodities", "asset_class": "Commodity", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
     {"symbol": "NATGAS", "instrument_id": 3004, "name": "Natural Gas (alias)", "category": "Commodities", "asset_class": "Commodity", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
     {"symbol": "COPPER", "instrument_id": 3005, "name": "Copper (Non-Expiry)", "category": "Commodities", "asset_class": "Commodity", "trading_hours": "Sun 23:00 - Fri 21:30 UK"},
@@ -244,14 +245,18 @@ class InstrumentsDBManager:
         self._init_db()
         self._seed_if_empty()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        """Returns a configured SQLite connection with WAL mode enabled."""
+    @contextmanager
+    def _get_connection(self):
+        """Yields a configured SQLite connection and closes it on exit."""
         conn = sqlite3.connect(str(self.db_path), timeout=10.0)
         conn.row_factory = sqlite3.Row
-        # Enable Write-Ahead Logging (WAL) for smooth concurrent read/write access
         conn.execute("PRAGMA journal_mode = WAL;")
         conn.execute("PRAGMA synchronous = NORMAL;")
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_db(self):
         """Initializes tables and indexes."""
@@ -300,6 +305,10 @@ class InstrumentsDBManager:
                 ))
             conn.commit()
             logger.info(f"✓ [InstrumentsDB] Synced SQLite database at {self.db_path} with authoritative seed IDs ({len(INITIAL_SEED_INSTRUMENTS)} assets).")
+
+    def get_instrument_id(self, symbol: str) -> Optional[int]:
+        """Alias for get_etoro_id."""
+        return self.get_etoro_id(symbol)
 
     def get_etoro_id(self, symbol: str) -> Optional[int]:
         """

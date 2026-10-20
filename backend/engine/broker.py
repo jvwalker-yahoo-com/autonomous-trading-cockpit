@@ -66,22 +66,39 @@ class SimulatedBroker:
             pnl_pct = float(h.get("pnlPercent", 0.0))
             units = float(h.get("units", 0.0))
             open_rate = float(h.get("avgOpenRate", 0.0))
-            if open_rate <= 0 and units > 0 and invested > 0:
-                open_rate = invested / units
+            if open_rate <= 0 and abs(units) > 0 and invested > 0:
+                open_rate = invested / abs(units)
             cur_rate = float(h.get("currentRate", open_rate))
             pos_list = h.get("positions", [])
             first_pos = pos_list[0] if pos_list else {}
             pos_id = str(first_pos.get("positionId", f"etoro-{sym}"))
+            all_pos_ids = [str(p.get("positionId")) for p in pos_list if p.get("positionId") is not None]
+            if not all_pos_ids:
+                all_pos_ids = [pos_id]
             open_time = str(first_pos.get("openTime", ""))
-            direction = "SHORT" if (first_pos.get("isBuy") is False or str(first_pos.get("direction", "")).upper() == "SHORT") else "LONG"
+            is_short = (first_pos.get("isBuy") is False or str(first_pos.get("direction", "")).upper() == "SHORT" or units < 0)
+            direction = "SHORT" if is_short else "LONG"
             sl = float(first_pos.get("stopLossRate") or first_pos.get("stopLoss") or 0.0)
             tp = float(first_pos.get("takeProfitRate") or first_pos.get("takeProfit") or 0.0)
             
+            # Check pre-existing local position metadata
+            existing_pos = self.positions.get(sym)
+            horizon = getattr(existing_pos, "horizon", "swing")
+            max_hold_until = getattr(existing_pos, "max_hold_until", None)
+
+            # Preserve tight stop-loss if local stop was tighter than eToro's -50% default
+            if existing_pos and existing_pos.stop_loss > 0:
+                if direction == "SHORT" and (sl <= 0 or sl > existing_pos.stop_loss):
+                    sl = existing_pos.stop_loss
+                elif direction == "LONG" and (sl <= 0 or sl < existing_pos.stop_loss):
+                    sl = existing_pos.stop_loss
+
             live_positions[sym] = Position(
                 id=pos_id,
                 symbol=sym,
                 direction=direction,
-                shares=round(units, 6),
+                horizon=horizon,
+                shares=round(abs(units), 6),
                 entry_price=round(open_rate, 2),
                 current_price=round(cur_rate, 2),
                 cost_basis_usd=round(invested, 2),
@@ -91,6 +108,8 @@ class SimulatedBroker:
                 stop_loss=sl,
                 take_profit=tp,
                 entry_time=open_time,
+                max_hold_until=max_hold_until,
+                etoro_position_ids=all_pos_ids,
                 rationale="Active Live eToro Holding"
             )
         self.positions = live_positions
@@ -286,6 +305,47 @@ class SimulatedBroker:
         if closed_trades:
             self.save_state()
         return closed_trades
+
+    def enforce_live_stops(self, etoro_client, max_loss_pct: float = 2.5) -> List[TradeRecord]:
+        """
+        Actively closes all underlying eToro lots when a live position breaches
+        its stop-loss rate or exceeds max_loss_pct threshold.
+        """
+        closed_records: List[TradeRecord] = []
+        if not etoro_client or not etoro_client.is_configured():
+            return closed_records
+
+        for sym, pos in list(self.positions.items()):
+            should_close = False
+            reason = ""
+
+            if pos.unrealized_pnl_pct <= -abs(max_loss_pct):
+                should_close = True
+                reason = f"Live Stop Enforced: Max loss breach ({pos.unrealized_pnl_pct:.2f}% <= -{max_loss_pct:.2f}%)"
+            elif pos.stop_loss > 0:
+                if pos.direction == "LONG" and pos.current_price <= pos.stop_loss:
+                    should_close = True
+                    reason = f"Live Stop Enforced: Price {pos.current_price:.2f} breached SL {pos.stop_loss:.2f}"
+                elif pos.direction == "SHORT" and pos.current_price >= pos.stop_loss:
+                    should_close = True
+                    reason = f"Live Stop Enforced: Price {pos.current_price:.2f} breached SL {pos.stop_loss:.2f}"
+
+            if should_close:
+                inst_id = etoro_client.resolve_instrument_id(sym)
+                ids_to_close = pos.etoro_position_ids or [pos.id]
+                for pid in ids_to_close:
+                    try:
+                        etoro_client.close_position(position_id=str(pid), mode="real", instrument_id=inst_id)
+                    except Exception as ex:
+                        logger.warning(f"Error closing live lot {pid} for {sym}: {ex}")
+
+                tr = self.close_position(sym, pos.current_price, exit_rationale=reason)
+                if tr:
+                    closed_records.append(tr)
+
+        if closed_records:
+            self.save_state()
+        return closed_records
 
     def prune_decaying_short_term_positions(
         self,

@@ -114,6 +114,7 @@ class Position(BaseModel):
     take_profit: float
     entry_time: str
     max_hold_until: Optional[str] = None # EOD expiration for day trades
+    etoro_position_ids: List[str] = Field(default_factory=list)
     rationale: str
     contributing_models: Dict[str, float] = Field(default_factory=dict)
 
