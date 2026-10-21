@@ -4,6 +4,8 @@
 
 ### 2026-10-21: Cockpit Responsiveness, Live Mode Switch & Settings Dialog Fixes
 - **Root Cause Resolution for Cloud Cockpit Freezing:**
+  - **Syntax Error Fix in Frontend Script (`frontend/dashboard.js`):** Resolved an unclosed `if (btnAutoAddTopScreened)` block at line 2353 that caused browser parsing to abort with `SyntaxError: Unexpected end of input`. This prevented all UI event listeners (Config modal, Live/Demo mode toggles, screener, polling) from binding on page load.
+  - **Automated Frontend Syntax Validation (`tests/test_frontend_assets.py`):** Added a Node.js VM syntax validation test to ensure `dashboard.js` and frontend assets are completely free of syntax errors across CI and test runs.
   - **Non-blocking Live Mode Switch (`backend/server.py`):** Changed `/api/mode/switch` to return immediately (instant response to browser UI) and execute portfolio synchronization and watchlist registration asynchronously in `background_tasks`.
   - **Decoupled Snapshot Polling from Broker Sync (`backend/server.py`):** Removed synchronous eToro portfolio HTTP network syncing from `/api/cockpit/snapshot`. The telemetry snapshot now reads cached broker state instantly (< 50ms), eliminating reverse proxy timeouts on Render.
   - **Instant Settings Modal Opening (`frontend/dashboard.js`):** Removed blocking `Promise.all` network gate before opening the Settings dialog. Clicking `⚙️ CONFIG` opens the modal immediately and pre-populates fields from `localStorage`, then syncs server status asynchronously in the background.

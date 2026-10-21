@@ -2368,6 +2368,7 @@ if (btnAutoAddTopScreened) {
       btnAutoAddTopScreened.textContent = "✨ AUTO-POPULATE TOP SCREENED";
     }
   });
+}
 // ==============================================================================
 // 🌍 WORLDWIDE BREAKING NEWS & MACRO RADAR CONTROLLER
 // ==============================================================================
