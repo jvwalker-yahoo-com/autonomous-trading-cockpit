@@ -41,6 +41,29 @@ class MarketIntelSuite:
             "HOOD": "0001783879", "COIN": "0001679788", "PLTR": "0001321655"
         }
 
+        # Load OpenBB wrapper for unified data access
+        try:
+            from src.openbb_feed import (
+                get_macro_data,
+                get_equity_fundamentals,
+                get_equity_market_depth,
+                get_equity_price_history,
+                get_news,
+                get_crypto_price,
+            )
+            self.openbb = {
+                "macro": get_macro_data,
+                "equity_fundamentals": get_equity_fundamentals,
+                "equity_depth": get_equity_market_depth,
+                "equity_price": get_equity_price_history,
+                "news": get_news,
+                "crypto": get_crypto_price,
+            }
+        except Exception as e:
+            # Fallback: OpenBB not available – keep empty dict
+            self.openbb = {}
+            print(f"OpenBB wrapper load failed: {e}")
+
     # ==========================================
     # 1. Frankfurter API (Forex & FX Crosses)
     # ==========================================

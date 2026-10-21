@@ -234,6 +234,28 @@ with tab_macro:
         c_cols[i % 4].metric(cdata["symbol"], f"${cdata['price_usd']:,.2f}", f"{cdata['change_24h_pct']:+.2f}%")
 
     st.markdown("---")
+    # OpenBB Feeds
+    if hasattr(market_intel, "openbb") and market_intel.openbb:
+        obb_col1, obb_col2 = st.columns([2, 2])
+        with obb_col1:
+            st.markdown("##### 🗞️ OpenBB News (Bloomberg / Market Feed)")
+            news_items = market_intel.openbb.get("news", lambda limit=10, source="bloomberg", provider="tiingo": [])(limit=10)
+            if news_items:
+                news_df = pd.DataFrame(news_items)
+                cols_to_show = [c for c in ["publishedDate", "title", "source"] if c in news_df.columns]
+                st.dataframe(news_df[cols_to_show], use_container_width=True, hide_index=True)
+            else:
+                st.info("No live OpenBB news retrieved.")
+        with obb_col2:
+            st.markdown(f"##### 📊 OpenBB Fundamentals ({sel_symbol})")
+            fundamentals = market_intel.openbb.get("equity_fundamentals", lambda symbol, provider="fmp": {})(symbol=sel_symbol)
+            if fundamentals and fundamentals.get("fundamentals"):
+                df_fund = pd.DataFrame(fundamentals.get("fundamentals", []))
+                st.dataframe(df_fund, use_container_width=True, hide_index=True)
+            else:
+                st.info("No OpenBB fundamental data available for this asset.")
+        st.markdown("---")
+
     sec_col1, sec_col2 = st.columns([1.5, 2.5])
     with sec_col1:
         st.markdown(f"##### ⚡ Polygon.io / Finnhub Ticks ({sel_symbol})")
