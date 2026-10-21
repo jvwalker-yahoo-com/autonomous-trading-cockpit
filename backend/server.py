@@ -481,6 +481,7 @@ class ConfigUpdateRequest(BaseModel):
     day_trade_take_profit_pct: Optional[float] = None
     day_trade_max_hold_hours: Optional[float] = None
     max_daily_loss_usd: Optional[float] = None
+    day_trade_eod_flatten_minutes_before_close: Optional[int] = None
 
 class ModeSwitchRequest(BaseModel):
     mode: str # "demo" or "live"
@@ -900,10 +901,11 @@ async def get_cockpit_full_snapshot(symbol: Optional[str] = None):
         if (now - cached_t) < 3.0:
             return cached_payload
 
-    if config.execution_mode == "live":
-        await asyncio.to_thread(sync_live_etoro_portfolio_if_live)
-
-    analysis = await asyncio.to_thread(run_analysis_cycle, sym)
+    try:
+        analysis = await asyncio.to_thread(run_analysis_cycle, sym)
+    except Exception as e:
+        logger.warning(f"Notice in snapshot analysis cycle for {sym}: {e}")
+        analysis = {}
     portfolio = broker.get_portfolio_summary(active_symbol=sym, simulation_mode=config.simulation_mode)
     learning = learner.get_stats()
     heartbeat = telemetry_module.heartbeat()
@@ -1625,7 +1627,7 @@ def get_live_portfolio(mode: str = "real"):
 
 
 @app.post("/api/mode/switch", tags=["eToro Live Integration"])
-def switch_execution_mode(req: ModeSwitchRequest):
+def switch_execution_mode(req: ModeSwitchRequest, background_tasks: BackgroundTasks):
     """Switches execution mode between demo (learning/simulation) and live (eToro real orders). Automatically builds 5-day proven watchlist when switching to live."""
     target_mode = req.mode.strip().lower()
     if target_mode not in ("demo", "live"):
@@ -1646,36 +1648,30 @@ def switch_execution_mode(req: ModeSwitchRequest):
     })
     logger.info(f"Execution mode switched to: {config.execution_mode.upper()} (simulation_mode={config.simulation_mode})")
 
-    sync_info = None
     if target_mode == "live":
         # Clear previous simulated paper positions so live execution slots are immediately open
         broker.positions.clear()
-        
-        # Synchronize live portfolio holdings & balances from eToro
-        sync_live_etoro_portfolio_if_live(force=True)
         recal_eq = broker.reset_drawdown(new_equity=broker.get_equity() if broker.get_equity() > 0 else None)
         logger.info(f"✓ Recalibrated broker equity to ${recal_eq:.2f} (Peak: ${broker.peak_equity:.2f}) and unlatched circuit breaker.")
 
-        # Build 5-day historical traded stocks + active watchlist and sync asynchronously in background
-        five_day_rep = broker.get_multi_day_report(5)
-        traded_symbols = [s.symbol for s in five_day_rep.stock_summaries if s.symbol]
-        combined_symbols = [s for s in dict.fromkeys(traded_symbols + config.watchlist) if s not in CRYPTO_SYMBOLS]
-        if not combined_symbols:
-            combined_symbols = ["AAPL", "NVDA", "TSLA", "MSFT", "SPY", "QQQ", "GOLD", "OIL"]
-
-        # Run watchlist sync in background thread so HTTP response is instant
-        def _bg_sync():
+        # Run live portfolio sync and watchlist setup in the background so HTTP response returns instantly
+        def _bg_live_init():
             try:
+                sync_live_etoro_portfolio_if_live(force=True)
+                five_day_rep = broker.get_multi_day_report(5)
+                traded_symbols = [s.symbol for s in five_day_rep.stock_summaries if s.symbol]
+                combined_symbols = [s for s in dict.fromkeys(traded_symbols + config.watchlist) if s not in CRYPTO_SYMBOLS]
+                if not combined_symbols:
+                    combined_symbols = ["AAPL", "NVDA", "TSLA", "MSFT", "SPY", "QQQ", "GOLD", "OIL"]
                 etoro_client.sync_symbols_to_watchlist(
                     symbols=combined_symbols,
                     watchlist_name="Autonomous Cockpit"
                 )
                 logger.info(f"✓ Background initialized eToro Watchlist 'Autonomous Cockpit' with {len(combined_symbols)} stocks.")
             except Exception as e:
-                logger.warning(f"Background watchlist sync notice: {e}")
+                logger.warning(f"Background live mode init notice: {e}")
 
-        import threading
-        threading.Thread(target=_bg_sync, daemon=True).start()
+        background_tasks.add_task(_bg_live_init)
 
     return {
         "status": "success",

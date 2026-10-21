@@ -381,7 +381,7 @@ class EToroClient:
                         headers=headers,
                         params=params,
                         json=json_data,
-                        timeout=timeout
+                        timeout=min(timeout, 6.0)
                     )
 
                     # HTTP 429 Rate Limit - Apply exponential backoff with jitter
@@ -418,6 +418,8 @@ class EToroClient:
                         # Try next authentication orientation
                         break
                     else:
+                        if response.status_code == 401:
+                            self.trigger_auth_cooldown("Direct REST execution returned HTTP 401 Unauthorized", cooldown_sec=60.0)
                         if suppress_error_log or response.status_code in (401, 404, 405):
                             logger.debug(
                                 f"[eToro API Probe] {method} {endpoint} -> HTTP {response.status_code} (x-request-id: {req_id})"
@@ -483,17 +485,13 @@ class EToroClient:
         # 1. Test authenticated user endpoints (requires both valid API Key AND valid User Key)
         user_endpoints = [
             "/api/v1/balances?expand=equityDetails",
-            "/api/v1/me",
             "/api/v1/trading/info/portfolio",
-            "/api/v1/trading/info/demo/portfolio",
-            "/api/v1/trading/info/real/pnl",
-            "/api/v1/balances",
-            "/api/v1/balances/accounts"
+            "/api/v1/me"
         ]
 
         # Orientation 1: Standard
         for ep in user_endpoints:
-            success, status_code, data = self._request("GET", ep, suppress_error_log=True)
+            success, status_code, data = self._request("GET", ep, timeout=5.0, suppress_error_log=True)
             if success:
                 user_desc = ""
                 if isinstance(data, dict):
@@ -515,16 +513,19 @@ class EToroClient:
                     "profile": data,
                     "timestamp": time.time()
                 }
+            if status_code == 401:
+                # 401 indicates key authentication issue; do not iterate redundant endpoints
+                break
 
-        # Orientation 2: Try swapped (DON'T permanently corrupt key variables — use a flag instead)
-        for ep in user_endpoints:
+        # Orientation 2: Try swapped
+        for ep in user_endpoints[:1]:
             # Build swapped headers manually without touching self.api_key / self.user_key
             swapped_headers = self._make_headers(self.api_key, self.user_key, "swapped")
             try:
                 resp = requests.get(
                     f"{self.base_url}/{ep.lstrip('/')}",
                     headers=swapped_headers,
-                    timeout=10.0
+                    timeout=5.0
                 )
                 if 200 <= resp.status_code < 300:
                     self._prefer_swapped = True  # Remember working orientation without swapping vars
@@ -605,20 +606,21 @@ class EToroClient:
 
     def get_portfolio(self, mode: str = "real") -> Dict[str, Any]:
         """Fetches active open positions and portfolio details via official MCP gateway or fallback."""
+        if not self.is_configured() or self.is_in_auth_cooldown():
+            return {"success": False, "status_code": 401, "data": {}, "error": "Auth cooldown or unconfigured"}
+
         account = "real" if mode.lower() in ("real", "live") else "demo"
         
-        # 1. Try MCP tool get-my-portfolio-summary (full)
-        mcp_res = self.call_mcp_tool("get-my-portfolio-summary", {"account": account, "includePositions": True})
+        # 1. Try MCP tool get-my-portfolio-summary (full) with 5s timeout
+        mcp_res = self.call_mcp_tool("get-my-portfolio-summary", {"account": account, "includePositions": True}, timeout=5.0, trigger_cooldown_on_auth_fail=True)
         if mcp_res.get("success") and isinstance(mcp_res.get("data"), dict) and not mcp_res.get("data", {}).get("error"):
             return {"success": True, "status_code": 200, "data": mcp_res.get("data")}
 
-        # 1b. Try MCP tool get-my-portfolio-summary (summary only, no subcalls)
-        mcp_summary = self.call_mcp_tool("get-my-portfolio-summary", {"account": account, "includePositions": False, "includeOrders": False, "includeCopiedTraders": False})
-        if mcp_summary.get("success") and isinstance(mcp_summary.get("data"), dict) and not mcp_summary.get("data", {}).get("error"):
-            return {"success": True, "status_code": 200, "data": mcp_summary.get("data")}
+        if self.is_in_auth_cooldown():
+            return {"success": False, "status_code": 401, "data": {}, "error": "Auth cooldown"}
 
-        # 2. Try MCP tool get-my-positions-and-orders
-        pos_res = self.call_mcp_tool("get-my-positions-and-orders", {"account": account})
+        # 2. Try MCP tool get-my-positions-and-orders with 5s timeout
+        pos_res = self.call_mcp_tool("get-my-positions-and-orders", {"account": account}, timeout=5.0, trigger_cooldown_on_auth_fail=True)
         if pos_res.get("success") and isinstance(pos_res.get("data"), dict) and not pos_res.get("data", {}).get("error"):
             data = pos_res["data"]
             direct_positions = data.get("direct", {}).get("positions", [])
@@ -658,29 +660,27 @@ class EToroClient:
                 }
             }
 
-        # 3. Direct REST Endpoints Fallback
+        if self.is_in_auth_cooldown():
+            return {"success": False, "status_code": 401, "data": {}, "error": "Auth cooldown"}
+
+        # 3. Direct REST Endpoints Fallback (single primary endpoint with fast 5s timeout)
         is_demo = mode.lower() == "demo"
-        endpoints = [
-            f"/api/v1/trading/info/{'demo/' if is_demo else ''}portfolio",
-            f"/api/v1/trading/info/{'demo/' if is_demo else 'real/'}pnl",
-            f"/api/v1/trading/{mode.lower()}/portfolio",
-            "/api/v1/trading/info/portfolio",
-            "/api/v1/trading/info/real/pnl"
-        ]
-        for ep in endpoints:
-            success, code, data = self._request("GET", ep, suppress_error_log=True)
-            if success:
-                return {"success": True, "status_code": code, "data": data}
-        return {"success": False, "status_code": 404, "data": {}}
+        ep = f"/api/v1/trading/info/{'demo/' if is_demo else ''}portfolio"
+        success, code, data = self._request("GET", ep, timeout=5.0, suppress_error_log=True)
+        if success:
+            return {"success": True, "status_code": code, "data": data}
+        return {"success": False, "status_code": code, "data": {}}
 
     def get_trading_history(self, mode: str = "real", page: int = 1, page_size: int = 100) -> Dict[str, Any]:
         """Fetches closed trading history from eToro via official MCP gateway or fallback."""
+        if not self.is_configured() or self.is_in_auth_cooldown():
+            return {"success": False, "status_code": 401, "error": "Auth cooldown or unconfigured"}
         account = "real" if mode.lower() in ("real", "live") else "demo"
         mcp_res = self.call_mcp_tool("get-my-trading-history", {
             "account": account,
             "page": page,
             "pageSize": min(page_size, 200)
-        })
+        }, timeout=5.0, trigger_cooldown_on_auth_fail=True)
         if mcp_res.get("success") and isinstance(mcp_res.get("data"), dict):
             return {"success": True, "status_code": 200, "data": mcp_res.get("data")}
         return {"success": False, "status_code": mcp_res.get("status_code", 500), "error": mcp_res.get("error", "Failed to fetch trading history")}
@@ -1105,8 +1105,8 @@ class EToroClient:
         self,
         tool_name: str,
         arguments: Optional[Dict[str, Any]] = None,
-        timeout: float = 25.0,
-        trigger_cooldown_on_auth_fail: bool = False
+        timeout: float = 6.0,
+        trigger_cooldown_on_auth_fail: bool = True
     ) -> Dict[str, Any]:
         """
         Invokes an MCP tool on the official eToro MCP gateway (https://mcp.public-api.etoro.com).
@@ -1219,11 +1219,10 @@ class EToroClient:
                 last_err = f"Exception ({label}): {e}"
                 logger.debug(f"[eToro MCP - {tool_name} - {label}] {e}")
 
-        # Only enter auth cooldown if explicitly requested (e.g. order execution)
-        if trigger_cooldown_on_auth_fail:
-            err_lower = str(last_err).lower()
-            if "401" in err_lower or "unauthorized" in err_lower or "re-authenticate" in err_lower or "not valid" in err_lower or "expired" in err_lower:
-                self.trigger_auth_cooldown(f"MCP credentials rejected: {last_err}")
+        # Always enter auth cooldown on authentication failure to prevent hammering & latency
+        err_lower = str(last_err).lower()
+        if "401" in err_lower or "unauthorized" in err_lower or "re-authenticate" in err_lower or "not valid" in err_lower or "expired" in err_lower:
+            self.trigger_auth_cooldown(f"MCP credentials rejected: {last_err}", cooldown_sec=60.0)
 
         return {"success": False, "error": last_err}
 

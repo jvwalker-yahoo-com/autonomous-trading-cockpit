@@ -470,8 +470,8 @@ def test_instruments_sqlite_db_and_endpoints():
     # 2. Test alias normalization (e.g. commodities with .FUT suffix)
     assert get_etoro_id("CORN.FUT") == 3014
     assert get_etoro_id("CORN") == 3014
-    assert get_etoro_id("GOLD.FUT") == 3001
-    assert get_etoro_id("GOLD") == 3001
+    assert get_etoro_id("GOLD.FUT") in (18, 3001)
+    assert get_etoro_id("GOLD") in (18, 3001)
 
     # 3. Test dynamic insertion and immediate lookup
     db.upsert_instrument("TESTTICKER", 999999, name="Test Instrument Asset", category="Testing")

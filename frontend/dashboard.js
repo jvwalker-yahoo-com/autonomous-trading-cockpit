@@ -1181,45 +1181,8 @@ if (btnSyncWlToEtoro) {
 
 // Settings Modal
 if (el.btnSettings) {
-  el.btnSettings.addEventListener("click", async () => {
-    try {
-      const [cfgRes, etoroRes] = await Promise.all([
-        fetch(`${BASE_URL}/api/config`),
-        fetch(`${BASE_URL}/api/etoro/status`)
-      ]);
-      if (cfgRes.ok) {
-        const cfg = await cfgRes.json();
-        if (el.selectSimMode) el.selectSimMode.value = localStorage.getItem("execution_mode") || cfg.execution_mode || "live";
-        if (el.inputRiskPct) el.inputRiskPct.value = ((cfg.risk_per_trade_pct || 0.02) * 100).toFixed(1);
-        if (el.inputEtoroBaseUrl) el.inputEtoroBaseUrl.value = cfg.etoro_base_url || "https://public-api.etoro.com";
-
-        if (el.inputFinnhubKey && !el.inputFinnhubKey.value) el.inputFinnhubKey.value = localStorage.getItem("finnhub_api_key") || "";
-        if (el.inputTwelveDataKey && !el.inputTwelveDataKey.value) el.inputTwelveDataKey.value = localStorage.getItem("twelve_data_api_key") || "";
-        if (el.inputFmpKey && !el.inputFmpKey.value) el.inputFmpKey.value = localStorage.getItem("fmp_api_key") || "";
-        if (el.inputAlphaVantageKey && !el.inputAlphaVantageKey.value) el.inputAlphaVantageKey.value = localStorage.getItem("alpha_vantage_api_key") || "";
-        if (el.inputTavilyKey && !el.inputTavilyKey.value) el.inputTavilyKey.value = localStorage.getItem("tavily_api_key") || "";
-        if (el.inputSerpApiKey && !el.inputSerpApiKey.value) el.inputSerpApiKey.value = localStorage.getItem("serpapi_api_key") || "";
-        if (el.inputAnspireKey && !el.inputAnspireKey.value) el.inputAnspireKey.value = localStorage.getItem("anspire_api_key") || "";
-        if (el.inputQuiverKey && !el.inputQuiverKey.value) el.inputQuiverKey.value = localStorage.getItem("quiver_api_key") || "";
-
-        if (el.inputEnableDayTrading) el.inputEnableDayTrading.checked = cfg.enable_day_trading !== false;
-        if (el.inputDayTradeAllocPct) el.inputDayTradeAllocPct.value = Math.round((cfg.day_trade_allocation_pct || 0.35) * 100);
-        if (el.inputDayTradeMaxActive) el.inputDayTradeMaxActive.value = cfg.day_trade_max_active || 4;
-        if (el.inputDayTradeSlPct) el.inputDayTradeSlPct.value = ((cfg.day_trade_stop_loss_pct || 0.012) * 100).toFixed(1);
-        if (el.inputDayTradeTpPct) el.inputDayTradeTpPct.value = ((cfg.day_trade_take_profit_pct || 0.024) * 100).toFixed(1);
-        if (el.inputMaxDailyLossUsd) el.inputMaxDailyLossUsd.value = (cfg.max_daily_loss_usd || 35.0).toFixed(1);
-        if (el.inputDayTradeEodFlattenMins) el.inputDayTradeEodFlattenMins.value = cfg.day_trade_eod_flatten_minutes_before_close || 15;
-      }
-      if (etoroRes.ok) {
-        const et = await etoroRes.json();
-        if (el.etoroTestStatus) {
-          el.etoroTestStatus.textContent = et.is_configured ? "✓ Keys configured in server" : "Keys not set";
-          el.etoroTestStatus.style.color = et.is_configured ? "#10b981" : "var(--text-muted)";
-        }
-      }
-    } catch (e) {
-      console.error("Error loading config:", e);
-    }
+  el.btnSettings.addEventListener("click", () => {
+    // 1. OPEN MODAL IMMEDIATELY
     if (el.settingsModal) {
       document.body.style.overflow = "hidden";
       el.settingsModal.classList.remove("hidden");
@@ -1230,6 +1193,43 @@ if (el.btnSettings) {
         setTimeout(() => el.inputEtoroUserKey.focus(), 150);
       }
     }
+
+    // 2. Pre-populate immediately from localStorage so form is instantly interactive
+    if (el.inputFinnhubKey && !el.inputFinnhubKey.value) el.inputFinnhubKey.value = localStorage.getItem("finnhub_api_key") || "";
+    if (el.inputTwelveDataKey && !el.inputTwelveDataKey.value) el.inputTwelveDataKey.value = localStorage.getItem("twelve_data_api_key") || "";
+    if (el.inputFmpKey && !el.inputFmpKey.value) el.inputFmpKey.value = localStorage.getItem("fmp_api_key") || "";
+    if (el.inputAlphaVantageKey && !el.inputAlphaVantageKey.value) el.inputAlphaVantageKey.value = localStorage.getItem("alpha_vantage_api_key") || "";
+    if (el.inputTavilyKey && !el.inputTavilyKey.value) el.inputTavilyKey.value = localStorage.getItem("tavily_api_key") || "";
+    if (el.inputSerpApiKey && !el.inputSerpApiKey.value) el.inputSerpApiKey.value = localStorage.getItem("serpapi_api_key") || "";
+    if (el.inputAnspireKey && !el.inputAnspireKey.value) el.inputAnspireKey.value = localStorage.getItem("anspire_api_key") || "";
+    if (el.inputQuiverKey && !el.inputQuiverKey.value) el.inputQuiverKey.value = localStorage.getItem("quiver_api_key") || "";
+    if (el.inputEtoroApiKey && !el.inputEtoroApiKey.value) el.inputEtoroApiKey.value = localStorage.getItem("etoro_api_key") || "";
+    if (el.inputEtoroUserKey && !el.inputEtoroUserKey.value) el.inputEtoroUserKey.value = localStorage.getItem("etoro_user_key") || "";
+    if (el.inputEtoroBaseUrl && !el.inputEtoroBaseUrl.value) el.inputEtoroBaseUrl.value = localStorage.getItem("etoro_base_url") || "https://public-api.etoro.com";
+
+    // 3. Sync from backend in background without blocking UI
+    Promise.all([
+      fetch(`${BASE_URL}/api/config`).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`${BASE_URL}/api/etoro/status`).then(r => r.ok ? r.json() : null).catch(() => null)
+    ]).then(([cfg, et]) => {
+      if (cfg) {
+        if (el.selectSimMode) el.selectSimMode.value = localStorage.getItem("execution_mode") || cfg.execution_mode || "live";
+        if (el.inputRiskPct) el.inputRiskPct.value = ((cfg.risk_per_trade_pct || 0.02) * 100).toFixed(1);
+        if (el.inputEtoroBaseUrl && !el.inputEtoroBaseUrl.value) el.inputEtoroBaseUrl.value = cfg.etoro_base_url || "https://public-api.etoro.com";
+
+        if (el.inputEnableDayTrading) el.inputEnableDayTrading.checked = cfg.enable_day_trading !== false;
+        if (el.inputDayTradeAllocPct) el.inputDayTradeAllocPct.value = Math.round((cfg.day_trade_allocation_pct || 0.35) * 100);
+        if (el.inputDayTradeMaxActive) el.inputDayTradeMaxActive.value = cfg.day_trade_max_active || 4;
+        if (el.inputDayTradeSlPct) el.inputDayTradeSlPct.value = ((cfg.day_trade_stop_loss_pct || 0.012) * 100).toFixed(1);
+        if (el.inputDayTradeTpPct) el.inputDayTradeTpPct.value = ((cfg.day_trade_take_profit_pct || 0.024) * 100).toFixed(1);
+        if (el.inputMaxDailyLossUsd) el.inputMaxDailyLossUsd.value = (cfg.max_daily_loss_usd || 35.0).toFixed(1);
+        if (el.inputDayTradeEodFlattenMins) el.inputDayTradeEodFlattenMins.value = cfg.day_trade_eod_flatten_minutes_before_close || 15;
+      }
+      if (et && el.etoroTestStatus) {
+        el.etoroTestStatus.textContent = et.is_configured ? "✓ Keys configured in server" : "Keys not set";
+        el.etoroTestStatus.style.color = et.is_configured ? "#10b981" : "var(--text-muted)";
+      }
+    });
   });
 }
 
