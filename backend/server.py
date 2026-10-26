@@ -21,6 +21,7 @@ def get_frontend_dir() -> Path:
         Path(__file__).resolve().parent.parent / "frontend",
         Path.cwd() / "frontend",
         Path(__file__).resolve().parent / "frontend",
+        Path("/app/frontend"),
         Path("/opt/render/project/src/frontend"),
     ]
     for p in candidates:

@@ -2,7 +2,13 @@
 
 ## Active Milestones & Changelog
 
-### 2026-10-26: Render Free Tier Exhaustion Resolution, Account Replication & Keep-Alive Automation
+### 2026-10-26: Koyeb Cloud Migration (No Credit Card), Keep-Alive Automation & Graft Sync
+- **Koyeb Cloud Infrastructure Configuration (No Credit Card Alternative):**
+  - Configured native Koyeb buildpack support with root [`Procfile`](file:///Procfile) targeting `uvicorn backend.server:app --host 0.0.0.0 --port ${PORT:-8000}`.
+  - Authored declarative infrastructure-as-code specification [`koyeb.yaml`](file:///koyeb.yaml) defining Nano tier, Frankfurt region, and `/` HTTP route.
+  - Enhanced `backend/server.py` frontend discovery candidates to include `/app/frontend` container path.
+  - Extended keep-alive cron workflow [`.github/workflows/keepalive.yml`](file:///c:/Antigravity/autonomous-trading-cockpit/.github/workflows/keepalive.yml) to accept `KOYEB_APP_URL`.
+  - Documented complete step-by-step migration runbook in [`RUNBOOK.md`](file:///c:/Antigravity/autonomous-trading-cockpit/RUNBOOK.md).
 - **New Account Verification & Provisioning (`jvwalker@yahoo.com`):**
   - Authenticated to the fresh Render account and verified the workspace (`tea-dbfk5ai9lscs73aeslo0`) has 750/750 fresh free instance hours available.
   - Generated programmatic Render API Key (`rnd_ivFvR2d5q113UStXv5DYzcSQ6zZm`) for automated deployment.

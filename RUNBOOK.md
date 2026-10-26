@@ -112,7 +112,66 @@ Holding stock CFDs overnight incurs daily rollover interest and overnight gap ri
 
 ---
 
-## 6. Cloud Deployment (Render) & Account Replication
+## 6. Cloud Deployment (Koyeb & Render) & Account Replication
+
+### Why Koyeb is the Recommended Free Host (No Credit Card Required)
+- **Render Policy Change:** Render now requires a credit card on file for identity verification even on the free tier before any new web services can be launched.
+- **Koyeb Advantages:**
+  - **100% Free Hobby Tier with NO credit card required.**
+  - Native Python Buildpack & Git integration.
+  - Generous free allowance (Nano instance: 512 MB RAM, 0.1 vCPU).
+  - Built-in automated deployments on `git push`.
+
+### Step-by-Step Deployment on Koyeb (1-Click via GitHub)
+
+1. **Sign Up to Koyeb (Free, No Card)**:
+   - Go to [https://app.koyeb.com](https://app.koyeb.com).
+   - Sign up with GitHub (`jvwalker-yahoo-com`) or email.
+   - No payment details or credit cards are requested.
+
+2. **Create New Service**:
+   - In the Koyeb Control Panel, click **Create Service**.
+   - Select **GitHub** as the source.
+   - Choose repository: `jvwalker-yahoo-com/autonomous-trading-cockpit` and branch `main`.
+   - Koyeb will automatically detect Python and the [`Procfile`](file:///Procfile).
+
+3. **Configure Build & Run Settings**:
+   - **Builder:** Buildpack (Default)
+   - **Build Command:** `pip install -r requirements.txt`
+   - **Run Command:** `uvicorn backend.server:app --host 0.0.0.0 --port 8000`
+   - **Port:** `8000` (Protocol: `HTTP`, Path: `/`)
+   - **Instance Size:** `Nano` ($0/mo Free Tier)
+
+4. **Add Environment Variables**:
+   In **Environment variables**, click **Bulk edit** or add variables from `.env`:
+   - `EXECUTION_MODE`: `live`
+   - `INITIAL_CAPITAL`: `1300.0`
+   - `ETORO_API_KEY`: *(from `.env`)*
+   - `ETORO_USER_KEY`: *(from `.env`)*
+   - `ETORO_BASE_URL`: `https://public-api.etoro.com`
+   - `FINNHUB_API_KEY`: *(from `.env`)*
+   - `TWELVE_DATA_API_KEY`: *(from `.env`)*
+   - `FMP_API_KEY`: *(from `.env`)*
+   - `ALPHA_VANTAGE_API_KEY`: *(from `.env`)*
+   - `TAVILY_API_KEY`: *(from `.env`)*
+   - `SERPAPI_API_KEY`: *(from `.env`)*
+   - `ANSPIRE_API_KEY`: *(from `.env`)*
+   - `OPENROUTER_API_KEY`: *(from `.env`)*
+   - `CONGRESS_INVESTS_URL`: `https://congressinfor-production.up.railway.app`
+   - `EQUIBLES_API_KEY`: `eq_1a4793cb907bc87e163c0b457166914a95c86e8e`
+   - `ENABLE_DAY_TRADING`: `true`
+   - `ENABLE_SMART_MONEY`: `true`
+
+5. **Deploy**:
+   - Click **Deploy**. Koyeb provisions the app and generates your live HTTPS URL (e.g., `https://autonomous-trading-cockpit-jvwalker.koyeb.app`).
+
+6. **Activate Keep-Alive Cron**:
+   - In GitHub Settings > Secrets and variables > Actions, add `KOYEB_APP_URL` with your new Koyeb app URL.
+   - The workflow [`.github/workflows/keepalive.yml`](file:///.github/workflows/keepalive.yml) will automatically ping `/heartbeat` every 10 minutes during market hours.
+
+---
+
+## 7. Alternative: Cloud Deployment (Render)
 
 ### Why Render Stops the Service on Free Accounts
 - Render free tier grants **750 free instance hours per calendar month** per account.
