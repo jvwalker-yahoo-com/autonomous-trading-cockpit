@@ -12,27 +12,47 @@ services:
       - key: SIMULATION_MODE
         value: "false"
       - key: INITIAL_CAPITAL
-        value: "10000.0"
-      - key: FINNHUB_API_KEY
-        value: "db402p9r01qucqgihnrgdb402p9r01qucqgihns0"
+        value: "1300.0"
       - key: MAX_CONCURRENT_POSITIONS
         value: "15"
+      - key: MAX_DRAWDOWN_LIMIT_PCT
+        value: "0.15"
       - key: MAX_PORTFOLIO_EXPOSURE_PCT
         value: "0.85"
       - key: MAX_POSITION_SIZE_USD
         value: "250.0"
+      - key: MIN_CONVICTION_SCORE
+        value: "0.08"
+      - key: DEFAULT_STOP_LOSS_PCT
+        value: "0.025"
+      - key: DEFAULT_TAKE_PROFIT_PCT
+        value: "0.050"
       - key: ENABLE_DAY_TRADING
         value: "true"
+      - key: DAY_TRADE_ALLOCATION_PCT
+        value: "0.50"
       - key: DAY_TRADE_MAX_ACTIVE
         value: "8"
       - key: EXECUTION_LOOP_INTERVAL
         value: "5.0"
+      - key: DAY_TRADE_STOP_LOSS_PCT
+        value: "0.012"
+      - key: DAY_TRADE_TAKE_PROFIT_PCT
+        value: "0.024"
+      - key: MAX_DAILY_LOSS_USD
+        value: "35.0"
+      - key: DAY_TRADE_EOD_FLATTEN_MINUTES_BEFORE_CLOSE
+        value: "15"
+      - key: ENABLE_SMART_MONEY
+        value: "true"
+      - key: SMART_MONEY_WEIGHT
+        value: "0.20"
       - key: EQUIBLES_API_KEY
         value: "eq_1a4793cb907bc87e163c0b457166914a95c86e8e"
       - key: CONGRESS_INVESTS_URL
         value: "https://congressinfor-production.up.railway.app"
-      - key: ENABLE_SMART_MONEY
-        value: "true"
+      - key: FINNHUB_API_KEY
+        value: "db402p9r01qucqgihnrgdb402p9r01qucqgihns0"
       - key: TWELVE_DATA_API_KEY
         value: "fa5122e69e6346359095fec0581fb72d"
       - key: FMP_API_KEY
@@ -45,5 +65,13 @@ services:
         value: "572f3ee5596cb17ee970fd360dfc8a36e8b8cba99c27b88d6362db83f76b30db"
       - key: ANSPIRE_API_KEY
         value: "PrR9nw3YnOMTdmjk3uvA0yLOvoBuEAoD"
+      - key: ETORO_BASE_URL
+        value: "https://public-api.etoro.com"
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: ETORO_API_KEY
+        sync: false
+      - key: ETORO_USER_KEY
+        sync: false
       - key: QUIVER_API_KEY
         sync: false

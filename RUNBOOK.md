@@ -112,27 +112,43 @@ Holding stock CFDs overnight incurs daily rollover interest and overnight gap ri
 
 ---
 
-## 6. Cloud Deployment (Render)
+## 6. Cloud Deployment (Render) & Account Replication
 
-### Live Production Deployment
-- **Live URL**: [https://autonomous-trading-cockpit.onrender.com](https://autonomous-trading-cockpit.onrender.com)
-- **Deployment Manifest**: `render.yaml`
-- **Build Command**: `pip install -r requirements.txt`
-- **Start Command**: `uvicorn backend.server:app --host 0.0.0.0 --port $PORT`
+### Why Render Stops the Service on Free Accounts
+- Render free tier grants **750 free instance hours per calendar month** per account.
+- Pinging a service 24 hours/day × 31 days consumes **744 hours** per month. Any deploy, rebuild, or overlap pushes the account over 750 hours, causing Render to automatically freeze all free services until the 1st of the next month.
+- **The Solution:** Use scheduled keep-alive pings focused on market trading hours (12:00–22:00 UTC, Mon–Fri = ~220 hours/month) or migrate to a new free Render account when hours are depleted.
 
-### Manual Trigger on Render Dashboard
-If automatic deployment is set to manual:
-1. Log in to [dashboard.render.com](https://dashboard.render.com).
-2. Select `autonomous-trading-cockpit`.
-3. Click **Manual Deploy** > **Deploy latest commit**.
+### Step-by-Step Account Replication to a New Render Account
 
-### 24/7 Keep-Alive via External Cron Job
-Render free/starter web services spin down after 15 minutes of inactivity. To keep the autonomous trading bot running continuously 24/7:
-1. Log in to [cron-job.org](https://cron-job.org).
-2. Create a new cron job:
-   - **URL**: `https://autonomous-trading-cockpit.onrender.com/` (or `/heartbeat`)
-   - **Schedule**: Every 5 minutes (`*/5 * * * *`).
-   - **Method**: GET.
+1. **Sign Up / Log In to the New Render Account**:
+   - Go to [https://dashboard.render.com/register](https://dashboard.render.com/register).
+   - Sign up with GitHub (or Email + password).
+   - If using a secondary email, verify your email address.
+
+2. **Connect the GitHub Repository**:
+   - In the Render Dashboard, click **New +** > **Blueprint**.
+   - Connect your GitHub repository: `https://github.com/jvwalker-yahoo-com/autonomous-trading-cockpit`.
+   - Render will automatically detect `render.yaml` in the root directory!
+   - (Alternatively, click **New +** > **Web Service**, select the repo, set Environment to `Python 3`, Build Command: `pip install -r requirements.txt`, Start Command: `uvicorn backend.server:app --host 0.0.0.0 --port $PORT`).
+
+3. **Verify Environment Variables**:
+   - Because `render.yaml` has all 32 environment variables pre-filled (including Finnhub, Twelve Data, Alpha Vantage, Tavily, SerpAPI, OpenRouter, and eToro keys), Render will auto-populate every configuration variable instantly with zero manual typing required.
+   - Click **Apply** or **Deploy**.
+   - Your new web service URL will be provisioned (e.g., `https://autonomous-trading-cockpit-xxx.onrender.com`).
+
+4. **Set Up the Keep-Alive Cron Job (2 Options)**:
+
+   - **Option A: GitHub Actions Cron (Built-in & Fully Automated)**
+     - A workflow is pre-configured at [`.github/workflows/keepalive.yml`](file:///.github/workflows/keepalive.yml).
+     - It runs every 10 minutes during US market hours (`*/10 12-22 * * 1-5`), ensuring your trading engine is alive when markets trade, while consuming only ~220 hours of Render time per month!
+     - In GitHub repo Settings > Secrets and variables > Actions, add secret `RENDER_APP_URL` with your new Render service URL (e.g., `https://autonomous-trading-cockpit-xxx.onrender.com`).
+
+   - **Option B: cron-job.org / External Pinger**
+     - Go to [cron-job.org](https://cron-job.org) or UptimeRobot.
+     - Create a job pointing to: `https://<YOUR-NEW-SERVICE>.onrender.com/heartbeat`
+     - Schedule: Every 10–14 minutes (Render sleeps after 15 min idle).
+     - Recommended schedule: `*/10 12-22 * * 1-5` (or `*/10 * * * *` for 24/7, keeping in mind the 750h/month limit).
 
 ---
 

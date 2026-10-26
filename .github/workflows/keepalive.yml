@@ -1,0 +1,43 @@
+name: Cockpit Keep-Alive Cron
+
+on:
+  schedule:
+    # Run every 10 minutes during US trading hours & pre-market (12:00 - 22:00 UTC, Mon-Fri)
+    # Saves Render free instance hours while keeping the trading engine running when markets are active!
+    - cron: '*/10 12-22 * * 1-5'
+    # Also ping once every 3 hours on weekends/off-hours to ensure service responsiveness
+    - cron: '0 */3 * * 0,6'
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Target Render URL to ping (e.g., https://your-app.onrender.com)'
+        required: false
+        default: ''
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Cockpit Heartbeat
+        env:
+          DEFAULT_URL: "https://autonomous-trading-cockpit.onrender.com"
+          SECRET_URL: ${{ secrets.RENDER_APP_URL }}
+          INPUT_URL: ${{ github.event.inputs.target_url }}
+        run: |
+          TARGET="${INPUT_URL:-${SECRET_URL:-$DEFAULT_URL}}"
+          echo "Target URL: $TARGET"
+          
+          # Clean trailing slash
+          TARGET="${TARGET%/}"
+          
+          echo "Pinging $TARGET/heartbeat..."
+          HTTP_STATUS=$(curl -s -o /tmp/heartbeat_res.txt -w "%{http_code}" -m 35 "$TARGET/heartbeat" || echo "000")
+          
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 400 ]; then
+            echo "Success! HTTP $HTTP_STATUS"
+            cat /tmp/heartbeat_res.txt
+          else
+            echo "Heartbeat returned $HTTP_STATUS, attempting fallback to root URL..."
+            HTTP_STATUS_ROOT=$(curl -s -o /tmp/root_res.txt -w "%{http_code}" -m 35 "$TARGET/" || echo "000")
+            echo "Root ping returned: $HTTP_STATUS_ROOT"
+          fi

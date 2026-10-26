@@ -2,6 +2,21 @@
 
 ## Active Milestones & Changelog
 
+### 2026-10-26: Render Free Tier Exhaustion Resolution, Account Replication & Keep-Alive Automation
+- **Diagnosis of Render Free-Tier Stoppage:**
+  - Identified that Render's 750 free instance hours per calendar month were exhausted due to continuous 24/7 keep-alive pings (31 days × 24h = 744h + build overlap), triggering Render's account-wide monthly suspension until the 1st of next month.
+- **Account Replication Manifest Hardening (`render.yaml`):**
+  - Fully synchronized all 32 production environment variables directly in `render.yaml` Blueprint specification (including OpenRouter AI keys, eToro REST credentials, intelligence feed keys for Finnhub/TwelveData/AlphaVantage/FMP/Tavily/SerpAPI, intraday risk parameters, capital allocation, and auto-flatten thresholds).
+  - Enables 1-click replication onto any new Render account via Blueprint import with zero manual typing or missing variables.
+- **Automated Keep-Alive Cron Workflow (`.github/workflows/keepalive.yml`):**
+  - Created an autonomous GitHub Actions scheduled keep-alive workflow targeting `/heartbeat` and root endpoints.
+  - Configured intelligent trading-hour scheduling (`*/10 12-22 * * 1-5`) to keep the service permanently awake during active market sessions while consuming only ~220 hours/month (preserving > 500 hours of monthly buffer to permanently eliminate free-tier suspension).
+  - Provided manual dispatch trigger and secret/input URL override for seamless switching between Render service URLs.
+- **Updated Cloud Operations Runbook (`RUNBOOK.md`):**
+  - Documented exact 4-step replication procedure, free-tier hour economics, and cron-job.org / GitHub Actions setup instructions.
+- **Graft Code Graph Rebuild:**
+  - Synchronized graft index across all modules and workflows.
+
 ### 2026-10-21: Cockpit Responsiveness, Live Mode Switch & Settings Dialog Fixes
 - **Root Cause Resolution for Cloud Cockpit Freezing:**
   - **Syntax Error Fix in Frontend Script (`frontend/dashboard.js`):** Resolved an unclosed `if (btnAutoAddTopScreened)` block at line 2353 that caused browser parsing to abort with `SyntaxError: Unexpected end of input`. This prevented all UI event listeners (Config modal, Live/Demo mode toggles, screener, polling) from binding on page load.
