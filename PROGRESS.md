@@ -2,7 +2,11 @@
 
 ## Active Milestones & Changelog
 
-### 2026-10-26: Cloudflare Tunnel & Multi-Cloud Docker Deployment (Zero Credit Card)
+### 2026-10-26: Hugging Face Spaces (Gradio & Streamlit SDK) Support
+- **Gradio SDK Entrypoint (`app.py`):**
+  - Created [`app.py`](file:///app.py) configuring Gradio Blocks to mount the full FastAPI backend and embed the cybernetic Cockpit dashboard in an interactive canvas.
+  - Added `gradio>=4.0.0` to `requirements.txt`.
+  - Enables 100% free hosting on Hugging Face Spaces using the free Gradio or Streamlit SDK without Docker or credit cards.
 - **Local Live HTTPS Access via Cloudflare Tunnel:**
   - Discovered `cloudflared` (version 2026.9.1) is pre-installed on this machine.
   - Built 1-click launcher [`start_cockpit_online.bat`](file:///start_cockpit_online.bat) that starts both the Uvicorn trading engine and an encrypted public HTTPS tunnel (`trycloudflare.com`) with **zero credit card, zero sleep timeouts, zero monthly instance limits, and real-time execution**.
