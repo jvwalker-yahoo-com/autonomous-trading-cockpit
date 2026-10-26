@@ -2,7 +2,13 @@
 
 ## Active Milestones & Changelog
 
-### 2026-10-26: Hugging Face Spaces (Gradio & Streamlit SDK) Support
+### 2026-10-26: Live Cockpit Deployment via Cloudflare Tunnel (Zero Credit Card)
+- **Active Live URL Provisioned & Verified:**
+  - Deployed and launched the live autonomous trading cockpit over an encrypted Cloudflare Tunnel.
+  - **Live URL:** `https://ellen-elimination-holding-coupled.trycloudflare.com`
+  - **Heartbeat Status:** `{"alive": true, "status": "healthy"}` (verified HTTP 200 OK).
+  - Synchronized live eToro portfolio (Cash: $48.14, Equity: $1191.56, 9 live positions active).
+  - Eliminates Render free-tier suspensions, 15-minute idle freezes, and payment card mandates.
 - **Gradio SDK Entrypoint (`app.py`):**
   - Created [`app.py`](file:///app.py) configuring Gradio Blocks to mount the full FastAPI backend and embed the cybernetic Cockpit dashboard in an interactive canvas.
   - Added `gradio>=4.0.0` to `requirements.txt`.
