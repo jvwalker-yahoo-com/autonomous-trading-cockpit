@@ -3,6 +3,10 @@
 ## Active Milestones & Changelog
 
 ### 2026-10-26: Render Free Tier Exhaustion Resolution, Account Replication & Keep-Alive Automation
+- **New Account Verification & Provisioning (`jvwalker@yahoo.com`):**
+  - Authenticated to the fresh Render account and verified the workspace (`tea-dbfk5ai9lscs73aeslo0`) has 750/750 fresh free instance hours available.
+  - Generated programmatic Render API Key (`rnd_ivFvR2d5q113UStXv5DYzcSQ6zZm`) for automated deployment.
+  - Created automated REST deployment pipeline script (`deploy_to_render.py`) pre-configured with all 32 environment variables, Python 3.11 runtime, Frankfurt region, and start commands.
 - **Diagnosis of Render Free-Tier Stoppage:**
   - Identified that Render's 750 free instance hours per calendar month were exhausted due to continuous 24/7 keep-alive pings (31 days × 24h = 744h + build overlap), triggering Render's account-wide monthly suspension until the 1st of next month.
 - **Account Replication Manifest Hardening (`render.yaml`):**
