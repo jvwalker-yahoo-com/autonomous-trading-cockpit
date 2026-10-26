@@ -2,7 +2,14 @@
 
 ## Active Milestones & Changelog
 
-### 2026-10-26: Koyeb Cloud Migration (No Credit Card), Keep-Alive Automation & Graft Sync
+### 2026-10-26: Cloudflare Tunnel & Multi-Cloud Docker Deployment (Zero Credit Card)
+- **Local Live HTTPS Access via Cloudflare Tunnel:**
+  - Discovered `cloudflared` (version 2026.9.1) is pre-installed on this machine.
+  - Built 1-click launcher [`start_cockpit_online.bat`](file:///start_cockpit_online.bat) that starts both the Uvicorn trading engine and an encrypted public HTTPS tunnel (`trycloudflare.com`) with **zero credit card, zero sleep timeouts, zero monthly instance limits, and real-time execution**.
+- **Container Infrastructure Specification ([`Dockerfile`](file:///Dockerfile)):**
+  - Added universal Python 3.11 slim container image supporting Hugging Face Spaces (Port 7860, 16 GB RAM free, 100% no card required) and Railway.
+- **Koyeb Status Observation:**
+  - Documented that Koyeb has frozen self-service deployments due to its acquisition by Mistral AI.
 - **Koyeb Cloud Infrastructure Configuration (No Credit Card Alternative):**
   - Configured native Koyeb buildpack support with root [`Procfile`](file:///Procfile) targeting `uvicorn backend.server:app --host 0.0.0.0 --port ${PORT:-8000}`.
   - Authored declarative infrastructure-as-code specification [`koyeb.yaml`](file:///koyeb.yaml) defining Nano tier, Frankfurt region, and `/` HTTP route.
