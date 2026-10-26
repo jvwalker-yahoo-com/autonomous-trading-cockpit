@@ -20,8 +20,8 @@ jobs:
     steps:
       - name: Ping Cockpit Heartbeat
         env:
-          DEFAULT_URL: "https://autonomous-trading-cockpit.onrender.com"
-          SECRET_URL: ${{ secrets.KOYEB_APP_URL || secrets.RENDER_APP_URL }}
+          DEFAULT_URL: "https://autonomous-trading-cockpit-8wal.onrender.com"
+          SECRET_URL: ${{ secrets.RENDER_APP_URL || secrets.KOYEB_APP_URL }}
           INPUT_URL: ${{ github.event.inputs.target_url }}
         run: |
           TARGET="${INPUT_URL:-${SECRET_URL:-$DEFAULT_URL}}"

@@ -2,6 +2,17 @@
 
 ## Active Milestones & Changelog
 
+### 2026-10-26: Production Deployment & Replication on New Render Account
+- **New Render Service Successfully Created & Provisioned:**
+  - Authenticated and deployed web service `autonomous-trading-cockpit` on Render account `jvwalker@yahoo.com` (`tea-dbfk5ai9lscs73aeslo0`).
+  - **Live Cloud URL:** `https://autonomous-trading-cockpit-8wal.onrender.com`
+  - **Dashboard Management URL:** `https://dashboard.render.com/web/srv-dbflfb9srm7s73fdvmn0`
+  - **Region:** Frankfurt (`frankfurt`), Plan: `Free (0.1 CPU, 512 MB RAM)`.
+  - Injected all 32 production environment variables directly (Finnhub, Twelve Data, Alpha Vantage, FMP, Tavily, SerpAPI, Anspire, Congress Invests, OpenRouter, eToro credentials, capital limits, and risk parameters).
+- **Automated Keep-Alive Cron Configured:**
+  - Synced [`.github/workflows/keepalive.yml`](file:///c:/Antigravity/autonomous-trading-cockpit/.github/workflows/keepalive.yml) with default URL pointing to `https://autonomous-trading-cockpit-8wal.onrender.com`.
+  - Cron scheduled for market and pre-market hours (`*/10 12-22 * * 1-5`) to preserve free instance hours and prevent end-of-month suspensions.
+
 ### 2026-10-26: Live Cockpit Deployment via Cloudflare Tunnel (Zero Credit Card)
 - **Active Live URL Provisioned & Verified:**
   - Deployed and launched the live autonomous trading cockpit over an encrypted Cloudflare Tunnel.
