@@ -1409,3 +1409,114 @@ def test_live_mode_enforces_stop_loss_and_closes_all_etoro_lots():
     assert closed_ids == ["3606518052", "3606518023"]
     assert "NETC.CO" not in b.positions
 
+
+
+def test_enforce_live_stops_decimal_normalization_and_spot():
+    """
+    Verifies that enforce_live_stops correctly normalizes decimal parameters (e.g. 0.025 -> 2.5%)
+    and liquidates positions breaching stop loss while sparing those within tolerance.
+    """
+    from backend.engine.broker import SimulatedBroker
+    from backend.engine.models import Position
+
+    b = SimulatedBroker(initial_capital=1200.0)
+    # TV: -6.89% loss (should be closed)
+    b.positions["TV"] = Position(
+        id="3615539636",
+        etoro_position_ids=["3615539636"],
+        symbol="TV",
+        direction="LONG",
+        horizon="swing",
+        shares=46.349137,
+        entry_price=2.32,
+        current_price=2.16,
+        cost_basis_usd=107.53,
+        market_value_usd=100.12,
+        unrealized_pnl_usd=-7.41,
+        unrealized_pnl_pct=-6.89,
+        stop_loss=2.26,
+        take_profit=0.0,
+        entry_time="2026-10-26T18:52:26.643",
+        rationale="Active Live eToro Holding"
+    )
+    # MMM: -1.64% loss (should NOT be closed under 2.5% swing stop)
+    b.positions["MMM"] = Position(
+        id="3615539893",
+        etoro_position_ids=["3615539893"],
+        symbol="MMM",
+        direction="LONG",
+        horizon="swing",
+        shares=0.767986,
+        entry_price=173.05,
+        current_price=170.21,
+        cost_basis_usd=132.90,
+        market_value_usd=130.72,
+        unrealized_pnl_usd=-2.18,
+        unrealized_pnl_pct=-1.64,
+        stop_loss=168.72,
+        take_profit=0.0,
+        entry_time="2026-10-26T18:53:06.867",
+        rationale="Active Live eToro Holding"
+    )
+
+    closed_ids = []
+    class DummyEtoroClient:
+        def is_configured(self):
+            return True
+        def resolve_instrument_id(self, sym):
+            return 1109 if sym == "TV" else 1026
+        def close_position(self, position_id, mode="real", instrument_id=None):
+            closed_ids.append(str(position_id))
+            return {"success": True}
+
+    # Pass decimal 0.025 (2.5%) as configured in config.default_stop_loss_pct
+    records = b.enforce_live_stops(etoro_client=DummyEtoroClient(), max_loss_pct=0.025)
+    assert len(records) == 1
+    assert records[0].symbol == "TV"
+    assert "TV" not in b.positions
+    assert "MMM" in b.positions
+    assert closed_ids == ["3615539636"]
+
+
+def test_sync_live_etoro_portfolio_synthetic_stop_loss():
+    """
+    Verifies that when eToro returns spot equity holdings without broker-side stop loss,
+    sync_live_etoro_portfolio initializes a synthetic software stop-loss.
+    """
+    from backend.engine.broker import SimulatedBroker
+
+    b = SimulatedBroker(initial_capital=1200.0)
+    mock_portfolio = {
+        "totals": {"netDeposit": 1200.0, "totalValue": 1200.0, "availableCash": 200.0},
+        "holdings": [
+            {
+                "market": {"instrumentId": 1109, "symbol": "TV", "name": "Grupo Televisa"},
+                "invested": 107.53,
+                "value": 100.12,
+                "pnl": -7.41,
+                "pnlPercent": -6.89,
+                "units": 46.349137,
+                "avgOpenRate": 2.32,
+                "currentRate": 2.16,
+                "positions": [
+                    {
+                        "positionId": 3615539636,
+                        "openTime": "2026-10-26T18:52:26.643",
+                        "openRate": 2.32,
+                        "currentRate": 2.16,
+                        "units": 46.349137,
+                        "invested": 107.53,
+                        "direction": "long",
+                        # Notice: No stopLossRate provided by eToro on spot long
+                    }
+                ]
+            }
+        ]
+    }
+
+    b.sync_live_etoro_portfolio(mock_portfolio)
+    assert "TV" in b.positions
+    pos = b.positions["TV"]
+    assert pos.stop_loss > 0.0
+    # 2.32 * (1 - 0.025) = 2.26
+    assert pos.stop_loss == 2.26

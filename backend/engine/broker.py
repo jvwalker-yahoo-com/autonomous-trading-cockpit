@@ -92,6 +92,12 @@ class SimulatedBroker:
                     sl = existing_pos.stop_loss
                 elif direction == "LONG" and (sl <= 0 or sl < existing_pos.stop_loss):
                     sl = existing_pos.stop_loss
+            elif sl <= 0 and open_rate > 0:
+                # For spot assets (unleveraged stocks), eToro does not attach broker-side stops at open.
+                # Initialize default synthetic software stop loss based on trade horizon:
+                def_sl = 0.015 if horizon == "day" else 0.025
+                sl_prec = 4 if open_rate < 1.0 else 2
+                sl = round(open_rate * (1.0 + def_sl if direction == "SHORT" else 1.0 - def_sl), sl_prec)
 
             live_positions[sym] = Position(
                 id=pos_id,
@@ -306,7 +312,12 @@ class SimulatedBroker:
             self.save_state()
         return closed_trades
 
-    def enforce_live_stops(self, etoro_client, max_loss_pct: float = 2.5) -> List[TradeRecord]:
+    def enforce_live_stops(
+        self,
+        etoro_client,
+        max_loss_pct: float = 2.5,
+        day_trade_max_loss_pct: Optional[float] = None
+    ) -> List[TradeRecord]:
         """
         Actively closes all underlying eToro lots when a live position breaches
         its stop-loss rate or exceeds max_loss_pct threshold.
@@ -315,13 +326,18 @@ class SimulatedBroker:
         if not etoro_client or not etoro_client.is_configured():
             return closed_records
 
+        # Normalize percentages if passed as decimals (< 1.0, e.g. 0.025 -> 2.5%)
+        norm_swing_pct = max_loss_pct * 100.0 if 0.0 < max_loss_pct < 1.0 else max_loss_pct
+        norm_day_pct = (day_trade_max_loss_pct * 100.0 if 0.0 < day_trade_max_loss_pct < 1.0 else day_trade_max_loss_pct) if day_trade_max_loss_pct is not None else norm_swing_pct
+
         for sym, pos in list(self.positions.items()):
             should_close = False
             reason = ""
+            active_max_pct = norm_day_pct if getattr(pos, "horizon", "swing") == "day" else norm_swing_pct
 
-            if pos.unrealized_pnl_pct <= -abs(max_loss_pct):
+            if pos.unrealized_pnl_pct <= -abs(active_max_pct):
                 should_close = True
-                reason = f"Live Stop Enforced: Max loss breach ({pos.unrealized_pnl_pct:.2f}% <= -{max_loss_pct:.2f}%)"
+                reason = f"Live Stop Enforced: Max loss breach ({pos.unrealized_pnl_pct:.2f}% <= -{active_max_pct:.2f}%)"
             elif pos.stop_loss > 0:
                 if pos.direction == "LONG" and pos.current_price <= pos.stop_loss:
                     should_close = True
@@ -333,15 +349,23 @@ class SimulatedBroker:
             if should_close:
                 inst_id = etoro_client.resolve_instrument_id(sym)
                 ids_to_close = pos.etoro_position_ids or [pos.id]
+                close_succeeded = False
                 for pid in ids_to_close:
                     try:
-                        etoro_client.close_position(position_id=str(pid), mode="real", instrument_id=inst_id)
+                        res = etoro_client.close_position(position_id=str(pid), mode="real", instrument_id=inst_id)
+                        if isinstance(res, dict) and res.get("success"):
+                            close_succeeded = True
+                        elif res is None:
+                            close_succeeded = True
                     except Exception as ex:
                         logger.warning(f"Error closing live lot {pid} for {sym}: {ex}")
 
-                tr = self.close_position(sym, pos.current_price, exit_rationale=reason)
-                if tr:
-                    closed_records.append(tr)
+                if close_succeeded or not hasattr(etoro_client, "close_position"):
+                    tr = self.close_position(sym, pos.current_price, exit_rationale=reason)
+                    if tr:
+                        closed_records.append(tr)
+                else:
+                    logger.warning(f"⚠️ [Live Stop Enforcement Pending] Could not close live lot(s) for {sym} on eToro (market may be closed or order rejected). Will retry.")
 
         if closed_records:
             self.save_state()

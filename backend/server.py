@@ -189,6 +189,14 @@ def sync_live_etoro_portfolio_if_live(force: bool = False):
             broker.sync_live_etoro_portfolio(pf_res["data"])
             _cockpit_snapshot_cache.clear()
             logger.info(f"🔄 [eToro Live Portfolio Synced] Cash: ${broker.cash:.2f}, Equity: ${broker.get_equity():.2f}, Positions: {len(broker.positions)}")
+            # Enforce live stop losses on any position breaching risk thresholds
+            enforced = broker.enforce_live_stops(
+                etoro_client=etoro_client,
+                max_loss_pct=config.default_stop_loss_pct,
+                day_trade_max_loss_pct=config.day_trade_stop_loss_pct
+            )
+            if enforced:
+                logger.warning(f"🛑 [LIVE STOP LOSS ENFORCED] Automatically closed {len(enforced)} breached position(s): {[t.symbol for t in enforced]}")
     except Exception as e:
         logger.warning(f"Notice during live eToro portfolio sync: {e}")
 
