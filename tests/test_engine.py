@@ -1520,3 +1520,104 @@ def test_sync_live_etoro_portfolio_synthetic_stop_loss():
     assert pos.stop_loss > 0.0
     # 2.32 * (1 - 0.025) = 2.26
     assert pos.stop_loss == 2.26
+    # 2.32 * (1 + 0.050) = 2.44
+    assert pos.take_profit == 2.44
+
+
+def test_multi_lot_flatten_prune_and_crypto_hard_block():
+    """
+    Verifies:
+    1. auto_flatten_day_trades and prune_decaying_short_term_positions close all underlying eToro lots.
+    2. EToroClient.execute_mcp_trade and create_order strictly block crypto symbols and crypto instrument IDs.
+    3. /api/etoro/status properly decodes base64 JWT payloads.
+    """
+    import base64
+    import json
+    from backend.engine.broker import SimulatedBroker
+    from backend.engine.models import Position
+    from src.services.etoro.client import EToroClient
+
+    b = SimulatedBroker(initial_capital=1200.0)
+    b.positions["NVDA"] = Position(
+        id="101",
+        etoro_position_ids=["101", "102", "103"],
+        symbol="NVDA",
+        direction="LONG",
+        horizon="day",
+        shares=2.0,
+        entry_price=120.0,
+        current_price=122.0,
+        cost_basis_usd=240.0,
+        market_value_usd=244.0,
+        unrealized_pnl_usd=4.0,
+        unrealized_pnl_pct=1.67,
+        stop_loss=118.2,
+        take_profit=123.6,
+        entry_time="2026-10-20T14:00:00Z",
+        rationale="Active Live eToro Holding"
+    )
+
+    closed_lots = []
+    class DummyEtoro:
+        def is_configured(self):
+            return True
+        def resolve_instrument_id(self, sym):
+            return 1005
+        def close_position(self, position_id, mode="real", instrument_id=None):
+            closed_lots.append(str(position_id))
+            return {"success": True}
+
+    flattened = b.auto_flatten_day_trades(etoro_client=DummyEtoro(), is_live=True)
+    assert len(flattened) == 1
+    assert closed_lots == ["101", "102", "103"]
+
+    # Test multi-lot pruning
+    closed_lots.clear()
+    b.positions["INTC"] = Position(
+        id="201",
+        etoro_position_ids=["201", "202"],
+        symbol="INTC",
+        direction="LONG",
+        horizon="swing",
+        shares=10.0,
+        entry_price=25.0,
+        current_price=24.0,
+        cost_basis_usd=250.0,
+        market_value_usd=240.0,
+        unrealized_pnl_usd=-10.0,
+        unrealized_pnl_pct=-4.0,
+        stop_loss=24.38,
+        take_profit=26.25,
+        entry_time="2026-01-01T14:00:00Z",
+        rationale="Active Live eToro Holding"
+    )
+    pruned = b.prune_decaying_short_term_positions(min_days_held=5.0, etoro_client=DummyEtoro(), is_live=True)
+    assert len(pruned) == 1
+    assert closed_lots == ["201", "202"]
+
+    # Test Crypto hard-block in EToroClient
+    et = EToroClient(api_key="test_k", user_key="test_u")
+    res_mcp = et.execute_mcp_trade(symbol="BTC", direction="BUY", amount_usd=100.0, mode="real")
+    assert res_mcp["success"] is False
+    assert "permanently deactivated" in res_mcp["error"].lower()
+
+    res_ord_id = et.create_order(instrument_id=100000, direction="BUY", amount_usd=100.0, mode="real")
+    assert res_ord_id["success"] is False
+    assert "permanently deactivated" in res_ord_id["error"].lower()
+
+    # Test JWT payload decoding in /api/etoro/status
+    fake_payload = base64.urlsafe_b64encode(json.dumps({"ean": "CockpitApp", "cid": 12345}).encode()).decode().rstrip("=")
+    fake_jwt = f"eyJhbGciOiJIUzI1NiJ9.{fake_payload}.sig"
+    from backend.server import etoro_client as srv_etoro
+    orig_uk = srv_etoro.user_key
+    try:
+        srv_etoro.user_key = fake_jwt
+        tc = TestClient(app)
+        st_res = tc.get("/api/etoro/status")
+        assert st_res.status_code == 200
+        st_json = st_res.json()
+        assert st_json["user_key_b64_json_valid"] is True
+        assert st_json["user_key_application_name"] == "CockpitApp"
+    finally:
+        srv_etoro.user_key = orig_uk
+

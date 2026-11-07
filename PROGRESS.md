@@ -2,6 +2,36 @@
 
 ## Active Milestones & Changelog
 
+### 2026-11-07: Comprehensive System Health Check, Execution Hardening & Static Verification
+- **Critical Diagnostic & Execution Safety Fixes:**
+  - **Read-Only Enforcement on `GET /api/etoro/mcp-test` ([`backend/server.py`](file:///c:/Antigravity/autonomous-trading-cockpit/backend/server.py)):** Fixed a critical bug where `GET /api/etoro/mcp-test` invoked `execute_mcp_trade(..., mode="real")` instead of read-only `prepare_mcp_trade(..., mode="demo")`, which previously caused test suites to trigger live orders on eToro.
+  - **Client-Layer Crypto Prohibition ([`src/services/etoro/client.py`](file:///c:/Antigravity/autonomous-trading-cockpit/src/services/etoro/client.py)):** Added hard rejection guards inside `EToroClient.execute_mcp_trade` and `EToroClient.create_order` for all `CRYPTO_SYMBOLS` and crypto instrument IDs (`>= 100000`), guaranteeing zero cryptocurrency orders can ever be dispatched at the transport layer.
+  - **Pytest Isolation & Live Order Guard ([`pytest.ini`](file:///c:/Antigravity/autonomous-trading-cockpit/pytest.ini), [`tests/conftest.py`](file:///c:/Antigravity/autonomous-trading-cockpit/tests/conftest.py)):** Added `pytest.ini` (`pythonpath = .`) so `pytest` runs directly without module path errors, and created an `autouse` fixture in `tests/conftest.py` that isolates `config.db_path` / `broker.db_path` to a temporary file and intercepts unmocked `place-trade` / `place-close` MCP calls during test runs.
+- **Static Symbol Table (`symtable`) Audit & `NameError` Resolutions ([`backend/server.py`](file:///c:/Antigravity/autonomous-trading-cockpit/backend/server.py)):**
+  - Resolved missing `import json` that caused `safe_decode_jwt_payload` in `/api/etoro/status` to silently fail when inspecting eToro JWT tokens.
+  - Resolved missing `import numpy as np` in `get_wyckoff_structure_endpoint` fallback calculation.
+  - Fixed `POST /api/research/evaluate` (`evaluate_symbol_committee`) calling undefined `indicators_module.compute_all` instead of `data_feed.get_technical_indicators(sym)`.
+  - Added automated `symtable` static scope verification test (`test_python_symtable_no_undefined_globals`) in [`tests/test_frontend_assets.py`](file:///c:/Antigravity/autonomous-trading-cockpit/tests/test_frontend_assets.py) to permanently prevent undefined global references across all 41 Python files.
+- **Multi-Lot eToro Position Closing & Broker Hardening ([`backend/engine/broker.py`](file:///c:/Antigravity/autonomous-trading-cockpit/backend/engine/broker.py)):**
+  - Updated `auto_flatten_day_trades` and `prune_decaying_short_term_positions` to iterate over all underlying `pos.etoro_position_ids` (matching `enforce_live_stops`), ensuring multi-lot holdings are completely closed on eToro.
+  - Enhanced `sync_live_etoro_portfolio` to preserve or initialize synthetic software `take_profit` targets (`3.0%` day / `5.0%` swing) alongside synthetic `stop_loss` levels for unleveraged spot holdings.
+  - Made `current_price` optional in `SimulatedBroker.close_position`, defaulting to `pos.current_price` when omitted (fixing `close_all_positions_endpoint(only_crypto=True)`).
+  - Updated `execute_manual_action` in `backend/server.py` to apply horizon-specific SL/TP (`day` vs `swing`) on live manual orders and prevent recording phantom local positions if a live eToro order is rejected.
+- **Telemetry Prefix Fix & FastAPI Lifespan Modernization:**
+  - Fixed `TelemetryModule.get_exchange_for_symbol` in [`backend/engine/telemetry.py`](file:///c:/Antigravity/autonomous-trading-cockpit/backend/engine/telemetry.py) to match exact crypto symbols or pair suffixes rather than `sym.startswith(c)`, preventing equities like `SOLV` or `UNFI` from colliding with crypto prefixes (`SOL`, `UNI`).
+  - Migrated `@app.on_event("startup")` in `backend/server.py` to a FastAPI `lifespan` async context manager that cleanly cancels the background worker task on shutdown.
+  - Synced `risk_per_trade_pct` and `day_trade_eod_flatten_minutes_before_close` across `get_system_config()`, `update_system_config()`, and startup state restoration.
+- **Verification, Graft Code Graph Rebuild & Render Service Restart:**
+  - All **47/47 unit & integration tests passing** (`pytest -v`).
+  - Rebuilt and verified `graft` code graph across all **41 files (500 nodes, 1,340 edges)**.
+  - Resumed and restarted Render cloud service `autonomous-trading-cockpit` (`srv-dbflfb9srm7s73fdvmn0`) at `https://autonomous-trading-cockpit-8wal.onrender.com` with all health-check fixes deployed.
+
+### 2026-10-28: Render Service Suspension & Live Stop-Loss Enforcement Wiring
+- **Render Service Suspended Per Operator Instruction:**
+  - Suspended Render web service `autonomous-trading-cockpit` (`srv-dbflfb9srm7s73fdvmn0`) via Render REST API (`POST /v1/services/{serviceId}/suspend`) until instructed to resume.
+- **Live Stop-Loss Enforcement & Synthetic Spot Stops ([`backend/engine/broker.py`](file:///c:/Antigravity/autonomous-trading-cockpit/backend/engine/broker.py), [`backend/server.py`](file:///c:/Antigravity/autonomous-trading-cockpit/backend/server.py)):**
+  - Wired `broker.enforce_live_stops` into `sync_live_etoro_portfolio_if_live` and auto-assigned synthetic software stop-losses (`1.5%` day / `2.5%` swing) for unleveraged spot holdings.
+
 ### 2026-10-26: Production Deployment & Replication on New Render Account
 - **New Render Service Successfully Created & Provisioned:**
   - Authenticated and deployed web service `autonomous-trading-cockpit` on Render account `jvwalker@yahoo.com` (`tea-dbfk5ai9lscs73aeslo0`).

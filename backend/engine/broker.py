@@ -9,7 +9,7 @@ import os
 import logging
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timezone, timedelta
-from .models import Position, TradeRecord, PortfolioSummary, StockPerformanceSummary, MultiDayPerformanceReport
+from .models import Position, TradeRecord, PortfolioSummary, StockPerformanceSummary, MultiDayPerformanceReport, MistakeLogEntry
 from .learner import AdaptiveLearner
 
 logger = logging.getLogger("broker")
@@ -98,6 +98,14 @@ class SimulatedBroker:
                 def_sl = 0.015 if horizon == "day" else 0.025
                 sl_prec = 4 if open_rate < 1.0 else 2
                 sl = round(open_rate * (1.0 + def_sl if direction == "SHORT" else 1.0 - def_sl), sl_prec)
+
+            # Preserve or initialize synthetic software take-profit for spot holdings
+            if existing_pos and existing_pos.take_profit > 0 and tp <= 0:
+                tp = existing_pos.take_profit
+            elif tp <= 0 and open_rate > 0:
+                def_tp = 0.030 if horizon == "day" else 0.050
+                tp_prec = 4 if open_rate < 1.0 else 2
+                tp = round(open_rate * (1.0 - def_tp if direction == "SHORT" else 1.0 + def_tp), tp_prec)
 
             live_positions[sym] = Position(
                 id=pos_id,
@@ -298,11 +306,13 @@ class SimulatedBroker:
                     pass
 
             if is_live and etoro_client and etoro_client.is_configured():
-                try:
-                    inst_id = etoro_client.resolve_instrument_id(sym)
-                    etoro_client.close_position(position_id=str(pos.id), mode="real", instrument_id=inst_id)
-                except Exception as ex:
-                    logger.warning(f"Live auto-flatten eToro close error for {sym}: {ex}")
+                inst_id = etoro_client.resolve_instrument_id(sym)
+                ids_to_close = pos.etoro_position_ids or [pos.id]
+                for pid in ids_to_close:
+                    try:
+                        etoro_client.close_position(position_id=str(pid), mode="real", instrument_id=inst_id)
+                    except Exception as ex:
+                        logger.warning(f"Live auto-flatten eToro close error for {sym} (lot {pid}): {ex}")
 
             tr = self.close_position(sym, price, exit_rationale=exit_rationale)
             if tr:
@@ -434,14 +444,16 @@ class SimulatedBroker:
                     except Exception:
                         pass
                 
-                # In live mode, dispatch close order to eToro
+                # In live mode, dispatch close order for all underlying lots to eToro
                 if is_live and etoro_client and etoro_client.is_configured():
-                    try:
-                        inst_id = etoro_client.resolve_instrument_id(sym)
-                        etoro_res = etoro_client.close_position(position_id=str(pos.id), mode="real", instrument_id=inst_id)
-                        logger.info(f"⚡ [eToro Live Prune Order] Closed {sym} (ID: {pos.id}) -> {etoro_res.get('success')}")
-                    except Exception as e:
-                        logger.warning(f"Error closing live position {sym} on eToro: {e}")
+                    inst_id = etoro_client.resolve_instrument_id(sym)
+                    ids_to_close = pos.etoro_position_ids or [pos.id]
+                    for pid in ids_to_close:
+                        try:
+                            etoro_res = etoro_client.close_position(position_id=str(pid), mode="real", instrument_id=inst_id)
+                            logger.info(f"⚡ [eToro Live Prune Order] Closed {sym} (ID: {pid}) -> {etoro_res.get('success') if isinstance(etoro_res, dict) else True}")
+                        except Exception as e:
+                            logger.warning(f"Error closing live position {sym} (lot {pid}) on eToro: {e}")
 
                 tr = self.close_position(sym, cur_p, exit_rationale=reason)
                 if tr:
@@ -577,7 +589,7 @@ class SimulatedBroker:
 
         return closed_trades
 
-    def close_position(self, symbol: str, current_price: float, exit_rationale: str = "Manual / System exit", contributing_models: Optional[Dict[str, float]] = None) -> Optional[TradeRecord]:
+    def close_position(self, symbol: str, current_price: Optional[float] = None, exit_rationale: str = "Manual / System exit", contributing_models: Optional[Dict[str, float]] = None) -> Optional[TradeRecord]:
         """
         Closes position, updates cash balance, records trade ledger,
         and feeds trade outcome to the Adaptive Learner.
@@ -586,6 +598,8 @@ class SimulatedBroker:
             return None
 
         pos = self.positions.pop(symbol)
+        if current_price is None or current_price <= 0:
+            current_price = pos.current_price if pos.current_price > 0 else pos.entry_price
         
         if pos.direction == "LONG":
             exit_value = round(pos.shares * current_price, 2)
@@ -689,6 +703,8 @@ class SimulatedBroker:
 
             if "learner_weights" in state:
                 self.learner.weights = state["learner_weights"]
+            if "mistake_history" in state and isinstance(state["mistake_history"], list):
+                self.learner.mistake_history = [MistakeLogEntry(**m) for m in state["mistake_history"] if isinstance(m, dict)]
             if "total_trades_evaluated" in state:
                 self.learner.total_trades_evaluated = state.get("total_trades_evaluated", 0)
                 self.learner.winning_trades_count = state.get("winning_trades_count", 0)

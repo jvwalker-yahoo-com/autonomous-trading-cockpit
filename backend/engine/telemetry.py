@@ -160,8 +160,8 @@ class TelemetryModule:
         """Resolves target eToro UK schedule for any asset class."""
         sym = symbol.upper()
         
-        # Crypto check
-        if any(sym == c or sym.startswith(c) for c in ALL_CRYPTO_SET):
+        # Crypto check (exact symbol or pair suffix like BTCUSD / BTC-USD, avoiding equity prefix collisions like SOLV/UNFI)
+        if any(sym == c or sym.startswith(f"{c}/") or sym.startswith(f"{c}-") or sym == f"{c}USD" or sym == f"{c}USDT" for c in ALL_CRYPTO_SET):
             if not ("FUTURE" in sym or "MICRO" in sym):
                 return ETORO_EXCHANGES_UK["CRYPTO"]
 

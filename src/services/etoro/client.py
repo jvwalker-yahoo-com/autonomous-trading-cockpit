@@ -1274,6 +1274,15 @@ class EToroClient:
         mcp_dir = "buy" if direction.upper() in ("BUY", "LONG") else "sellShort"
         sym = symbol.upper().strip()
 
+        # Permanent deactivation of Crypto trading per user mandate due to high spread costs
+        if sym in CRYPTO_SYMBOLS:
+            logger.warning(f"🚫 [eToro MCP] Trade rejected for {sym}: Cryptocurrency trading is permanently deactivated due to excessive spread costs.")
+            return {
+                "success": False,
+                "status_code": 400,
+                "error": f"Cryptocurrency trading is permanently deactivated for {sym} due to excessive spread costs."
+            }
+
         # Step 1: prepare-trade
         logger.info(f"[eToro MCP] Preparing trade: {mcp_dir} ${amount_usd:.2f} of {sym} on {account} account...")
         prep_res = self.prepare_mcp_trade(
@@ -1510,12 +1519,12 @@ class EToroClient:
             }
 
         # Permanent deactivation of Crypto trading per user mandate due to high spread costs
-        if sym in CRYPTO_SYMBOLS:
-            logger.warning(f"🚫 [eToro] Trade rejected for {sym}: Cryptocurrency trading is permanently deactivated due to excessive spread costs.")
+        if sym in CRYPTO_SYMBOLS or (instrument_id is not None and int(instrument_id) >= 100000):
+            logger.warning(f"🚫 [eToro] Trade rejected for {sym or instrument_id}: Cryptocurrency trading is permanently deactivated due to excessive spread costs.")
             return {
                 "success": False,
                 "status_code": 400,
-                "error": f"Cryptocurrency trading is permanently deactivated for {sym} due to excessive spread costs."
+                "error": f"Cryptocurrency trading is permanently deactivated for {sym or instrument_id} due to excessive spread costs."
             }
 
         # 1. Try MCP pipeline first if symbol is provided

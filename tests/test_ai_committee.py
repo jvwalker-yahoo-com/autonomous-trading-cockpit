@@ -70,3 +70,12 @@ def test_research_api_endpoints():
     assert "conviction_score" in data
     assert "debate_transcript" in data
     assert "complete_report_md" in data
+
+    # Verify POST /api/research/evaluate forces fresh deliberation without NameError
+    res_eval = client.post("/api/research/evaluate?symbol=MSFT")
+    assert res_eval.status_code == 200
+    eval_data = res_eval.json()
+    assert eval_data["status"] == "success"
+    assert eval_data["symbol"] == "MSFT"
+    assert "verdict" in eval_data
+    assert "dossier" in eval_data

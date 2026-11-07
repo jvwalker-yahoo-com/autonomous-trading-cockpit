@@ -4,9 +4,12 @@ Provides all 10 core endpoints specified in the architectural design, plus live 
 self-learning evaluation, Finnhub integration, and static UI serving.
 """
 import os
+import json
 import time
 import asyncio
 import logging
+import numpy as np
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
@@ -162,6 +165,22 @@ if saved_settings:
         config.min_conviction_score = float(saved_settings["min_conviction_score"])
     if "max_concurrent_positions" in saved_settings and saved_settings["max_concurrent_positions"]:
         config.max_concurrent_positions = int(saved_settings["max_concurrent_positions"])
+    if "risk_per_trade_pct" in saved_settings and saved_settings["risk_per_trade_pct"] is not None:
+        config.risk_per_trade_pct = float(saved_settings["risk_per_trade_pct"])
+    if "enable_day_trading" in saved_settings and saved_settings["enable_day_trading"] is not None:
+        config.enable_day_trading = bool(saved_settings["enable_day_trading"])
+    if "day_trade_allocation_pct" in saved_settings and saved_settings["day_trade_allocation_pct"] is not None:
+        config.day_trade_allocation_pct = float(saved_settings["day_trade_allocation_pct"])
+    if "day_trade_max_active" in saved_settings and saved_settings["day_trade_max_active"] is not None:
+        config.day_trade_max_active = int(saved_settings["day_trade_max_active"])
+    if "day_trade_stop_loss_pct" in saved_settings and saved_settings["day_trade_stop_loss_pct"] is not None:
+        config.day_trade_stop_loss_pct = float(saved_settings["day_trade_stop_loss_pct"])
+    if "day_trade_take_profit_pct" in saved_settings and saved_settings["day_trade_take_profit_pct"] is not None:
+        config.day_trade_take_profit_pct = float(saved_settings["day_trade_take_profit_pct"])
+    if "max_daily_loss_usd" in saved_settings and saved_settings["max_daily_loss_usd"] is not None:
+        config.max_daily_loss_usd = float(saved_settings["max_daily_loss_usd"])
+    if "day_trade_eod_flatten_minutes_before_close" in saved_settings and saved_settings["day_trade_eod_flatten_minutes_before_close"] is not None:
+        config.day_trade_eod_flatten_minutes_before_close = int(saved_settings["day_trade_eod_flatten_minutes_before_close"])
 
 
 # Cache for full cockpit snapshot to prevent redundant execution cycles on frequent UI polling
@@ -242,16 +261,21 @@ if config.execution_mode == "live":
 active_symbol = "AAPL"
 is_autonomous_loop_running = True
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Starts the continuous background autonomous execution loop and cancels cleanly on shutdown."""
+    worker_task = asyncio.create_task(autonomous_background_worker_loop())
+    try:
+        yield
+    finally:
+        worker_task.cancel()
+
 app = FastAPI(
     title="Predictive Execution Cockpit API",
     description="Autonomous Trading Engine with Real-Time Learning & Predictive Cockpit",
-    version="2.0.0"
+    version="2.0.0",
+    lifespan=lifespan
 )
-
-@app.on_event("startup")
-async def start_autonomous_background_worker():
-    """Starts the continuous background autonomous execution loop."""
-    asyncio.create_task(autonomous_background_worker_loop())
 
 # Permanent Core Anchor Assets — European Morning (UK100, GER40) + US Tech Titans & High-Beta Day Trading Leaders
 CORE_ANCHOR_SYMBOLS = [
@@ -1202,16 +1226,19 @@ def execute_manual_action(req: ManualTradeRequest):
     direction = "LONG" if req.action.upper() == "BUY" else "SHORT"
     alloc_usd = req.amount_usd or 100.0
     etoro_res = None
+    manual_sl = config.day_trade_stop_loss_pct if req.horizon == "day" else config.default_stop_loss_pct
+    manual_tp = config.day_trade_take_profit_pct if req.horizon == "day" else config.default_take_profit_pct
+    can_execute_broker = True
 
     if config.execution_mode == "live" and etoro_client.is_configured():
         inst_id = etoro_client.resolve_instrument_id(req.symbol)
         is_short = (direction == "SHORT")
         sl_prec = 8 if quote.price < 0.01 else (4 if quote.price < 1.0 else 2)
-        sl_rate = round(quote.price * (1.0 + config.default_stop_loss_pct if is_short else 1.0 - config.default_stop_loss_pct), sl_prec)
-        tp_rate = round(quote.price * (1.0 - config.default_take_profit_pct if is_short else 1.0 + config.default_take_profit_pct), sl_prec)
+        sl_rate = round(quote.price * (1.0 + manual_sl if is_short else 1.0 - manual_sl), sl_prec)
+        tp_rate = round(quote.price * (1.0 - manual_tp if is_short else 1.0 + manual_tp), sl_prec)
 
         id_desc = f"ID: {inst_id}" if inst_id else "symbol-only"
-        logger.info(f"⚡ [MANUAL LIVE ETORO ORDER] [{req.horizon.upper()}] {direction} on {req.symbol} ({id_desc}) for ${alloc_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
+        logger.info(f"⚡ [MANUAL LIVE ETORO ORDER] [{(req.horizon or 'swing').upper()}] {direction} on {req.symbol} ({id_desc}) for ${alloc_usd:.2f} (SL: ${sl_rate}, TP: ${tp_rate})...")
         try:
             etoro_res = etoro_client.create_order(
                 instrument_id=inst_id,
@@ -1222,12 +1249,18 @@ def execute_manual_action(req: ManualTradeRequest):
                 mode="real",
                 symbol=None if inst_id else req.symbol
             )
+            if not etoro_res.get("success"):
+                can_execute_broker = False
         except Exception as e:
             logger.error(f"eToro manual live order exception: {e}")
             etoro_res = {"success": False, "error": str(e)}
+            can_execute_broker = False
 
-    manual_sl = config.day_trade_stop_loss_pct if req.horizon == "day" else config.default_stop_loss_pct
-    manual_tp = config.day_trade_take_profit_pct if req.horizon == "day" else config.default_take_profit_pct
+    if not can_execute_broker:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Live eToro order rejected: {etoro_res.get('error') if isinstance(etoro_res, dict) else 'Unknown error'}"
+        )
 
     pos = broker.execute_order(
         symbol=req.symbol,
@@ -1236,7 +1269,7 @@ def execute_manual_action(req: ManualTradeRequest):
         current_price=quote.price,
         stop_loss_pct=manual_sl,
         take_profit_pct=manual_tp,
-        rationale=f"Manual user execution of [{req.horizon.upper()}] {direction} on {req.symbol}",
+        rationale=f"Manual user execution of [{(req.horizon or 'swing').upper()}] {direction} on {req.symbol}",
         horizon=req.horizon or "swing",
         max_hold_hours=config.day_trade_max_hold_hours
     )
@@ -1272,6 +1305,7 @@ def get_system_config():
         "watchlist": config.watchlist,
         "initial_capital": config.initial_capital,
         "max_position_size_usd": config.max_position_size_usd,
+        "risk_per_trade_pct": config.risk_per_trade_pct,
         "max_drawdown_limit_pct": config.max_drawdown_limit_pct,
         "max_concurrent_positions": getattr(config, "max_concurrent_positions", 8),
         "min_conviction_score": getattr(config, "min_conviction_score", 0.08),
@@ -1281,6 +1315,7 @@ def get_system_config():
         "day_trade_stop_loss_pct": config.day_trade_stop_loss_pct,
         "day_trade_take_profit_pct": config.day_trade_take_profit_pct,
         "day_trade_max_hold_hours": config.day_trade_max_hold_hours,
+        "day_trade_eod_flatten_minutes_before_close": config.day_trade_eod_flatten_minutes_before_close,
         "max_daily_loss_usd": config.max_daily_loss_usd,
         "news_intel_last_refresh": news_intel._last_refresh,
         "equibles_api_key_configured": bool(config.equibles_api_key and len(config.equibles_api_key) > 5),
@@ -1363,6 +1398,8 @@ def update_system_config(req: ConfigUpdateRequest, background_tasks: BackgroundT
         config.day_trade_max_hold_hours = req.day_trade_max_hold_hours
     if req.max_daily_loss_usd is not None:
         config.max_daily_loss_usd = req.max_daily_loss_usd
+    if req.day_trade_eod_flatten_minutes_before_close is not None:
+        config.day_trade_eod_flatten_minutes_before_close = int(req.day_trade_eod_flatten_minutes_before_close)
     if req.watchlist is not None:
         config.watchlist = [s for s in req.watchlist if s not in CRYPTO_SYMBOLS]
         logger.info(f"Updated watchlist to {len(config.watchlist)} assets (Crypto purged): {config.watchlist[:10]}")
@@ -1375,13 +1412,16 @@ def update_system_config(req: ConfigUpdateRequest, background_tasks: BackgroundT
         "etoro_user_key": config.etoro_user_key,
         "etoro_base_url": config.etoro_base_url,
         "finnhub_api_key": config.finnhub_api_key,
+        "risk_per_trade_pct": config.risk_per_trade_pct,
         "min_conviction_score": config.min_conviction_score,
         "max_concurrent_positions": getattr(config, "max_concurrent_positions", 8),
         "enable_day_trading": config.enable_day_trading,
+        "day_trade_allocation_pct": config.day_trade_allocation_pct,
         "day_trade_max_active": config.day_trade_max_active,
         "day_trade_stop_loss_pct": config.day_trade_stop_loss_pct,
         "day_trade_take_profit_pct": config.day_trade_take_profit_pct,
-        "max_daily_loss_usd": config.max_daily_loss_usd
+        "max_daily_loss_usd": config.max_daily_loss_usd,
+        "day_trade_eod_flatten_minutes_before_close": config.day_trade_eod_flatten_minutes_before_close
     })
     if config.execution_mode == "live" and etoro_client.is_configured():
         background_tasks.add_task(sync_live_etoro_portfolio_if_live, force=True)
@@ -1606,9 +1646,9 @@ def test_etoro_websocket():
 
 
 @app.get("/api/etoro/mcp-test", tags=["eToro Live Integration"])
-def test_etoro_mcp(symbol: str = "BTC"):
-    """Tests eToro MCP prepare-trade validation for $100 on symbol."""
-    return etoro_client.execute_mcp_trade(symbol=symbol, direction="BUY", amount_usd=100.0, mode="real")
+def test_etoro_mcp(symbol: str = "AAPL"):
+    """Tests eToro MCP prepare-trade validation for $100 on symbol (read-only pre-flight check, zero execution)."""
+    return etoro_client.prepare_mcp_trade(symbol=symbol, direction="BUY", amount_usd=100.0, mode="demo")
 
 
 @app.get("/api/etoro/scopes", tags=["eToro Live Integration"])
@@ -2467,10 +2507,7 @@ def evaluate_symbol_committee(symbol: str):
     ai_committee = get_ai_committee_engine()
     quote = data_feed.get_latest_quote(sym)
     price = quote.price if quote and quote.price > 0 else 100.0
-    inds = indicators_module.compute_all(
-        data_feed.history_windows.get(sym, [price]),
-        data_feed.volume_windows.get(sym, [1000.0])
-    )
+    inds = data_feed.get_technical_indicators(sym)
     news_items = news_intel.get_symbol_news(sym)
     headlines = [item.get("headline", "") for item in news_items[:5]]
     sm_conv = smart_money.get_flow_conviction(sym)
