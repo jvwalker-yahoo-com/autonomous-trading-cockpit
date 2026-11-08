@@ -1621,3 +1621,91 @@ def test_multi_lot_flatten_prune_and_crypto_hard_block():
     finally:
         srv_etoro.user_key = orig_uk
 
+
+def test_five_source_pre_trade_intelligence_gate():
+    """
+    Verifies that before making autonomous or manual trades, the system reads all 5 sources:
+      1. screener_stocks (MarketScreener + TradingView consensus)
+      2. congress_trades (CongressInvests / QuiverQuant + 3-way flow)
+      3. etoro_data (InstrumentsDB ID resolution, UK market hours, spread & position state)
+      4. finnhub (Quote/sentiment, company catalysts, earnings proximity, EDGAR)
+      5. world_news (Global breaking news, macro sentiment, macro risk level & themes)
+    """
+    from backend.server import collect_pre_trade_intelligence, run_analysis_cycle, smart_money, news_intel, broker, config
+
+    # Seed realistic Congress & World News state for NVDA
+    with smart_money._lock:
+        smart_money._symbol_congress_scores["NVDA"] = 0.42
+        smart_money._symbol_congress_trades["NVDA"] = [
+            {"ticker": "NVDA", "member": "Nancy Pelosi", "trade_type": "Purchase", "amount": "$500,001 - $1,000,000", "disclosed": "2026-11-01"}
+        ]
+    with news_intel._lock:
+        news_intel._catalyst_scores["NVDA"] = 0.35
+        news_intel._macro_sentiment = 0.18
+        news_intel._macro_risk_level = "NORMAL"
+        news_intel._world_breaking_news = [
+            {"title": "Global AI CapEx surges as hyperscalers expand GPU clusters", "source": "Reuters", "sentiment": 0.6}
+        ]
+
+    intel = collect_pre_trade_intelligence("NVDA")
+    assert intel["all_sources_read"] is True
+    assert intel["sources_checked"] == [
+        "screener_stocks",
+        "congress_trades",
+        "etoro_data",
+        "finnhub",
+        "world_news"
+    ]
+    assert intel["screener_stocks"]["read"] is True
+    assert intel["screener_stocks"]["opportunity_score"] >= 10.0
+    assert intel["congress_trades"]["read"] is True
+    assert intel["congress_trades"]["congress_conviction"] == 0.42
+    assert intel["congress_trades"]["signal"] == "CONGRESS_BUY"
+    assert intel["etoro_data"]["read"] is True
+    assert intel["etoro_data"]["instrument_id"] == 1137
+    assert intel["etoro_data"]["tradable"] is True
+    assert intel["finnhub"]["read"] is True
+    assert intel["finnhub"]["catalyst_score"] == 0.35
+    assert intel["world_news"]["read"] is True
+    assert intel["world_news"]["macro_risk_level"] == "NORMAL"
+    assert "[5-Source Intel:" in intel["summary_tag"]
+
+    # Verify run_analysis_cycle attaches pre_trade_intel and feeds 5 sources into federation & decision
+    orig_hours = config.enforce_market_hours
+    orig_mode = config.execution_mode
+    config.enforce_market_hours = False
+    config.execution_mode = "simulated"
+    try:
+        cycle = run_analysis_cycle("NVDA")
+        assert "pre_trade_intel" in cycle
+        assert cycle["pre_trade_intel"]["all_sources_read"] is True
+        assert cycle["decision"].pre_trade_intel is not None
+        assert "[5-Source Intel:" in cycle["decision"].rationale
+        model_names = [m.name for m in cycle["federation"].model_details]
+        assert any("Screener/Congress/eToro/Finnhub/WorldNews" in n for n in model_names)
+
+        # Verify GET /api/intel/pre_trade endpoint
+        r_intel = client.get("/api/intel/pre_trade?symbol=NVDA")
+        assert r_intel.status_code == 200
+        j_intel = r_intel.json()
+        assert j_intel["all_sources_read"] is True
+        assert j_intel["etoro_data"]["instrument_id"] == 1137
+
+        # Verify manual trade also reads and records all 5 sources before execution
+        r_trade = client.post(
+            "/api/action/trade",
+            json={"symbol": "NVDA", "action": "BUY", "amount_usd": 100.0, "bypass_market_hours": True}
+        )
+        assert r_trade.status_code == 200
+        j_trade = r_trade.json()
+        assert "pre_trade_intel" in j_trade
+        assert j_trade["pre_trade_intel"]["all_sources_read"] is True
+        assert "[5-Source Intel:" in j_trade["position"]["rationale"]
+        for k in ("screener_stocks", "congress_trades", "finnhub_intel", "world_news_macro"):
+            assert k in j_trade["position"]["contributing_models"]
+        client.post("/api/action/trade", json={"symbol": "NVDA", "action": "CLOSE"})
+    finally:
+        config.enforce_market_hours = orig_hours
+        config.execution_mode = orig_mode
+
+

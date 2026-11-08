@@ -403,6 +403,46 @@ class SmartMoneyEngine:
                 "insider_sentiment": self._equibles_insider_sentiment
             }
 
+    def get_pre_trade_congress_intel(self, symbol: str) -> Dict[str, Any]:
+        """
+        Consolidates Congressional trades, QuiverQuant/CongressInvests filings,
+        and 3-way institutional/insider flow conviction for pre-trade evaluation.
+        """
+        sym = (symbol or "").upper().strip()
+        congress_conv = self.get_congress_conviction(sym)
+        flow_conv = self.get_flow_conviction(sym)
+        sym_trades = self.get_symbol_trades(sym)
+        recent_trades = self.get_recent_trades(limit=15)
+        candidates = self.get_trade_candidates()
+
+        if congress_conv != 0.0 and flow_conv != 0.0:
+            combined = round(max(-1.0, min(1.0, congress_conv * 0.60 + flow_conv * 0.40)), 3)
+        elif congress_conv != 0.0:
+            combined = round(float(congress_conv), 3)
+        else:
+            combined = round(float(flow_conv), 3)
+
+        if combined >= 0.10:
+            sig = "CONGRESS_BUY"
+        elif combined <= -0.10:
+            sig = "CONGRESS_SELL"
+        else:
+            sig = "NEUTRAL"
+
+        return {
+            "symbol": sym,
+            "congress_conviction": round(float(congress_conv), 3),
+            "flow_conviction": round(float(flow_conv), 3),
+            "combined_conviction": combined,
+            "signal": sig,
+            "symbol_trades_count": len(sym_trades),
+            "recent_filings": sym_trades[:3],
+            "market_wide_disclosures_count": len(recent_trades),
+            "is_top_candidate": any(c.get("symbol") == sym for c in candidates),
+            "last_refresh": self._last_refresh,
+            "read": True
+        }
+
     # ── 3-Way Transparency Flow Stack: OpenInsider + QuiverQuant + Finnhub 13F ──
 
     def fetch_openinsider_trades(self, symbol: Optional[str] = None, limit: int = 35) -> List[Dict[str, Any]]:

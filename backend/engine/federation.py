@@ -91,18 +91,55 @@ class FederationModule:
             rationale = f"Price {price:.2f} oscillating within Keltner envelope ({k_lower:.2f} - {k_upper:.2f})"
         return round(score, 3), sig, rationale
 
-    def score_news_sentiment(self, sentiment_val: float) -> Tuple[float, str, str]:
-        """Finnhub / NLP sentiment index."""
+    def score_news_sentiment(
+        self,
+        sentiment_val: float,
+        pre_trade_intel: Optional[Dict[str, Any]] = None
+    ) -> Tuple[float, str, str]:
+        """Finnhub, World News, Screener & Congress multi-source intelligence index."""
         score = max(-1.0, min(1.0, sentiment_val))
+        intel_notes = []
+        if isinstance(pre_trade_intel, dict):
+            scr = pre_trade_intel.get("screener_stocks") or {}
+            cong = pre_trade_intel.get("congress_trades") or {}
+            fh = pre_trade_intel.get("finnhub") or {}
+            wn = pre_trade_intel.get("world_news") or {}
+            et = pre_trade_intel.get("etoro_data") or {}
+
+            scr_norm = float(scr.get("normalized_score", 0.0) or 0.0)
+            cong_conv = float(cong.get("combined_conviction", 0.0) or 0.0)
+            fh_comb = float(fh.get("combined_score", sentiment_val) or 0.0)
+            wn_sent = float(wn.get("macro_sentiment", 0.0) or 0.0)
+            wn_risk = str(wn.get("macro_risk_level", "NORMAL"))
+
+            # Blend all 5 intelligence streams into unified fundamental/flow/screener score
+            score = max(
+                -1.0,
+                min(
+                    1.0,
+                    sentiment_val * 0.35
+                    + scr_norm * 0.25
+                    + cong_conv * 0.20
+                    + fh_comb * 0.10
+                    + wn_sent * 0.10
+                )
+            )
+            intel_notes.append(f"Screener:{scr.get('signal', 'HOLD')}({scr.get('opportunity_score', 50.0):.0f})")
+            intel_notes.append(f"Congress:{cong_conv:+.2f}")
+            intel_notes.append(f"eToro:ID={et.get('instrument_id', 'N/A')}")
+            intel_notes.append(f"Finnhub:{fh_comb:+.2f}")
+            intel_notes.append(f"WorldNews:{wn_risk}({wn_sent:+.2f})")
+
+        suffix = f" [{' | '.join(intel_notes)}]" if intel_notes else ""
         if score > 0.20:
             sig = "BUY"
-            rationale = f"Positive institutional sentiment score (+{score:.2f})"
+            rationale = f"Positive multi-source intelligence score ({score:+.2f}){suffix}"
         elif score < -0.20:
             sig = "SHORT"
-            rationale = f"Negative headline sentiment and risk-off score ({score:.2f})"
+            rationale = f"Negative multi-source intelligence & risk-off score ({score:+.2f}){suffix}"
         else:
             sig = "NEUTRAL"
-            rationale = f"Neutral market sentiment coverage ({score:+.2f})"
+            rationale = f"Neutral multi-source intelligence coverage ({score:+.2f}){suffix}"
         return round(score, 3), sig, rationale
 
     def score_pattern_recognition(self, indicators: Dict[str, Any], price: float) -> Tuple[float, str, str]:
@@ -235,16 +272,17 @@ class FederationModule:
         current_weights: Dict[str, float],
         trend: str = "CHOPPY",
         ai_committee_score: Optional[float] = None,
-        ai_committee_rationale: Optional[str] = None
+        ai_committee_rationale: Optional[str] = None,
+        pre_trade_intel: Optional[Dict[str, Any]] = None
     ) -> FederationOutput:
         """
         Executes multi-model scoring, applies regime-aware dynamically calibrated weights,
-        and determines consensus winner across 6 strategy models.
+        and determines consensus winner across strategy models and 5-source pre-trade intelligence.
         """
         s_mom, sig_mom, rat_mom = self.score_momentum_trend(indicators, price)
         s_mr, sig_mr, rat_mr = self.score_mean_reversion(indicators, price)
         s_bo, sig_bo, rat_bo = self.score_volatility_breakout(indicators, price)
-        s_sent, sig_sent, rat_sent = self.score_news_sentiment(sentiment_val)
+        s_sent, sig_sent, rat_sent = self.score_news_sentiment(sentiment_val, pre_trade_intel=pre_trade_intel)
         s_pat, sig_pat, rat_pat = self.score_pattern_recognition(indicators, price)
         s_wyck, sig_wyck, rat_wyck = self.score_wyckoff_engine(indicators, price)
 
@@ -353,13 +391,28 @@ class FederationModule:
         if abs(dom_score) >= 0.40 and (dom_score * weighted_score >= 0):
             weighted_score = weighted_score * 0.6 + (dom_score * 0.4)
 
+        # 5-Source Pre-Trade Intelligence Confirmation (Screener + Congress + Finnhub + World News)
+        if isinstance(pre_trade_intel, dict):
+            composite_intel = float(pre_trade_intel.get("composite_intel_score", 0.0) or 0.0)
+            if abs(composite_intel) >= 0.15:
+                weighted_score = max(-1.0, min(1.0, weighted_score * 0.85 + composite_intel * 0.15))
+            wn = pre_trade_intel.get("world_news") or {}
+            if wn.get("macro_risk_level") == "CRITICAL" and float(wn.get("macro_sentiment", 0.0) or 0.0) <= -0.25 and weighted_score > 0:
+                # Dampen aggressive long signals during CRITICAL negative world news
+                weighted_score *= 0.80
+
+        sent_model_name = (
+            "Multi-Source Intel (Screener/Congress/eToro/Finnhub/WorldNews)"
+            if isinstance(pre_trade_intel, dict)
+            else "News Sentiment (Finnhub)"
+        )
         model_details = [
             ModelSignal(name="Momentum Trend (EMA/MACD)", signal=sig_mom, score=s_mom, weight=round(normalized_weights["momentum_trend"], 3), rationale=rat_mom),
             ModelSignal(name="Mean Reversion (RSI/BB)", signal=sig_mr, score=s_mr, weight=round(normalized_weights["mean_reversion"], 3), rationale=rat_mr),
             ModelSignal(name="Volatility Breakout", signal=sig_bo, score=s_bo, weight=round(normalized_weights["volatility_breakout"], 3), rationale=rat_bo),
             ModelSignal(name="Pattern Recognition (Breakout/W-M)", signal=sig_pat, score=s_pat, weight=round(normalized_weights["pattern_recognition"], 3), rationale=rat_pat),
             ModelSignal(name="Wyckoff Range Engine (Phase/Spring)", signal=sig_wyck, score=s_wyck, weight=round(normalized_weights["wyckoff_engine"], 3), rationale=rat_wyck),
-            ModelSignal(name="News Sentiment (Finnhub)", signal=sig_sent, score=s_sent, weight=round(normalized_weights["news_sentiment"], 3), rationale=rat_sent),
+            ModelSignal(name=sent_model_name, signal=sig_sent, score=s_sent, weight=round(normalized_weights["news_sentiment"], 3), rationale=rat_sent),
         ]
 
         if ai_committee_score is not None and "ai_committee" in normalized_weights:

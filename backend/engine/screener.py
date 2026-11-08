@@ -454,9 +454,183 @@ class MarketScreener:
                 "congress_conviction": round(congress_score, 2)
             })
 
+        # Cache per-symbol scan results for O(1) pre-trade lookup
+        for item in results:
+            cls._last_universe_cache[item["symbol"]] = item
+
         # Sort by opportunity score descending
         results.sort(key=lambda x: x["opportunity_score"], reverse=True)
         return results[:top_n]
+
+    _last_universe_cache: Dict[str, Dict[str, Any]] = {}
+
+    @classmethod
+    def get_symbol_screen(
+        cls,
+        symbol: str,
+        data_feed_manager=None,
+        smart_money_engine=None,
+        refresh_tv: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Evaluates a single stock/instrument through the quantitative MarketScreener
+        and merges cached TradingView multi-timeframe technical consensus.
+        Always read before autonomous or manual trade execution.
+        """
+        sym = (symbol or "").strip().upper()
+        if not sym or sym in PROHIBITED_CRYPTO:
+            return {
+                "symbol": sym,
+                "signal": "HOLD",
+                "opportunity_score": 0.0,
+                "normalized_score": 0.0,
+                "tv_consensus_1d": "NEUTRAL",
+                "tv_recommend_score": 0.0,
+                "read": True,
+                "prohibited": True
+            }
+
+        if data_feed_manager is None:
+            from .data_feed import DataFeedManager
+            data_feed_manager = DataFeedManager()
+
+        info = MASTER_STOCK_UNIVERSE.get(sym, {
+            "name": sym,
+            "category": "US Equities",
+            "asset_class": "Stock",
+            "trading_hours": "14:30 - 21:00 UK"
+        })
+
+        quote = data_feed_manager.get_latest_quote(sym, allow_external=False)
+        ind = data_feed_manager.get_technical_indicators(sym)
+
+        adx = float(ind.get("adx", 20.0))
+        supertrend_dir = float(ind.get("supertrend_direction", ind.get("supertrend_dir", 1.0)))
+        rsi = float(ind.get("rsi_14", ind.get("rsi", 50.0)))
+        vwap = float(ind.get("vwap", quote.price))
+        mfi = float(ind.get("mfi", 50.0))
+        chg_pct = float(quote.change_pct)
+        vol_surge = float(ind.get("volume_surge", 1.0))
+        breakout = str(ind.get("breakout_type", "NONE"))
+        db_det = float(ind.get("double_bottom_detected", 0.0)) > 0
+        dt_det = float(ind.get("double_top_detected", 0.0)) > 0
+
+        score = 50.0
+        if adx >= 30:
+            score += 20.0
+        elif adx >= 22:
+            score += 10.0
+
+        if supertrend_dir > 0:
+            signal = "BUY"
+            if quote.price > vwap:
+                score += 15.0
+            if 50 < rsi < 70:
+                score += 10.0
+        else:
+            signal = "SHORT"
+            if quote.price < vwap:
+                score += 15.0
+            if 30 < rsi < 50:
+                score += 10.0
+
+        if db_det:
+            signal = "BUY (DOUBLE BOTTOM)"
+            score += 16.0
+        elif dt_det:
+            signal = "SHORT (DOUBLE TOP)"
+            score += 16.0
+
+        if breakout == "BULL_BREAKOUT":
+            signal = "BUY (RANGE BREAKOUT)"
+            score += 14.0
+        elif breakout == "BEAR_BREAKDOWN":
+            signal = "SHORT (RANGE BREAKDOWN)"
+            score += 14.0
+
+        if vol_surge >= 1.5:
+            score += 12.0
+        elif vol_surge >= 1.2:
+            score += 6.0
+
+        if rsi < 30 or mfi < 25:
+            signal = "BUY (OVERSOLD REBOUND)"
+            score += 15.0
+        elif rsi > 70 or mfi > 75:
+            signal = "SHORT (OVERBOUGHT REVERSAL)"
+            score += 15.0
+
+        congress_score = smart_money_engine.get_congress_conviction(sym) if smart_money_engine else 0.0
+        if congress_score >= 0.20:
+            score += min(18.0, congress_score * 20.0)
+            signal = f"{signal} + CONGRESS BUY"
+        elif congress_score <= -0.25:
+            score -= min(15.0, abs(congress_score) * 15.0)
+
+        score += min(15.0, abs(chg_pct) * 2.0)
+        final_score = min(99.0, max(10.0, round(score, 1)))
+
+        is_day_setup = (vol_surge >= 1.25 or breakout != "NONE" or db_det or dt_det or adx >= 26)
+        rec_horizon = "DAY" if is_day_setup else "LONG-TERM"
+        pattern_desc = "Double Bottom" if db_det else ("Double Top" if dt_det else (breakout if breakout != "NONE" else "Trend Continuation"))
+
+        # Directional normalized score in [-1.0, +1.0]
+        dir_sign = 1.0 if signal.startswith("BUY") else (-1.0 if signal.startswith("SHORT") else 0.0)
+        magnitude = max(0.0, min(1.0, (final_score - 45.0) / 50.0))
+        norm_score = round(dir_sign * magnitude, 3)
+
+        # Attach TradingView consensus if present in cache (or refresh if requested)
+        tv_entry = cls._tv_consensus_cache.get(sym)
+        if not tv_entry and cls._tv_cache:
+            for item in cls._tv_cache:
+                if item.get("symbol") == sym:
+                    tv_entry = item
+                    break
+        if not tv_entry and refresh_tv:
+            try:
+                tv_map = cls.get_tradingview_technical_consensus([sym])
+                tv_entry = tv_map.get(sym)
+            except Exception:
+                tv_entry = None
+
+        tv_consensus_1d = "NEUTRAL"
+        tv_consensus_1h = "NEUTRAL"
+        tv_consensus_15m = "NEUTRAL"
+        tv_rec_score = 0.0
+        if isinstance(tv_entry, dict):
+            tv_consensus_1d = str(tv_entry.get("consensus_1d", "NEUTRAL"))
+            tv_consensus_1h = str(tv_entry.get("consensus_1h", "NEUTRAL"))
+            tv_consensus_15m = str(tv_entry.get("consensus_15m", "NEUTRAL"))
+            tv_rec_score = float(tv_entry.get("recommend_score_1d", tv_entry.get("recommend_score", 0.0)) or 0.0)
+            norm_score = round(max(-1.0, min(1.0, norm_score * 0.75 + tv_rec_score * 0.25)), 3)
+
+        screen_res = {
+            "symbol": sym,
+            "name": info.get("name", sym),
+            "category": info.get("category", "US Equities"),
+            "asset_class": info.get("asset_class", "Stock"),
+            "trading_hours": info.get("trading_hours", "eToro Hours"),
+            "price": round(quote.price, 4 if quote.price < 1.0 else 2),
+            "change_pct": round(chg_pct, 2),
+            "adx": round(adx, 1),
+            "supertrend": "BULLISH" if supertrend_dir > 0 else "BEARISH",
+            "rsi": round(rsi, 1),
+            "mfi": round(mfi, 1),
+            "volume_surge": round(vol_surge, 1),
+            "pattern": pattern_desc,
+            "recommended_horizon": rec_horizon,
+            "signal": signal,
+            "opportunity_score": final_score,
+            "normalized_score": norm_score,
+            "congress_conviction": round(congress_score, 2),
+            "tv_consensus_1d": tv_consensus_1d,
+            "tv_consensus_1h": tv_consensus_1h,
+            "tv_consensus_15m": tv_consensus_15m,
+            "tv_recommend_score": round(tv_rec_score, 3),
+            "read": True
+        }
+        cls._last_universe_cache[sym] = screen_res
+        return screen_res
 
     # ── TradingView Screener & Technical Consensus Engine ───────────────────
     _tv_cache: List[Dict[str, Any]] = []

@@ -65,6 +65,7 @@ class DecisionOutput(BaseModel):
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     rationale: str
+    pre_trade_intel: Optional[Dict[str, Any]] = None
     timestamp: str = Field(default_factory=utc_now_str)
 
 class AnomalyDetectorOutput(BaseModel):

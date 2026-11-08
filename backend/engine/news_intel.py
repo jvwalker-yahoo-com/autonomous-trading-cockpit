@@ -235,6 +235,64 @@ class NewsIntelligenceEngine:
                 "last_refresh": self._last_refresh,
             }
 
+    def get_pre_trade_news_intel(
+        self,
+        symbol: str,
+        finnhub_sentiment: float = 0.0,
+        finnhub_price: float = 0.0,
+        feed_source: str = ""
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Consolidates both Finnhub intelligence (sentiment, company catalysts, earnings calendar, EDGAR)
+        and World News intelligence (global breaking news, macro sentiment, macro risk level, themes)
+        for pre-trade evaluation before any order is dispatched.
+        """
+        sym = (symbol or "").upper().strip()
+        catalyst_score = self.get_catalyst_score(sym)
+        sym_news = self.get_symbol_news(sym)
+        days_to_earnings = self.get_earnings_alert(sym)
+        edgar_filings = self.get_edgar_filings(sym)
+        macro_state = self.get_macro_risk_state()
+        world_breaking = self.get_world_breaking_news(limit=15)
+        global_headlines = self.get_global_headlines()
+
+        finnhub_combined = round(max(-1.0, min(1.0, float(finnhub_sentiment) * 0.55 + float(catalyst_score) * 0.45)), 3)
+        earnings_imminent = bool(days_to_earnings is not None and 0 <= days_to_earnings <= 1)
+
+        top_world_headline = (
+            world_breaking[0].get("title", "")
+            if world_breaking
+            else (global_headlines[-1].get("title", "") if global_headlines else "Normal global macro flow")
+        )
+
+        return {
+            "finnhub": {
+                "symbol": sym,
+                "quote_price": round(float(finnhub_price), 4),
+                "feed_source": feed_source or "Finnhub / Multi-Source Cascade",
+                "news_sentiment": round(float(finnhub_sentiment), 3),
+                "catalyst_score": round(float(catalyst_score), 3),
+                "combined_score": finnhub_combined,
+                "company_articles_count": len(sym_news),
+                "recent_articles": sym_news[:3],
+                "days_to_earnings": days_to_earnings,
+                "earnings_imminent": earnings_imminent,
+                "edgar_filings_count": len(edgar_filings),
+                "read": True
+            },
+            "world_news": {
+                "macro_sentiment": round(float(macro_state.get("macro_sentiment", 0.0)), 3),
+                "macro_risk_level": str(macro_state.get("macro_risk_level", "NORMAL")),
+                "macro_themes": list(macro_state.get("macro_themes", [])),
+                "breaking_news_count": int(macro_state.get("breaking_news_count", len(world_breaking))),
+                "global_headlines_count": len(global_headlines),
+                "top_headline": top_world_headline,
+                "recent_breaking": world_breaking[:3],
+                "last_refresh": macro_state.get("last_refresh", 0.0),
+                "read": True
+            }
+        }
+
     # ── Refresh Orchestrator ────────────────────────────────────────────────
 
     def refresh_all(self, watchlist: Optional[List[str]] = None):
