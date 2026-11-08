@@ -2,6 +2,14 @@
 
 ## Active Milestones & Changelog
 
+### 2026-11-08: 24/7 Keep-Alive Cron Reinstatement (GitHub Actions + Cloud Self-Ping + Local Scheduler)
+- **GitHub Actions Keep-Alive Cron Upgraded to 24/7 ([`.github/workflows/keepalive.yml`](file:///c:/Antigravity/autonomous-trading-cockpit/.github/workflows/keepalive.yml)):**
+  - Updated cron schedule from restricted US-only hours (`*/10 12-22 * * 1-5` + `0 */3 * * 0,6`) to continuous **24/7 every 10 minutes (`*/10 * * * *`)** so European morning sessions (`UK100`, `GER40`) and weekend/off-hour dashboard visits never encounter a Render 15-minute idle spin-down.
+  - Fixed curl exit-code handling (`|| true`) so cold-start timeouts do not concatenate duplicate `"000"` status strings.
+  - Manually dispatched and verified the active `Cockpit Keep-Alive Cron` workflow run on GitHub Actions.
+- **In-Process Render Cloud Self-Keep-Alive Loop ([`backend/server.py`](file:///c:/Antigravity/autonomous-trading-cockpit/backend/server.py)):**
+  - Added a 10-minute (`600s`) external self-ping inside `autonomous_background_worker_loop()` targeting `RENDER_EXTERNAL_URL/heartbeat` (`https://autonomous-trading-cockpit-8wal.onrender.com/heartbeat`) to keep Render's external Cloudflare ingress timer active even when GitHub Actions runner queues are delayed.
+
 ### 2026-11-07: Comprehensive System Health Check, Execution Hardening & Static Verification
 - **Critical Diagnostic & Execution Safety Fixes:**
   - **Read-Only Enforcement on `GET /api/etoro/mcp-test` ([`backend/server.py`](file:///c:/Antigravity/autonomous-trading-cockpit/backend/server.py)):** Fixed a critical bug where `GET /api/etoro/mcp-test` invoked `execute_mcp_trade(..., mode="real")` instead of read-only `prepare_mcp_trade(..., mode="demo")`, which previously caused test suites to trigger live orders on eToro.

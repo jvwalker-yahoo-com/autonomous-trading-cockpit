@@ -311,6 +311,7 @@ async def autonomous_background_worker_loop():
     last_nightly_sync_date = ""
     last_auth_warn = 0.0
     last_prune_check = 0.0
+    last_keepalive_ping = 0.0
 
     # Ensure core anchor assets are in watchlist on boot (strictly excluding any crypto)
     config.watchlist = [s for s in dict.fromkeys(CORE_ANCHOR_SYMBOLS + config.watchlist) if s not in CRYPTO_SYMBOLS]
@@ -378,6 +379,17 @@ async def autonomous_background_worker_loop():
                     await asyncio.to_thread(smart_money.refresh_all, list(config.watchlist))
                 except Exception as sme:
                     logger.warning(f"Smart Money background refresh error: {sme}")
+
+            # Cloud Keep-Alive Self-Ping (every 10 minutes / 600s)
+            # Resets Render's external ingress 15-minute inactivity timer even if GitHub Actions cron is delayed
+            if (now - last_keepalive_ping) >= 600.0 and (os.environ.get("RENDER") or os.environ.get("RENDER_EXTERNAL_URL")):
+                last_keepalive_ping = now
+                try:
+                    import urllib.request
+                    ext_url = os.environ.get("RENDER_EXTERNAL_URL", "https://autonomous-trading-cockpit-8wal.onrender.com").rstrip("/")
+                    await asyncio.to_thread(urllib.request.urlopen, f"{ext_url}/heartbeat", timeout=10)
+                except Exception as kpe:
+                    logger.debug(f"Keep-alive self-ping notice: {kpe}")
 
             # Scheduled 10:00 PM UK Time eToro SQLite Database Sync
             # Automatically syncs newly discovered instruments from eToro catalog every night at 22:00 UK time
