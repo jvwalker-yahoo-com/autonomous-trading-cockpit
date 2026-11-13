@@ -19,6 +19,9 @@ import re
 import json
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import requests
+from requests.adapters import HTTPAdapter
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timezone, timedelta
 
@@ -58,6 +61,10 @@ class SmartMoneyEngine:
         self.quiver_api_key = quiver_api_key.strip()
         
         self._lock = threading.Lock()
+        self._session = requests.Session()
+        _adapter = HTTPAdapter(pool_connections=10, pool_maxsize=20)
+        self._session.mount("https://", _adapter)
+        self._session.mount("http://", _adapter)
         
         # In-memory caches
         self._recent_congress_trades: List[Dict[str, Any]] = []
@@ -107,14 +114,13 @@ class SmartMoneyEngine:
 
     def fetch_congress_invests_recent(self, limit: int = 50, days: int = 30) -> List[Dict[str, Any]]:
         """Fetches recent congressional trades from CongressInvests API."""
-        import requests
         url = f"{self.congress_invests_url}/trades/recent?limit={limit}&days={days}"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "application/json"
         }
         try:
-            resp = requests.get(url, headers=headers, timeout=8)
+            resp = self._session.get(url, headers=headers, timeout=8)
             if resp.status_code == 200:
                 data = resp.json()
                 return data.get("trades", [])
@@ -124,14 +130,13 @@ class SmartMoneyEngine:
 
     def fetch_congress_invests_ticker(self, ticker: str) -> List[Dict[str, Any]]:
         """Fetches congressional trading history for a specific ticker."""
-        import requests
         url = f"{self.congress_invests_url}/trades/{ticker.upper().strip()}"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "application/json"
         }
         try:
-            resp = requests.get(url, headers=headers, timeout=6)
+            resp = self._session.get(url, headers=headers, timeout=6)
             if resp.status_code == 200:
                 data = resp.json()
                 return data.get("trades", [])
@@ -143,7 +148,6 @@ class SmartMoneyEngine:
 
     def call_equibles_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
         """Invokes a tool on Equibles MCP server via JSON-RPC 2.0 / SSE."""
-        import requests
         headers = {"Content-Type": "application/json"}
         payload = {
             "jsonrpc": "2.0",
@@ -155,7 +159,7 @@ class SmartMoneyEngine:
             }
         }
         try:
-            resp = requests.post(self.equibles_mcp_url, json=payload, headers=headers, timeout=12)
+            resp = self._session.post(self.equibles_mcp_url, json=payload, headers=headers, timeout=12)
             if resp.status_code == 200:
                 for line in resp.text.strip().split("\n"):
                     if line.startswith("data:"):
@@ -173,9 +177,8 @@ class SmartMoneyEngine:
         """Queries Tavily AI Search for breaking US Congress stock trades and STOCK Act filings."""
         if not self.tavily_api_key or len(self.tavily_api_key) < 5:
             return []
-        import requests
         try:
-            resp = requests.post(
+            resp = self._session.post(
                 "https://api.tavily.com/search",
                 json={
                     "api_key": self.tavily_api_key,
@@ -196,10 +199,9 @@ class SmartMoneyEngine:
         """Queries SerpApi for breaking news and reports on congressional stock trading."""
         if not self.serpapi_api_key or len(self.serpapi_api_key) < 5:
             return []
-        import requests
         try:
-            url = f"https://serpapi.com/search.json?q=congress+stock+trades+disclosures&api_key={self.serpapi_key}"
-            resp = requests.get(url, timeout=8)
+            url = f"https://serpapi.com/search.json?q=congress+stock+trades+disclosures&api_key={self.serpapi_api_key}"
+            resp = self._session.get(url, timeout=8)
             if resp.status_code == 200:
                 data = resp.json()
                 return data.get("organic_results", [])[:5]
@@ -422,9 +424,9 @@ class SmartMoneyEngine:
         else:
             combined = round(float(flow_conv), 3)
 
-        if combined >= 0.10:
+        if combined >= 0.10 or (congress_conv >= 0.20 and combined > -0.05):
             sig = "CONGRESS_BUY"
-        elif combined <= -0.10:
+        elif combined <= -0.10 or (congress_conv <= -0.20 and combined < 0.05):
             sig = "CONGRESS_SELL"
         else:
             sig = "NEUTRAL"
@@ -450,7 +452,6 @@ class SmartMoneyEngine:
         Scrapes real-time Form 4 insider trades (officers, directors, 10% owners) from OpenInsider.
         Free, open-source transparency feed, zero API key required.
         """
-        import requests
         sym_param = symbol.upper().strip() if symbol else ""
         url = f"http://openinsider.com/screener?s={sym_param}&cnt={limit}"
         headers = {
@@ -459,7 +460,7 @@ class SmartMoneyEngine:
         }
         trades: List[Dict[str, Any]] = []
         try:
-            resp = requests.get(url, headers=headers, timeout=8)
+            resp = self._session.get(url, headers=headers, timeout=8)
             if resp.status_code == 200:
                 rows = re.findall(r'<tr\b[^>]*>(.*?)</tr>', resp.text, re.DOTALL)
                 for row in rows:
@@ -525,11 +526,10 @@ class SmartMoneyEngine:
         """Fetches official Form 4 insider transactions from Finnhub."""
         if not self.finnhub_api_key or len(self.finnhub_api_key) < 5:
             return []
-        import requests
         sym = symbol.upper().strip()
         url = f"https://finnhub.io/api/v1/stock/insider-transactions?symbol={sym}&token={self.finnhub_api_key}"
         try:
-            resp = requests.get(url, timeout=6)
+            resp = self._session.get(url, timeout=6)
             if resp.status_code == 200:
                 data = resp.json().get("data", [])
                 formatted = []
@@ -564,7 +564,6 @@ class SmartMoneyEngine:
         Fetches Congressional trading disclosures from QuiverQuant's Congress Trading API.
         Cascades to CongressInvests and Tavily AI search if needed.
         """
-        import requests
         sym = symbol.upper().strip() if symbol else ""
         headers = {"User-Agent": "Mozilla/5.0"}
         if self.quiver_api_key:
@@ -573,7 +572,7 @@ class SmartMoneyEngine:
         trades = []
         try:
             url = "https://api.quiverquant.com/beta/live/congresstrading"
-            resp = requests.get(url, headers=headers, timeout=6)
+            resp = self._session.get(url, headers=headers, timeout=6)
             if resp.status_code == 200:
                 raw_list = resp.json()
                 if isinstance(raw_list, list):
@@ -620,7 +619,6 @@ class SmartMoneyEngine:
         Fetches large institutional holdings and 13F-HR filings from SEC EDGAR and Finnhub.
         Free, open-source institutional transparency.
         """
-        import requests
         sym = symbol.upper().strip()
         filings = []
         
@@ -630,7 +628,7 @@ class SmartMoneyEngine:
         }
         sec_url = f"https://efts.sec.gov/LATEST/search-index?q=%22{sym}%22&forms=13F-HR"
         try:
-            resp = requests.get(sec_url, headers=headers, timeout=6)
+            resp = self._session.get(sec_url, headers=headers, timeout=6)
             if resp.status_code == 200:
                 hits = resp.json().get("hits", {}).get("hits", [])
                 for hit in hits[:20]:
@@ -734,3 +732,28 @@ class SmartMoneyEngine:
             self._transparency_feed_cache[sym] = payload
 
         return payload
+
+    def refresh_flow_transparency_batch(self, symbols: List[str], max_symbols: int = 10) -> int:
+        """Concurrently populates 3-way institutional/insider flow cache for top active symbols."""
+        targets = [s.upper().strip() for s in dict.fromkeys(symbols) if s and s.strip()][:max_symbols]
+        if not targets:
+            return 0
+        now = time.time()
+        stale = []
+        with self._lock:
+            for sym in targets:
+                cached = self._transparency_feed_cache.get(sym)
+                if not cached or (now - float(cached.get("timestamp", 0.0))) >= 900.0:
+                    stale.append(sym)
+        if not stale:
+            return 0
+        updated = 0
+        with ThreadPoolExecutor(max_workers=min(4, len(stale))) as pool:
+            futs = [pool.submit(self.get_unified_flow_transparency, sym) for sym in stale]
+            for fut in as_completed(futs):
+                try:
+                    fut.result()
+                    updated += 1
+                except Exception:
+                    pass
+        return updated

@@ -7,6 +7,7 @@ import os
 import json
 import time
 import asyncio
+import threading
 import logging
 import numpy as np
 from contextlib import asynccontextmanager
@@ -54,6 +55,7 @@ from .engine.data_feed import BASE_PRICES
 from .engine.news_intel import NewsIntelligenceEngine
 from .engine.smart_money import SmartMoneyEngine
 from .engine.ai_committee import get_ai_committee_engine, AICommitteeDossier
+from .engine.market_intel import MarketIntelSuite
 from .engine.models import (
     RegimeState, FederationOutput, ArbitrationOutput,
     DecisionOutput, AnomalyDetectorOutput, QuadrantOutput,
@@ -117,6 +119,12 @@ smart_money = SmartMoneyEngine(
     finnhub_api_key=config.finnhub_api_key,
     quiver_api_key=config.quiver_api_key
 )
+market_intel_engine = MarketIntelSuite(
+    finnhub_key=config.finnhub_api_key,
+    polygon_key=os.getenv("POLYGON_API_KEY", ""),
+    fred_key=os.getenv("FRED_API_KEY", ""),
+    av_key=config.alpha_vantage_api_key
+)
 
 
 # Restore persisted system settings from disk
@@ -140,6 +148,7 @@ if saved_settings:
         config.finnhub_api_key = saved_settings["finnhub_api_key"]
         data_feed.set_api_key(config.finnhub_api_key)
         news_intel.set_finnhub_key(config.finnhub_api_key)
+        market_intel_engine.finnhub_key = config.finnhub_api_key
     if "twelve_data_api_key" in saved_settings and saved_settings["twelve_data_api_key"]:
         config.twelve_data_api_key = saved_settings["twelve_data_api_key"]
         data_feed.twelve_data_api_key = config.twelve_data_api_key
@@ -150,6 +159,7 @@ if saved_settings:
         config.alpha_vantage_api_key = saved_settings["alpha_vantage_api_key"]
         data_feed.alpha_vantage_api_key = config.alpha_vantage_api_key
         news_intel.alpha_vantage_api_key = config.alpha_vantage_api_key
+        market_intel_engine.av_key = config.alpha_vantage_api_key
     if "tavily_api_key" in saved_settings and saved_settings["tavily_api_key"]:
         config.tavily_api_key = saved_settings["tavily_api_key"]
         news_intel.tavily_api_key = config.tavily_api_key
@@ -308,6 +318,9 @@ async def autonomous_background_worker_loop():
     last_news_refresh = 0.0
     last_tv_scan = 0.0
     last_smart_money_refresh = 0.0
+    last_ohlcv_hydration = 0.0
+    last_macro_refresh = 0.0
+    last_committee_eval = 0.0
     last_nightly_sync_date = ""
     last_auth_warn = 0.0
     last_prune_check = 0.0
@@ -316,17 +329,20 @@ async def autonomous_background_worker_loop():
     # Ensure core anchor assets are in watchlist on boot (strictly excluding any crypto)
     config.watchlist = [s for s in dict.fromkeys(CORE_ANCHOR_SYMBOLS + config.watchlist) if s not in CRYPTO_SYMBOLS]
 
-    # Immediately trigger initial background warmup for News, TradingView, Screener, and Smart Money (non-blocking)
+    # Immediately trigger initial background warmup for OHLCV bars, News, Macro, TradingView, Screener, and Smart Money (non-blocking)
     def _initial_warmup():
         try:
             news_intel.set_finnhub_key(config.finnhub_api_key)
             news_intel.refresh_all(list(config.watchlist))
+            data_feed.hydrate_historical_ohlcv(list(config.watchlist))
             screener.scan_tradingview_volume_breakouts(1.5, 5.0, 25, True)
             screener.get_tradingview_technical_consensus(list(config.watchlist), True)
             smart_money.set_equibles_key(config.equibles_api_key)
             smart_money.refresh_all(list(config.watchlist))
+            smart_money.refresh_flow_transparency_batch(list(config.watchlist), max_symbols=12)
+            market_intel_engine.get_cached_macro_summary(max_age_sec=900.0)
             screener.scan_universe(data_feed, "Stock", 50, True, False, smart_money)
-            logger.info("🚀 [WARMUP] Initial news intelligence, TradingView consensus, Stock Screener, and Smart Money pre-cached successfully.")
+            logger.info("🚀 [WARMUP] Initial OHLCV bars, news intelligence, FRED macro, TradingView consensus, Stock Screener, and Smart Money pre-cached successfully.")
         except Exception as we:
             logger.warning(f"Initial warmup notice: {we}")
 
@@ -372,14 +388,31 @@ async def autonomous_background_worker_loop():
                 except Exception as tve:
                     logger.debug(f"TradingView background scan notice: {tve}")
 
-            # Smart Money & Congressional Disclosures Refresh (every 15 minutes / 900s)
+            # Smart Money, Congressional Disclosures & Unified Flow Batch Refresh (every 15 minutes / 900s)
             if (now - last_smart_money_refresh) >= 900.0:
                 last_smart_money_refresh = now
                 try:
                     smart_money.set_equibles_key(config.equibles_api_key)
                     await asyncio.to_thread(smart_money.refresh_all, list(config.watchlist))
+                    await asyncio.to_thread(smart_money.refresh_flow_transparency_batch, list(config.watchlist), 12)
                 except Exception as sme:
                     logger.warning(f"Smart Money background refresh error: {sme}")
+
+            # FRED Macro & FX Cross Refresh (every 15 minutes / 900s)
+            if (now - last_macro_refresh) >= 900.0:
+                last_macro_refresh = now
+                try:
+                    await asyncio.to_thread(market_intel_engine.get_cached_macro_summary, 900.0)
+                except Exception as me:
+                    logger.debug(f"Macro refresh notice: {me}")
+
+            # Historical Real OHLCV Candle Hydration (every 1 hour / 3600s)
+            if (now - last_ohlcv_hydration) >= 3600.0:
+                last_ohlcv_hydration = now
+                try:
+                    await asyncio.to_thread(data_feed.hydrate_historical_ohlcv, list(config.watchlist))
+                except Exception as he:
+                    logger.debug(f"OHLCV hydration notice: {he}")
 
             # Cloud Keep-Alive Self-Ping (every 10 minutes / 600s)
             # Resets Render's external ingress 15-minute inactivity timer even if GitHub Actions cron is delayed
@@ -469,22 +502,68 @@ async def autonomous_background_worker_loop():
                     all_candidates = list(dict.fromkeys(smart_buys + tv_breakouts + screened_syms))
                     if all_candidates:
                         clean_watchlist = [s for s in config.watchlist if s not in CRYPTO_SYMBOLS]
-                        combined = list(dict.fromkeys(CORE_ANCHOR_SYMBOLS + all_candidates + clean_watchlist))[:75]
+                        open_syms = [s for s in broker.positions.keys() if s not in CRYPTO_SYMBOLS]
+                        rot = int(now // 300) % max(1, len(CORE_ANCHOR_SYMBOLS))
+                        rotated_anchors = CORE_ANCHOR_SYMBOLS[rot:] + CORE_ANCHOR_SYMBOLS[:rot]
+                        priority_syms = open_syms + ([active_symbol] if active_symbol not in CRYPTO_SYMBOLS else []) + all_candidates[:35]
+                        combined = list(dict.fromkeys(priority_syms + rotated_anchors + clean_watchlist))[:75]
                         config.watchlist = combined
                         logger.info(f"✨ [AUTONOMOUS ASSET SELECTION] Rotated active universe to {len(combined)} opportunities (Screened: {len(screened_syms)}, TV Breakouts: {len(tv_breakouts)}, Smart Money: {len(smart_buys)}). Top: {combined[:10]}")
                 except Exception as ex:
                     logger.warning(f"Dynamic asset discovery notice: {ex}")
 
-            # Cycle analysis across all currently active dynamic watchlist assets (non-blocking thread)
+            # Filter open-market symbols first, pre-fetch quotes concurrently, then run analysis
+            cycle_syms: List[str] = []
             for sym in list(config.watchlist):
-                # Check trading hours before checking whether to place a trade
                 if config.enforce_market_hours:
                     m_open, _ = telemetry_module.is_etoro_uk_market_open(sym)
                     if not m_open and sym != active_symbol:
-                        # Skip background trade analysis for closed markets unless active on UI
                         continue
-                await asyncio.to_thread(run_analysis_cycle, sym)
-                await asyncio.sleep(0.1)
+                cycle_syms.append(sym)
+
+            if cycle_syms:
+                try:
+                    await asyncio.to_thread(data_feed.fetch_quotes_batch, cycle_syms)
+                except Exception as bqe:
+                    logger.debug(f"Batch quote prefetch notice: {bqe}")
+
+                # Keep AI Committee dossiers warm in background (max 3 per 180s interval)
+                if (now - last_committee_eval) >= 180.0:
+                    last_committee_eval = now
+                    try:
+                        def _refresh_committee_batch(targets: List[str]):
+                            comm = get_ai_committee_engine()
+                            macro_base = market_intel_engine.get_cached_macro_summary(max_age_sec=900.0, allow_network=False)
+                            w_state = news_intel.get_macro_risk_state()
+                            w_sent = float(w_state.get("macro_sentiment", 0.0))
+                            w_risk = str(w_state.get("macro_risk_level", "NORMAL"))
+                            m_ctx = {**macro_base, "macro_sentiment": w_sent, "macro_risk_level": w_risk}
+                            refreshed = 0
+                            for csym in targets:
+                                if refreshed >= 3:
+                                    break
+                                if comm.is_dossier_stale(csym, max_age_sec=1800.0):
+                                    q_c = data_feed.get_latest_quote(csym, allow_external=False)
+                                    ind_c = data_feed.get_technical_indicators(csym)
+                                    hl_c = [str(n.get("headline", "")) for n in news_intel.get_symbol_news(csym)[:5] if n.get("headline")]
+                                    comm.evaluate(
+                                        symbol=csym,
+                                        price=q_c.price,
+                                        indicators=ind_c,
+                                        sentiment_score=data_feed.get_news_sentiment(csym),
+                                        headlines=hl_c,
+                                        smart_money_conviction=smart_money.get_flow_conviction(csym),
+                                        macro_context=m_ctx,
+                                    )
+                                    refreshed += 1
+                        comm_targets = list(dict.fromkeys([s for s in broker.positions.keys() if s not in CRYPTO_SYMBOLS] + [active_symbol] + cycle_syms[:12]))
+                        await asyncio.to_thread(_refresh_committee_batch, comm_targets)
+                    except Exception as ce:
+                        logger.debug(f"Background AI Committee refresh notice: {ce}")
+
+                for sym in cycle_syms:
+                    await asyncio.to_thread(run_analysis_cycle, sym)
+                    await asyncio.sleep(0)
 
         except Exception as e:
             logger.error(f"Autonomous background cycle exception: {e}")
@@ -564,12 +643,14 @@ def collect_pre_trade_intelligence(
     if indicators is None:
         indicators = data_feed.get_technical_indicators(sym)
 
-    # 1. Screener / Stocks
+    # 1. Screener / Stocks (reuses pre-fetched quote & memoized indicators)
     screener_intel = screener.get_symbol_screen(
         sym,
         data_feed_manager=data_feed,
         smart_money_engine=smart_money,
-        refresh_tv=False
+        refresh_tv=False,
+        quote=quote,
+        indicators=indicators
     )
 
     # 2. Congress Trades & Smart Money Flow
@@ -674,6 +755,8 @@ def collect_pre_trade_intelligence(
         f"WorldNews={macro_risk}({macro_sentiment:+.2f})]"
     )
 
+    macro_indicators = market_intel_engine.get_cached_macro_summary(max_age_sec=900.0, allow_network=False)
+
     return {
         "symbol": sym,
         "all_sources_read": all_sources_read,
@@ -689,6 +772,7 @@ def collect_pre_trade_intelligence(
         "etoro_data": etoro_intel,
         "finnhub": finnhub_intel,
         "world_news": world_news_intel,
+        "macro_indicators": macro_indicators,
         "blended_sentiment": blended_sentiment,
         "composite_intel_score": composite_intel_score,
         "summary_tag": summary_tag
@@ -758,7 +842,23 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
 
     # 7. Model Federation (Multi-Strategy Scoring + Adaptive Weights + Regime Awareness + 5-Source Pre-Trade Intel)
     ai_committee = get_ai_committee_engine()
-    dossier = ai_committee.get_dossier(symbol)
+    if ai_committee.is_dossier_stale(symbol, max_age_sec=1800.0):
+        news_items = news_intel.get_symbol_news(symbol)
+        headlines = [str(item.get("headline", "")) for item in news_items[:5] if item.get("headline")]
+        macro_ctx = dict(pre_trade_intel.get("macro_indicators") or {})
+        macro_ctx["macro_sentiment"] = macro_sentiment
+        macro_ctx["macro_risk_level"] = macro_risk
+        dossier = ai_committee.evaluate(
+            symbol=symbol,
+            price=quote.price,
+            indicators=indicators,
+            sentiment_score=sentiment,
+            headlines=headlines,
+            smart_money_conviction=flow_score,
+            macro_context=macro_ctx,
+        )
+    else:
+        dossier = ai_committee.get_dossier(symbol)
     ac_score = dossier.conviction_score if dossier else None
     ac_rat = dossier.pm_rationale if dossier else None
     federation = federation_module.model_federation(
@@ -928,9 +1028,13 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
                 if not existing or (existing.direction != ("LONG" if signal == "BUY" else "SHORT")):
                     trade_dir = "LONG" if signal == "BUY" else "SHORT"
                     can_execute_broker = True
+                    quote_source = str(getattr(quote, "source", "simulated") or "simulated").lower()
 
+                    if config.execution_mode == "live" and quote_source in ("simulated", "warmup", "offline_fallback", ""):
+                        logger.warning(f"🛑 [LIVE QUOTE GUARD] Refusing real eToro {trade_dir} on {symbol}: quote source is '{quote_source}' (verified live quote required).")
+                        can_execute_broker = False
                     # When in Live mode, sync eToro portfolio & dispatch real order to official eToro REST API
-                    if config.execution_mode == "live" and etoro_client.is_configured():
+                    elif config.execution_mode == "live" and etoro_client.is_configured():
                         if etoro_client.is_in_auth_cooldown():
                             logger.debug(f"[eToro Auth Paused] Skipping live order on {symbol} - waiting for fresh credentials.")
                             can_execute_broker = False
@@ -959,10 +1063,12 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
                                 if order_res.get("success"):
                                     logger.info(f"✅ [LIVE ETORO SUCCESS] Order filled for {symbol}: {order_res}")
                                     can_execute_broker = True
-                                    try:
-                                        etoro_client.sync_symbols_to_watchlist([symbol], watchlist_name="Autonomous Cockpit")
-                                    except Exception as e:
-                                        logger.debug(f"Watchlist auto-sync notice for {symbol}: {e}")
+                                    def _bg_sync_watchlist(sym_to_sync: str):
+                                        try:
+                                            etoro_client.sync_symbols_to_watchlist([sym_to_sync], watchlist_name="Autonomous Cockpit")
+                                        except Exception as e:
+                                            logger.debug(f"Watchlist auto-sync notice for {sym_to_sync}: {e}")
+                                    threading.Thread(target=_bg_sync_watchlist, args=(symbol,), daemon=True).start()
                                 else:
                                     err_payload = order_res.get('error') or order_res
                                     err_str = str(err_payload).lower()
@@ -2145,10 +2251,13 @@ def reset_portfolio():
     learner.total_win_usd = 0.0
     learner.total_loss_usd = 0.0
     learner.weights = {
-        "momentum_trend": 0.25,
-        "mean_reversion": 0.25,
-        "volatility_breakout": 0.25,
-        "news_sentiment": 0.25
+        "momentum_trend": 0.15,
+        "mean_reversion": 0.14,
+        "volatility_breakout": 0.14,
+        "pattern_recognition": 0.14,
+        "wyckoff_engine": 0.15,
+        "news_sentiment": 0.14,
+        "ai_committee": 0.14
     }
     broker.save_state()
     if config.execution_mode == "live":
@@ -2606,13 +2715,6 @@ def serve_wyckoff_page(symbol: Optional[str] = None):
 # =========================================================================
 # GLOBAL MARKET INTELLIGENCE (Frankfurter, CoinGecko, FRED, SEC, Polygon)
 # =========================================================================
-from .engine.market_intel import MarketIntelSuite
-market_intel_engine = MarketIntelSuite(
-    finnhub_key=config.finnhub_api_key,
-    polygon_key=os.getenv("POLYGON_API_KEY", ""),
-    fred_key=os.getenv("FRED_API_KEY", ""),
-    av_key=config.alpha_vantage_api_key
-)
 
 @app.get("/api/macro/forex", tags=["Global Market Intelligence"])
 async def get_macro_forex(base: str = "USD"):
@@ -2688,6 +2790,15 @@ async def serve_js():
 # TRADINGAGENTS AI INVESTMENT COMMITTEE APIS
 # ==========================================
 
+def _build_committee_macro_context() -> Dict[str, Any]:
+    macro_base = market_intel_engine.get_cached_macro_summary(max_age_sec=900.0, allow_network=False)
+    w_state = news_intel.get_macro_risk_state()
+    return {
+        **macro_base,
+        "macro_sentiment": float(w_state.get("macro_sentiment", 0.0)),
+        "macro_risk_level": str(w_state.get("macro_risk_level", "NORMAL")),
+    }
+
 @app.get("/api/research/{symbol}", tags=["AI Committee"])
 def get_ai_committee_dossier(symbol: str):
     """
@@ -2697,7 +2808,7 @@ def get_ai_committee_dossier(symbol: str):
     sym = symbol.upper().strip()
     ai_committee = get_ai_committee_engine()
     dossier = ai_committee.get_dossier(sym)
-    if not dossier:
+    if not dossier or ai_committee.is_dossier_stale(sym, max_age_sec=1800.0):
         quote = data_feed.get_latest_quote(sym)
         price = quote.price if quote and quote.price > 0 else 100.0
         inds = data_feed.get_technical_indicators(sym)
@@ -2710,7 +2821,8 @@ def get_ai_committee_dossier(symbol: str):
             indicators=inds,
             sentiment_score=data_feed.get_news_sentiment(sym),
             headlines=headlines,
-            smart_money_conviction=sm_conv
+            smart_money_conviction=sm_conv,
+            macro_context=_build_committee_macro_context(),
         )
     return dossier
 
@@ -2731,7 +2843,8 @@ def evaluate_symbol_committee(symbol: str):
         indicators=inds,
         sentiment_score=data_feed.get_news_sentiment(sym),
         headlines=headlines,
-        smart_money_conviction=sm_conv
+        smart_money_conviction=sm_conv,
+        macro_context=_build_committee_macro_context(),
     )
     return {
         "status": "success",

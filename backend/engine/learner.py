@@ -11,11 +11,13 @@ from .models import TradeRecord, MistakeLogEntry, LearningStatsOutput
 class AdaptiveLearner:
     def __init__(self, initial_weights: Optional[Dict[str, float]] = None):
         self.weights: Dict[str, float] = initial_weights or {
-            "momentum_trend": 0.20,
-            "mean_reversion": 0.20,
-            "volatility_breakout": 0.20,
-            "pattern_recognition": 0.20,
-            "wyckoff_engine": 0.20
+            "momentum_trend": 0.15,
+            "mean_reversion": 0.14,
+            "volatility_breakout": 0.14,
+            "pattern_recognition": 0.14,
+            "wyckoff_engine": 0.15,
+            "news_sentiment": 0.14,
+            "ai_committee": 0.14,
         }
         self.learning_rate: float = 0.08
         self.min_weight: float = 0.05
@@ -46,16 +48,16 @@ class AdaptiveLearner:
         else:
             self.losing_trades_count += 1
             self.total_loss_usd += abs(pnl)
-            
-            # Diagnose mistake root cause
+
+            # Apply negative reinforcement first so mistake_entry records post-adaptation weights
+            self._reinforce_models(models, trade.direction, reward=False, scale=abs(trade.realized_pnl_pct))
+            self.last_calibration_time = datetime.now(timezone.utc).isoformat()
+
+            # Diagnose mistake root cause with updated weights
             mistake_entry = self._diagnose_mistake(trade)
             self.mistake_history.insert(0, mistake_entry)
             if len(self.mistake_history) > 30:
                 self.mistake_history.pop()
-
-            # Negative reinforcement: Penalize models that gave misleading signals
-            self._reinforce_models(models, trade.direction, reward=False, scale=abs(trade.realized_pnl_pct))
-            self.last_calibration_time = datetime.now(timezone.utc).isoformat()
             return mistake_entry
 
     def _diagnose_mistake(self, trade: TradeRecord) -> MistakeLogEntry:
@@ -85,6 +87,12 @@ class AdaptiveLearner:
         elif "news_sentiment" in top_model:
             failure_cause = f"Sentiment divergence. News sentiment was bullish but technical price action broke key support."
             adaptation = f"Down-weighted news_sentiment relative to price action models."
+        elif "ai_committee" in top_model:
+            failure_cause = f"AI Committee consensus error on {symbol} during rapid tape reversal."
+            adaptation = f"Reduced ai_committee influence weight until confluence accuracy recovers."
+        elif "wyckoff" in top_model:
+            failure_cause = f"Wyckoff structural phase invalidation on {symbol} ({direction})."
+            adaptation = f"Reduced wyckoff_engine weight by {self.learning_rate*100:.0f}% on false structural breakout."
         else:
             failure_cause = f"Adverse trend continuation against {direction} position on {symbol} hitting Stop-Loss."
             adaptation = f"Adjusted momentum_trend sensitivity and lowered entry risk budget."
@@ -97,7 +105,7 @@ class AdaptiveLearner:
             pnl_usd=round(-loss_usd, 2),
             primary_failure_cause=failure_cause,
             adaptation_action=adaptation,
-            adjusted_weights={k: round(v, 3) for k, v in self.weights.items()}
+            adjusted_weights={k: round(v, 4) for k, v in self.weights.items()}
         )
 
     def _reinforce_models(self, contributing_models: Dict[str, float], direction: str, reward: bool, scale: float):

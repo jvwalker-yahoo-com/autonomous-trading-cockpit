@@ -49,6 +49,7 @@ class AICommitteeEngine:
         self.reports_dir = Path(reports_dir or os.getenv("TRADING_AGENTS_REPORTS_DIR", "data/reports"))
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         self._dossier_cache: Dict[str, AICommitteeDossier] = {}
+        self._dossier_eval_ts: Dict[str, float] = {}
 
     def get_dossier(self, symbol: str) -> Optional[AICommitteeDossier]:
         """Returns in-memory or on-disk cached dossier for symbol."""
@@ -68,6 +69,28 @@ class AICommitteeEngine:
                 logger.warning(f"Error loading cached dossier for {sym}: {ex}")
         return None
 
+    def is_dossier_stale(self, symbol: str, max_age_sec: float = 1800.0) -> bool:
+        """Returns True if the symbol has no cached dossier or its evaluation exceeded max_age_sec."""
+        import time as _time
+        sym = symbol.upper().strip()
+        if sym not in self._dossier_cache:
+            dossier = self.get_dossier(sym)
+            if dossier is None:
+                return True
+        eval_ts = self._dossier_eval_ts.get(sym, 0.0)
+        if eval_ts <= 0.0:
+            dossier = self._dossier_cache.get(sym)
+            if dossier and getattr(dossier, "timestamp", ""):
+                try:
+                    dt = datetime.fromisoformat(str(dossier.timestamp).replace("Z", "+00:00"))
+                    eval_ts = dt.timestamp()
+                    self._dossier_eval_ts[sym] = eval_ts
+                except Exception:
+                    return True
+            else:
+                return True
+        return (_time.time() - eval_ts) >= max_age_sec
+
     def evaluate(
         self,
         symbol: str,
@@ -76,7 +99,8 @@ class AICommitteeEngine:
         fundamentals: Optional[Dict[str, Any]] = None,
         sentiment_score: float = 0.0,
         headlines: Optional[List[str]] = None,
-        smart_money_conviction: float = 0.0
+        smart_money_conviction: float = 0.0,
+        macro_context: Optional[Dict[str, Any]] = None,
     ) -> AICommitteeDossier:
         """
         Runs the full 5-tier AI Committee deliberation pipeline:
@@ -92,7 +116,7 @@ class AICommitteeEngine:
         adx = float(ind.get("adx", 22.0))
         rsi = float(ind.get("rsi_14", 50.0))
         trend = str(ind.get("heikin_ashi_trend", "NEUTRAL"))
-        supertrend = float(ind.get("supertrend_dir", 1.0))
+        supertrend = float(ind.get("supertrend_direction", ind.get("supertrend_dir", 1.0)))
         vol_surge = float(ind.get("volume_surge", 1.0))
         wyck_phase = str(ind.get("wyckoff_phase_code", "B"))
 
@@ -106,18 +130,36 @@ class AICommitteeEngine:
             f"- **Technical Verdict**: {tech_stance}. Momentum is {'expanding' if adx >= 25 else 'contracting / consolidating'}."
         )
 
-        # 2. Fundamental Analyst
-        pe_ratio = funds.get("pe_ratio") or funds.get("pe", 24.5)
-        market_cap_b = funds.get("market_cap_b", 120.0)
-        rev_growth = funds.get("revenue_growth_pct", 12.4)
-        fund_stance = "FAVORABLE" if rev_growth > 10.0 else "CHALLENGED"
-        fund_report = (
-            f"### Fundamental Analyst Valuation on {sym}\n"
-            f"- **P/E Multiple**: {pe_ratio:.1f}x\n"
-            f"- **Estimated Market Cap**: ${market_cap_b:.1f}B\n"
-            f"- **Revenue Growth**: {rev_growth:+.1f}% YoY\n"
-            f"- **Institutional Balance Sheet Assessment**: Operating cash flows remain {fund_stance.lower()} under current cost of capital."
+        # 2. Fundamental Analyst (strictly neutral when fundamental metrics unavailable)
+        has_fundamentals = bool(
+            funds and any(k in funds and funds.get(k) is not None for k in ("revenue_growth_pct", "pe_ratio", "pe", "market_cap_b"))
         )
+        if has_fundamentals:
+            pe_ratio = float(funds.get("pe_ratio") or funds.get("pe") or 20.0)
+            market_cap_b = float(funds.get("market_cap_b") or 0.0)
+            rev_growth_raw = funds.get("revenue_growth_pct")
+            rev_growth = float(rev_growth_raw) if rev_growth_raw is not None else 0.0
+            fund_stance = "FAVORABLE" if rev_growth > 10.0 else ("CHALLENGED" if rev_growth < 0.0 else "NEUTRAL")
+            fund_score = 1.0 if fund_stance == "FAVORABLE" else (-0.5 if fund_stance == "CHALLENGED" else 0.0)
+            pe_desc = f"{pe_ratio:.1f}x"
+            cap_desc = f"${market_cap_b:.1f}B" if market_cap_b > 0 else "N/A"
+            rev_desc = f"{rev_growth:+.1f}% YoY"
+            fund_report = (
+                f"### Fundamental Analyst Valuation on {sym}\n"
+                f"- **P/E Multiple**: {pe_desc}\n"
+                f"- **Estimated Market Cap**: {cap_desc}\n"
+                f"- **Revenue Growth**: {rev_desc}\n"
+                f"- **Institutional Balance Sheet Assessment**: Operating cash flows remain {fund_stance.lower()} under current cost of capital."
+            )
+        else:
+            pe_desc = "N/A"
+            fund_stance = "NEUTRAL (UNAVAILABLE)"
+            fund_score = 0.0
+            fund_report = (
+                f"### Fundamental Analyst Valuation on {sym}\n"
+                f"- **Status**: NEUTRAL (UNAVAILABLE) — live fundamental multiples not supplied; zero bias applied.\n"
+                f"- **P/E Multiple**: N/A | **Revenue Growth**: N/A"
+            )
 
         # 3. Sentiment & Social Analyst
         sent_label = "POSITIVE" if sentiment_score > 0.15 else ("NEGATIVE" if sentiment_score < -0.15 else "NEUTRAL")
@@ -142,7 +184,7 @@ class AICommitteeEngine:
             f"smart money flow (+{smart_money_conviction:.2f}) indicates accumulation before the next markup cycle."
         )
         bear_arg1 = (
-            f"**Bear Researcher**: Overly optimistic. At {pe_ratio:.1f}x P/E, {sym} leaves no margin of safety if macro conditions tighten. "
+            f"**Bear Researcher**: Overly optimistic. At {pe_desc} P/E, {sym} leaves limited margin of safety if macro conditions tighten. "
             f"With RSI at {rsi:.1f} and market ADX at {adx:.1f}, risk of a false breakout or mean-reversion trap is elevated."
         )
         bull_arg2 = (
@@ -166,12 +208,26 @@ class AICommitteeEngine:
         ]
 
         # --- TIER 3: TRADING DESK ---
-        # Quantitative score synthesis
+        # Quantitative score synthesis (macro_context subtly adjusts risk appetite when elevated/critical or inverted)
+        macro_adj = 0.0
+        if isinstance(macro_context, dict):
+            m_sent = float(macro_context.get("macro_sentiment", 0.0) or 0.0)
+            m_risk = str(macro_context.get("macro_risk_level", "NORMAL")).upper()
+            macro_adj = max(-0.10, min(0.10, m_sent * 0.15))
+            if m_risk == "CRITICAL":
+                macro_adj -= 0.08
+            elif m_risk == "ELEVATED":
+                macro_adj -= 0.04
+            spread = macro_context.get("yield_curve_spread")
+            if spread is not None and float(spread) < -0.50:
+                macro_adj -= 0.03
+
         quant_score = (
             (0.35 * (1.0 if tech_stance == "BULLISH" else (-1.0 if tech_stance == "BEARISH" else 0.0))) +
-            (0.25 * (1.0 if fund_stance == "FAVORABLE" else -0.5)) +
+            (0.25 * fund_score) +
             (0.20 * max(-1.0, min(1.0, sentiment_score * 2.0))) +
-            (0.20 * max(-1.0, min(1.0, smart_money_conviction * 2.0)))
+            (0.20 * max(-1.0, min(1.0, smart_money_conviction * 2.0))) +
+            macro_adj
         )
         conviction_score = round(max(-1.0, min(1.0, quant_score)), 3)
 
@@ -246,7 +302,9 @@ class AICommitteeEngine:
         )
 
         # Cache in memory and save structured report tree to disk
+        import time as _time
         self._dossier_cache[sym] = dossier
+        self._dossier_eval_ts[sym] = _time.time()
         self.save_reports(dossier)
         return dossier
 

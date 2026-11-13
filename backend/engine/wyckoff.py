@@ -84,15 +84,21 @@ class WyckoffRangeEngine:
         if volumes is None or len(volumes) != n:
             volumes = np.full(n, 100000.0)
 
-        window = min(n, 35)
+        window = min(n, 45)
         w_prices = prices[-window:]
         w_highs = highs[-window:]
         w_lows = lows[-window:]
         w_vols = volumes[-window:]
 
         cur_p = float(w_prices[-1])
-        tr_high = float(np.max(w_highs))
-        tr_low = float(np.min(w_lows))
+        # Anchor Trading Range (Creek & Ice) to the established base formation window
+        # rather than the full window min/max so subsequent Springs, UTADs, SOS, and SOW can trigger.
+        anchor_bars = max(4, min(22, int(len(w_prices) * 0.45)))
+        tr_high = float(np.max(w_highs[:anchor_bars]))
+        tr_low = float(np.min(w_lows[:anchor_bars]))
+        if tr_high <= tr_low:
+            tr_high = float(np.max(w_highs))
+            tr_low = float(np.min(w_lows))
         tr_mid = float((tr_high + tr_low) / 2.0)
         tr_height = float(max(0.0001, tr_high - tr_low))
         tr_height_pct = (tr_height / max(0.01, cur_p)) * 100.0
@@ -144,12 +150,12 @@ class WyckoffRangeEngine:
             is_vol_surge = v > (1.3 * mean_vol)
 
             # Selling Climax (SC)
-            if l <= tr_low * 1.002 and is_vol_surge and spread > mean_spread and p < prev_p:
+            if not has_sc and l <= tr_low * 1.002 and is_vol_surge and spread > mean_spread and p < prev_p:
                 has_sc = True
                 events.append({"event": "SC", "name": "Selling Climax", "price": round(l, 2), "bar": i})
 
             # Buying Climax (BC)
-            if h >= tr_high * 0.998 and is_vol_surge and spread > mean_spread and p > prev_p:
+            if not has_bc and h >= tr_high * 0.998 and is_vol_surge and spread > mean_spread and p > prev_p:
                 has_bc = True
                 events.append({"event": "BC", "name": "Buying Climax", "price": round(h, 2), "bar": i})
 
@@ -171,30 +177,32 @@ class WyckoffRangeEngine:
                     events.append({"event": "ST", "name": "Secondary Test", "price": round(h, 2), "bar": i})
 
             # Smart Spring (Phase C - Liquidity Sweep below Ice Support followed by rapid recovery)
-            if l < tr_low and p >= tr_low and i >= 4:
+            if l < tr_low and p >= tr_low and i >= anchor_bars:
                 recovery_pct = ((p - l) / max(0.001, spread)) * 100.0
                 effort_bonus = 25 if is_vol_surge else 10
                 q = min(100, int(35 + (recovery_pct * 0.45) + effort_bonus))
-                has_spring = True
-                spring_quality = max(spring_quality, q)
-                events.append({"event": "SPRING", "name": f"Smart Spring (Quality: {q})", "price": round(l, 2), "bar": i, "score": q})
+                if not has_spring or q > spring_quality:
+                    has_spring = True
+                    spring_quality = max(spring_quality, q)
+                    events.append({"event": "SPRING", "name": f"Smart Spring (Quality: {q})", "price": round(l, 2), "bar": i, "score": q})
 
             # UTAD (Phase C - Upthrust After Distribution above Creek Resistance)
-            if h > tr_high and p <= tr_high and i >= 4:
+            if h > tr_high and p <= tr_high and i >= anchor_bars:
                 rejection_pct = ((h - p) / max(0.001, spread)) * 100.0
                 effort_bonus = 25 if is_vol_surge else 10
                 q = min(100, int(35 + (rejection_pct * 0.45) + effort_bonus))
-                has_utad = True
-                utad_quality = max(utad_quality, q)
-                events.append({"event": "UTAD", "name": f"UTAD Upthrust (Quality: {q})", "price": round(h, 2), "bar": i, "score": q})
+                if not has_utad or q > utad_quality:
+                    has_utad = True
+                    utad_quality = max(utad_quality, q)
+                    events.append({"event": "UTAD", "name": f"UTAD Upthrust (Quality: {q})", "price": round(h, 2), "bar": i, "score": q})
 
             # Sign of Strength (SOS - Phase D Breakout above Creek on expanding volume)
-            if p > tr_high and is_vol_surge and p > prev_p:
+            if not has_sos and i >= anchor_bars and p > tr_high and is_vol_surge and p > prev_p:
                 has_sos = True
                 events.append({"event": "SOS", "name": "Sign of Strength (SOS)", "price": round(h, 2), "bar": i})
 
             # Sign of Weakness (SOW - Phase D Breakdown below Ice on expanding volume)
-            if p < tr_low and is_vol_surge and p < prev_p:
+            if not has_sow and i >= anchor_bars and p < tr_low and is_vol_surge and p < prev_p:
                 has_sow = True
                 events.append({"event": "SOW", "name": "Sign of Weakness (SOW)", "price": round(l, 2), "bar": i})
 

@@ -7,6 +7,7 @@ from typing import Dict, List, Any, Optional
 import time
 import logging
 import requests
+from requests.adapters import HTTPAdapter
 
 logger = logging.getLogger("auton-cockpit.screener")
 
@@ -285,6 +286,141 @@ UNTRADABLE_RETAIL_SYMBOLS = {
 class MarketScreener:
     """Scans all multi-asset instruments across Commodities, Indices, ETFs, and Equities (Crypto Deactivated)."""
 
+    _session: Optional[requests.Session] = None
+
+    @classmethod
+    def _get_session(cls) -> requests.Session:
+        if cls._session is None:
+            sess = requests.Session()
+            adapter = HTTPAdapter(pool_connections=8, pool_maxsize=16)
+            sess.mount("https://", adapter)
+            sess.mount("http://", adapter)
+            cls._session = sess
+        return cls._session
+
+    @staticmethod
+    def _evaluate_technical_and_congress(
+        symbol: str,
+        quote: Any,
+        ind: Dict[str, Any],
+        smart_money_engine: Any = None,
+    ) -> Dict[str, Any]:
+        """
+        Shared directional scoring engine for both scan_universe() and get_symbol_screen().
+        Applies Congressional conviction on a signed basis so bullish Congress flow never
+        amplifies a SHORT technical score (and bearish Congress flow attenuates LONG setups).
+        """
+        adx = float(ind.get("adx", 20.0))
+        supertrend_dir = float(ind.get("supertrend_direction", ind.get("supertrend_dir", 1.0)))
+        rsi = float(ind.get("rsi_14", ind.get("rsi", 50.0)))
+        vwap = float(ind.get("vwap", quote.price))
+        mfi = float(ind.get("mfi", 50.0))
+        chg_pct = float(quote.change_pct)
+        vol_surge = float(ind.get("volume_surge", 1.0))
+        breakout = str(ind.get("breakout_type", "NONE"))
+        db_det = float(ind.get("double_bottom_detected", 0.0)) > 0
+        dt_det = float(ind.get("double_top_detected", 0.0)) > 0
+
+        score = 50.0
+        if adx >= 30:
+            score += 20.0
+        elif adx >= 22:
+            score += 10.0
+
+        if supertrend_dir > 0:
+            signal = "BUY"
+            if quote.price > vwap:
+                score += 15.0
+            if 50 < rsi < 70:
+                score += 10.0
+        else:
+            signal = "SHORT"
+            if quote.price < vwap:
+                score += 15.0
+            if 30 < rsi < 50:
+                score += 10.0
+
+        if db_det:
+            signal = "BUY (DOUBLE BOTTOM)"
+            score += 16.0
+        elif dt_det:
+            signal = "SHORT (DOUBLE TOP)"
+            score += 16.0
+
+        if breakout == "BULL_BREAKOUT":
+            signal = "BUY (RANGE BREAKOUT)"
+            score += 14.0
+        elif breakout == "BEAR_BREAKDOWN":
+            signal = "SHORT (RANGE BREAKDOWN)"
+            score += 14.0
+
+        if vol_surge >= 1.5:
+            score += 12.0
+        elif vol_surge >= 1.2:
+            score += 6.0
+
+        if rsi < 30 or mfi < 25:
+            signal = "BUY (OVERSOLD REBOUND)"
+            score += 15.0
+        elif rsi > 70 or mfi > 75:
+            signal = "SHORT (OVERBOUGHT REVERSAL)"
+            score += 15.0
+
+        tech_dir = 1.0 if signal.startswith("BUY") else (-1.0 if signal.startswith("SHORT") else 0.0)
+        tech_score_with_vol = score + min(15.0, abs(chg_pct) * 2.0)
+        tech_mag = max(0.0, min(1.0, (tech_score_with_vol - 45.0) / 50.0))
+        signed_tech = tech_dir * tech_mag
+
+        # Signed Congressional / Smart Money Reconciliation
+        congress_score = float(smart_money_engine.get_congress_conviction(symbol) if smart_money_engine else 0.0)
+        pattern_desc = "Double Bottom" if db_det else ("Double Top" if dt_det else (breakout if breakout != "NONE" else "Trend Continuation"))
+
+        cong_delta = 0.0
+        if congress_score >= 0.20:
+            cong_delta = min(0.45, congress_score * 0.50)
+            if tech_dir >= 0:
+                score += min(18.0, congress_score * 20.0)
+                signal = f"{signal} + CONGRESS BUY"
+            else:
+                score -= min(18.0, congress_score * 20.0)
+                signal = f"{signal} (CONGRESS DIVERGENCE)"
+            pattern_desc = f"{pattern_desc} [Congress Accumulation]"
+        elif congress_score <= -0.25:
+            cong_delta = -min(0.45, abs(congress_score) * 0.50)
+            if tech_dir <= 0:
+                score += min(15.0, abs(congress_score) * 15.0)
+                signal = f"{signal} + CONGRESS SELL"
+            else:
+                score -= min(15.0, abs(congress_score) * 15.0)
+                signal = f"{signal} (CONGRESS SELL RISK)"
+            pattern_desc = f"{pattern_desc} [Congress Distribution]"
+        elif abs(congress_score) > 0.01:
+            cong_delta = congress_score * 0.20
+
+        score += min(15.0, abs(chg_pct) * 2.0)
+        final_score = min(99.0, max(10.0, round(score, 1)))
+        norm_score = round(max(-1.0, min(1.0, signed_tech + cong_delta)), 3)
+
+        is_day_setup = (vol_surge >= 1.25 or breakout != "NONE" or db_det or dt_det or adx >= 26)
+        rec_horizon = "DAY" if is_day_setup else "LONG-TERM"
+
+        return {
+            "adx": adx,
+            "supertrend_dir": supertrend_dir,
+            "rsi": rsi,
+            "mfi": mfi,
+            "chg_pct": chg_pct,
+            "vol_surge": vol_surge,
+            "breakout": breakout,
+            "signal": signal,
+            "opportunity_score": final_score,
+            "normalized_score": norm_score,
+            "congress_score": congress_score,
+            "pattern_desc": pattern_desc,
+            "is_day_setup": is_day_setup,
+            "recommended_horizon": rec_horizon,
+        }
+
     @classmethod
     def scan_universe(
         cls,
@@ -343,95 +479,10 @@ class MarketScreener:
 
             quote = data_feed_manager.get_latest_quote(symbol, allow_external=False)
             ind = data_feed_manager.get_technical_indicators(symbol)
+            ev = cls._evaluate_technical_and_congress(symbol, quote, ind, smart_money_engine)
 
-
-            adx = ind.get("adx", 20.0)
-            supertrend_dir = ind.get("supertrend_direction", ind.get("supertrend_dir", 1.0))
-            rsi = ind.get("rsi_14", ind.get("rsi", 50.0))
-            vwap = ind.get("vwap", quote.price)
-            mfi = ind.get("mfi", 50.0)
-            chg_pct = quote.change_pct
-            vol_surge = ind.get("volume_surge", 1.0)
-            breakout = ind.get("breakout_type", "NONE")
-            db_det = ind.get("double_bottom_detected", 0.0) > 0
-            dt_det = ind.get("double_top_detected", 0.0) > 0
-
-            # Calculate Quantitative Score (0 to 100)
-            score = 50.0
-            
-            # Trend strength bonus (high ADX indicates strong directional move)
-            if adx >= 30:
-                score += 20.0
-            elif adx >= 22:
-                score += 10.0
-
-            # Momentum / SuperTrend direction
-            if supertrend_dir > 0: # BULL
-                signal = "BUY"
-                if quote.price > vwap:
-                    score += 15.0
-                if rsi > 50 and rsi < 70:
-                    score += 10.0
-            else: # BEAR
-                signal = "SHORT"
-                if quote.price < vwap:
-                    score += 15.0
-                if rsi < 50 and rsi > 30:
-                    score += 10.0
-
-            # Pattern recognition bonuses
-            if db_det:
-                signal = "BUY (DOUBLE BOTTOM)"
-                score += 16.0
-            elif dt_det:
-                signal = "SHORT (DOUBLE TOP)"
-                score += 16.0
-
-            if breakout == "BULL_BREAKOUT":
-                signal = "BUY (RANGE BREAKOUT)"
-                score += 14.0
-            elif breakout == "BEAR_BREAKDOWN":
-                signal = "SHORT (RANGE BREAKDOWN)"
-                score += 14.0
-
-            # Volume surge confirmation bonus
-            if vol_surge >= 1.5:
-                score += 12.0
-            elif vol_surge >= 1.2:
-                score += 6.0
-
-            # Extreme Mean-Reversion Bonus
-            if rsi < 30 or mfi < 25:
-                signal = "BUY (OVERSOLD REBOUND)"
-                score += 15.0
-            elif rsi > 70 or mfi > 75:
-                signal = "SHORT (OVERBOUGHT REVERSAL)"
-                score += 15.0
-
-            # Congressional / Smart Money Conviction Bonus
-            congress_score = smart_money_engine.get_congress_conviction(symbol) if smart_money_engine else 0.0
-            if congress_score >= 0.20:
-                score += min(18.0, congress_score * 20.0)
-                signal = f"{signal} + CONGRESS BUY"
-            elif congress_score <= -0.25:
-                score -= min(15.0, abs(congress_score) * 15.0)
-
-            # Volatility bonus
-            score += min(15.0, abs(chg_pct) * 2.0)
-            final_score = min(99.0, max(10.0, round(score, 1)))
-
-            # Horizon classification
-            is_day_setup = (vol_surge >= 1.25 or breakout != "NONE" or db_det or dt_det or adx >= 26)
-            rec_horizon = "DAY" if is_day_setup else "LONG-TERM"
-
-            if (day_trade_only or (category_filter and category_filter.lower() in ("daytrade", "day_trade"))) and not is_day_setup:
+            if (day_trade_only or (category_filter and category_filter.lower() in ("daytrade", "day_trade"))) and not ev["is_day_setup"]:
                 continue
-
-            pattern_desc = "Double Bottom" if db_det else ("Double Top" if dt_det else (breakout if breakout != "NONE" else "Trend Continuation"))
-            if congress_score >= 0.20:
-                pattern_desc = f"{pattern_desc} [Congress Accumulation]"
-            elif congress_score <= -0.25:
-                pattern_desc = f"{pattern_desc} [Congress Distribution]"
 
             results.append({
                 "symbol": symbol,
@@ -441,17 +492,18 @@ class MarketScreener:
                 "trading_hours": info.get("trading_hours", "eToro Hours"),
                 "price": round(quote.price, 4 if quote.price < 1.0 else 2),
                 "change_usd": round(quote.change, 4 if abs(quote.change) < 0.1 else 2),
-                "change_pct": round(chg_pct, 2),
-                "adx": round(adx, 1),
-                "supertrend": "BULLISH" if supertrend_dir > 0 else "BEARISH",
-                "rsi": round(rsi, 1),
-                "mfi": round(mfi, 1),
-                "volume_surge": round(vol_surge, 1),
-                "pattern": pattern_desc,
-                "recommended_horizon": rec_horizon,
-                "signal": signal,
-                "opportunity_score": final_score,
-                "congress_conviction": round(congress_score, 2)
+                "change_pct": round(ev["chg_pct"], 2),
+                "adx": round(ev["adx"], 1),
+                "supertrend": "BULLISH" if ev["supertrend_dir"] > 0 else "BEARISH",
+                "rsi": round(ev["rsi"], 1),
+                "mfi": round(ev["mfi"], 1),
+                "volume_surge": round(ev["vol_surge"], 1),
+                "pattern": ev["pattern_desc"],
+                "recommended_horizon": ev["recommended_horizon"],
+                "signal": ev["signal"],
+                "opportunity_score": ev["opportunity_score"],
+                "normalized_score": ev["normalized_score"],
+                "congress_conviction": round(ev["congress_score"], 2)
             })
 
         # Cache per-symbol scan results for O(1) pre-trade lookup
@@ -470,7 +522,9 @@ class MarketScreener:
         symbol: str,
         data_feed_manager=None,
         smart_money_engine=None,
-        refresh_tv: bool = False
+        refresh_tv: bool = False,
+        quote: Any = None,
+        indicators: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Evaluates a single stock/instrument through the quantitative MarketScreener
@@ -501,83 +555,10 @@ class MarketScreener:
             "trading_hours": "14:30 - 21:00 UK"
         })
 
-        quote = data_feed_manager.get_latest_quote(sym, allow_external=False)
-        ind = data_feed_manager.get_technical_indicators(sym)
-
-        adx = float(ind.get("adx", 20.0))
-        supertrend_dir = float(ind.get("supertrend_direction", ind.get("supertrend_dir", 1.0)))
-        rsi = float(ind.get("rsi_14", ind.get("rsi", 50.0)))
-        vwap = float(ind.get("vwap", quote.price))
-        mfi = float(ind.get("mfi", 50.0))
-        chg_pct = float(quote.change_pct)
-        vol_surge = float(ind.get("volume_surge", 1.0))
-        breakout = str(ind.get("breakout_type", "NONE"))
-        db_det = float(ind.get("double_bottom_detected", 0.0)) > 0
-        dt_det = float(ind.get("double_top_detected", 0.0)) > 0
-
-        score = 50.0
-        if adx >= 30:
-            score += 20.0
-        elif adx >= 22:
-            score += 10.0
-
-        if supertrend_dir > 0:
-            signal = "BUY"
-            if quote.price > vwap:
-                score += 15.0
-            if 50 < rsi < 70:
-                score += 10.0
-        else:
-            signal = "SHORT"
-            if quote.price < vwap:
-                score += 15.0
-            if 30 < rsi < 50:
-                score += 10.0
-
-        if db_det:
-            signal = "BUY (DOUBLE BOTTOM)"
-            score += 16.0
-        elif dt_det:
-            signal = "SHORT (DOUBLE TOP)"
-            score += 16.0
-
-        if breakout == "BULL_BREAKOUT":
-            signal = "BUY (RANGE BREAKOUT)"
-            score += 14.0
-        elif breakout == "BEAR_BREAKDOWN":
-            signal = "SHORT (RANGE BREAKDOWN)"
-            score += 14.0
-
-        if vol_surge >= 1.5:
-            score += 12.0
-        elif vol_surge >= 1.2:
-            score += 6.0
-
-        if rsi < 30 or mfi < 25:
-            signal = "BUY (OVERSOLD REBOUND)"
-            score += 15.0
-        elif rsi > 70 or mfi > 75:
-            signal = "SHORT (OVERBOUGHT REVERSAL)"
-            score += 15.0
-
-        congress_score = smart_money_engine.get_congress_conviction(sym) if smart_money_engine else 0.0
-        if congress_score >= 0.20:
-            score += min(18.0, congress_score * 20.0)
-            signal = f"{signal} + CONGRESS BUY"
-        elif congress_score <= -0.25:
-            score -= min(15.0, abs(congress_score) * 15.0)
-
-        score += min(15.0, abs(chg_pct) * 2.0)
-        final_score = min(99.0, max(10.0, round(score, 1)))
-
-        is_day_setup = (vol_surge >= 1.25 or breakout != "NONE" or db_det or dt_det or adx >= 26)
-        rec_horizon = "DAY" if is_day_setup else "LONG-TERM"
-        pattern_desc = "Double Bottom" if db_det else ("Double Top" if dt_det else (breakout if breakout != "NONE" else "Trend Continuation"))
-
-        # Directional normalized score in [-1.0, +1.0]
-        dir_sign = 1.0 if signal.startswith("BUY") else (-1.0 if signal.startswith("SHORT") else 0.0)
-        magnitude = max(0.0, min(1.0, (final_score - 45.0) / 50.0))
-        norm_score = round(dir_sign * magnitude, 3)
+        quote = quote or data_feed_manager.get_latest_quote(sym, allow_external=False)
+        ind = indicators or data_feed_manager.get_technical_indicators(sym)
+        ev = cls._evaluate_technical_and_congress(sym, quote, ind, smart_money_engine)
+        norm_score = ev["normalized_score"]
 
         # Attach TradingView consensus if present in cache (or refresh if requested)
         tv_entry = cls._tv_consensus_cache.get(sym)
@@ -611,18 +592,18 @@ class MarketScreener:
             "asset_class": info.get("asset_class", "Stock"),
             "trading_hours": info.get("trading_hours", "eToro Hours"),
             "price": round(quote.price, 4 if quote.price < 1.0 else 2),
-            "change_pct": round(chg_pct, 2),
-            "adx": round(adx, 1),
-            "supertrend": "BULLISH" if supertrend_dir > 0 else "BEARISH",
-            "rsi": round(rsi, 1),
-            "mfi": round(mfi, 1),
-            "volume_surge": round(vol_surge, 1),
-            "pattern": pattern_desc,
-            "recommended_horizon": rec_horizon,
-            "signal": signal,
-            "opportunity_score": final_score,
+            "change_pct": round(ev["chg_pct"], 2),
+            "adx": round(ev["adx"], 1),
+            "supertrend": "BULLISH" if ev["supertrend_dir"] > 0 else "BEARISH",
+            "rsi": round(ev["rsi"], 1),
+            "mfi": round(ev["mfi"], 1),
+            "volume_surge": round(ev["vol_surge"], 1),
+            "pattern": ev["pattern_desc"],
+            "recommended_horizon": ev["recommended_horizon"],
+            "signal": ev["signal"],
+            "opportunity_score": ev["opportunity_score"],
             "normalized_score": norm_score,
-            "congress_conviction": round(congress_score, 2),
+            "congress_conviction": round(ev["congress_score"], 2),
             "tv_consensus_1d": tv_consensus_1d,
             "tv_consensus_1h": tv_consensus_1h,
             "tv_consensus_15m": tv_consensus_15m,
@@ -696,7 +677,7 @@ class MarketScreener:
         }
 
         try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=8)
+            resp = cls._get_session().post(url, json=payload, headers=headers, timeout=8)
             if resp.status_code != 200:
                 logger.warning(f"TradingView screener returned HTTP {resp.status_code}")
                 return cls._tv_cache[:top_n]
@@ -796,7 +777,7 @@ class MarketScreener:
         }
 
         try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=6)
+            resp = cls._get_session().post(url, json=payload, headers=headers, timeout=6)
             if resp.status_code != 200:
                 return cls._tv_consensus_cache
 

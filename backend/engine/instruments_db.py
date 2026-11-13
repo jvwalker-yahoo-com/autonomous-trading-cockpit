@@ -6,6 +6,7 @@ and automated nightly catalog updates.
 """
 import sqlite3
 import logging
+import threading
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Tuple
@@ -242,6 +243,9 @@ class InstrumentsDBManager:
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = Path(db_path or DEFAULT_DB_PATH)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._cache_lock = threading.RLock()
+        self._id_cache: Dict[str, int] = {}
+        self._instrument_cache: Dict[str, Dict[str, Any]] = {}
         self._init_db()
         self._seed_if_empty()
 
@@ -313,48 +317,74 @@ class InstrumentsDBManager:
     def get_etoro_id(self, symbol: str) -> Optional[int]:
         """
         Primary Lookup Function:
-        Returns the eToro internal instrument ID for a ticker symbol.
+        Returns the eToro internal instrument ID for a ticker symbol (with in-memory cache).
         Normalizes aliases (e.g. 'CORN.FUT' -> 'CORN').
         """
         if not symbol or not isinstance(symbol, str):
             return None
-        
+
         sym = symbol.strip().upper()
+        with self._cache_lock:
+            if sym in self._id_cache:
+                return self._id_cache[sym]
 
         with self._get_connection() as conn:
-            # 1. Direct exact lookup
-            row = conn.execute("SELECT instrument_id FROM instruments WHERE symbol = ?;", (sym,)).fetchone()
+            # 1. Direct exact lookup (SELECT * so we warm both caches in 1 SQLite round-trip)
+            row = conn.execute("SELECT * FROM instruments WHERE symbol = ?;", (sym,)).fetchone()
             if row:
-                return int(row["instrument_id"])
-            
+                row_dict = dict(row)
+                iid = int(row_dict["instrument_id"])
+                with self._cache_lock:
+                    self._id_cache[sym] = iid
+                    self._instrument_cache[sym] = row_dict
+                return iid
+
             # 2. Alias resolution: handle .FUT or exchange extensions like .US
             clean_sym = sym.replace(".FUT", "").replace(".US", "")
-            row = conn.execute("SELECT instrument_id FROM instruments WHERE symbol = ?;", (clean_sym,)).fetchone()
+            row = conn.execute("SELECT * FROM instruments WHERE symbol = ?;", (clean_sym,)).fetchone()
             if row:
+                row_dict = dict(row)
+                iid = int(row_dict["instrument_id"])
                 # Cache the alias in DB for subsequent zero-cost lookups
                 conn.execute("""
                     INSERT OR IGNORE INTO instruments (symbol, instrument_id, name, category, asset_class, trading_hours, is_active)
                     VALUES (?, ?, ?, 'Alias', 'Derived', 'eToro Hours', 1);
-                """, (sym, int(row["instrument_id"]), f"Alias of {clean_sym}"))
+                """, (sym, iid, f"Alias of {clean_sym}"))
                 conn.commit()
-                return int(row["instrument_id"])
+                with self._cache_lock:
+                    self._id_cache[sym] = iid
+                    self._instrument_cache[sym] = row_dict
+                return iid
 
         return None
 
     def get_instrument(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Returns full metadata for an instrument from SQLite."""
+        """Returns full metadata for an instrument from in-memory cache or SQLite."""
         if not symbol:
             return None
         sym = symbol.strip().upper()
+        with self._cache_lock:
+            cached = self._instrument_cache.get(sym)
+            if cached is not None:
+                return dict(cached)
+
         with self._get_connection() as conn:
             row = conn.execute("SELECT * FROM instruments WHERE symbol = ?;", (sym,)).fetchone()
             if row:
-                return dict(row)
+                row_dict = dict(row)
+                with self._cache_lock:
+                    self._id_cache[sym] = int(row_dict["instrument_id"])
+                    self._instrument_cache[sym] = row_dict
+                return dict(row_dict)
             # Try without .FUT
             clean_sym = sym.replace(".FUT", "")
             row = conn.execute("SELECT * FROM instruments WHERE symbol = ?;", (clean_sym,)).fetchone()
             if row:
-                return dict(row)
+                row_dict = dict(row)
+                with self._cache_lock:
+                    self._id_cache[sym] = int(row_dict["instrument_id"])
+                    self._instrument_cache[sym] = row_dict
+                return dict(row_dict)
         return None
 
     def upsert_instrument(
@@ -387,6 +417,18 @@ class InstrumentsDBManager:
                     now_str
                 ))
                 conn.commit()
+            with self._cache_lock:
+                self._id_cache[sym] = int(instrument_id)
+                self._instrument_cache[sym] = {
+                    "symbol": sym,
+                    "instrument_id": int(instrument_id),
+                    "name": name or sym,
+                    "category": category or "General",
+                    "asset_class": asset_class or "Stock",
+                    "trading_hours": trading_hours or "eToro Hours",
+                    "is_active": is_active,
+                    "last_updated": now_str,
+                }
             return True
         except Exception as e:
             logger.error(f"[InstrumentsDB] Upsert error for {sym}: {e}")

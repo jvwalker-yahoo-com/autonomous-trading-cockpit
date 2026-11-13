@@ -14,6 +14,9 @@ import math
 import re
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import requests
+from requests.adapters import HTTPAdapter
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timezone, timedelta
 
@@ -143,6 +146,10 @@ class NewsIntelligenceEngine:
         self.tavily_api_key = tavily_api_key.strip()
         self.serpapi_api_key = serpapi_api_key.strip()
         self._lock = threading.Lock()
+        self._session = requests.Session()
+        _adapter = HTTPAdapter(pool_connections=12, pool_maxsize=24)
+        self._session.mount("https://", _adapter)
+        self._session.mount("http://", _adapter)
         # Per-symbol catalyst scores, keyed by symbol
         self._catalyst_scores: Dict[str, float] = {}
         # Per-symbol news items (last 10 per symbol)
@@ -296,13 +303,14 @@ class NewsIntelligenceEngine:
     # ── Refresh Orchestrator ────────────────────────────────────────────────
 
     def refresh_all(self, watchlist: Optional[List[str]] = None):
-        """Main refresh entry point — pulls RSS, SEC EDGAR, Finnhub, SerpApi, and Tavily."""
-        import requests
+        """Main refresh entry point — pulls RSS, SEC EDGAR, Finnhub, SerpApi, and Tavily across full watchlist."""
         if watchlist:
             self.set_watchlist(watchlist)
 
         with self._lock:
-            symbols = list(self._watchlist[:30])
+            symbols = list(self._watchlist)
+
+        req_sess = self._session
 
         new_scores: Dict[str, float] = {}
         new_news: Dict[str, List[Dict[str, Any]]] = {}
@@ -330,42 +338,52 @@ class NewsIntelligenceEngine:
         except Exception as e:
             logger.warning(f"RSS fetch error: {e}")
 
-        # 2. Finnhub Company News (if configured)
-        if has_finnhub:
-            for sym in symbols:
-                try:
-                    score, items = self._fetch_finnhub_news(sym, requests)
-                    if items:
-                        new_news.setdefault(sym, []).extend(items)
-                    new_scores[sym] = new_scores.get(sym, 0.0) + score * 0.40
-                    time.sleep(0.25)
-                except Exception as e:
-                    logger.debug(f"Finnhub news {sym}: {e}")
+        # 2. Finnhub Company News concurrently across ALL watchlist symbols
+        if has_finnhub and symbols:
+            def _load_fh(sym: str):
+                return sym, self._fetch_finnhub_news(sym, req_sess)
+
+            with ThreadPoolExecutor(max_workers=min(4, len(symbols))) as pool:
+                futs = [pool.submit(_load_fh, sym) for sym in symbols]
+                for fut in as_completed(futs):
+                    try:
+                        sym, (score, items) = fut.result()
+                        if items:
+                            new_news.setdefault(sym, []).extend(items)
+                        new_scores[sym] = new_scores.get(sym, 0.0) + score * 0.40
+                    except Exception as e:
+                        logger.debug(f"Finnhub news concurrent error: {e}")
 
             # 3. Finnhub Earnings Calendar
             try:
-                new_earnings = self._fetch_finnhub_earnings(requests)
+                new_earnings = self._fetch_finnhub_earnings(req_sess)
                 logger.info(f"📅 [EARNINGS] {len(new_earnings)} upcoming earnings dates found")
             except Exception as e:
                 logger.debug(f"Finnhub earnings: {e}")
 
-        # 4. SEC EDGAR 8-K & Form 4 Filings (Top 15 symbols)
-        edgar_weight = 0.30 if has_finnhub else 0.30
-        for sym in symbols[:15]:
-            try:
-                filings, score = self._fetch_edgar_filings(sym, requests)
-                if filings:
-                    new_edgar[sym] = filings
-                if score != 0.0:
-                    new_scores[sym] = new_scores.get(sym, 0.0) + score * edgar_weight
-                time.sleep(0.35)
-            except Exception as e:
-                logger.debug(f"EDGAR {sym}: {e}")
+        # 4. SEC EDGAR 8-K & Form 4 Filings concurrently (Top 25 symbols)
+        edgar_weight = 0.30
+        edgar_syms = symbols[:25]
+        if edgar_syms:
+            def _load_edgar(sym: str):
+                return sym, self._fetch_edgar_filings(sym, req_sess)
+
+            with ThreadPoolExecutor(max_workers=min(3, len(edgar_syms))) as pool:
+                futs = [pool.submit(_load_edgar, sym) for sym in edgar_syms]
+                for fut in as_completed(futs):
+                    try:
+                        sym, (filings, score) = fut.result()
+                        if filings:
+                            new_edgar[sym] = filings
+                        if score != 0.0:
+                            new_scores[sym] = new_scores.get(sym, 0.0) + score * edgar_weight
+                    except Exception as e:
+                        logger.debug(f"EDGAR concurrent error: {e}")
 
         # 5. Tavily AI Search Catalysts (Breaking financial news)
         if self.tavily_api_key and len(self.tavily_api_key) > 5:
             try:
-                t_scores, t_news = self._fetch_tavily_catalysts(symbols[:10], requests)
+                t_scores, t_news = self._fetch_tavily_catalysts(symbols[:10], req_sess)
                 for sym, t_score in t_scores.items():
                     new_scores[sym] = new_scores.get(sym, 0.0) + t_score * 0.25
                 for sym, items in t_news.items():
@@ -378,7 +396,7 @@ class NewsIntelligenceEngine:
         # 6. Alpha Vantage News & Sentiment (Targeted catalysts)
         if self.alpha_vantage_api_key and len(self.alpha_vantage_api_key) > 5:
             try:
-                av_scores, av_news = self._fetch_alpha_vantage_sentiment(symbols[:5], requests)
+                av_scores, av_news = self._fetch_alpha_vantage_sentiment(symbols[:5], req_sess)
                 for sym, av_score in av_scores.items():
                     new_scores[sym] = new_scores.get(sym, 0.0) + av_score * 0.25
                 for sym, items in av_news.items():
@@ -405,7 +423,7 @@ class NewsIntelligenceEngine:
         new_macro_themes: List[Dict[str, Any]] = []
         try:
             new_world_news, new_macro_sentiment, new_macro_risk_level, new_macro_themes = self._fetch_global_market_news(
-                requests, existing_rss_headlines=new_headlines
+                req_sess, existing_rss_headlines=new_headlines
             )
             logger.info(
                 f"🌍 [WORLD NEWS INTEL] {len(new_world_news)} breaking articles ingested | "
@@ -467,12 +485,25 @@ class NewsIntelligenceEngine:
             patterns = [re.compile(r'(?:\b|\$)' + re.escape(t.replace('$', '')) + r'\b', re.IGNORECASE) for t in tokens if t]
             sym_patterns[s_up] = patterns
 
-        for feed_url in RSS_FEEDS:
+        def _download_feed(url: str) -> Tuple[str, Optional[str]]:
             try:
-                req = urllib.request.Request(feed_url, headers=headers)
-                with urllib.request.urlopen(req, timeout=6) as resp:
-                    raw = resp.read().decode("utf-8", errors="ignore")
+                resp = self._session.get(url, headers=headers, timeout=5)
+                if resp.status_code == 200 and resp.text:
+                    return url, resp.text
+            except Exception as e:
+                logger.debug(f"RSS feed notice ({url}): {e}")
+            return url, None
 
+        fetched_feeds: List[Tuple[str, Optional[str]]] = []
+        with ThreadPoolExecutor(max_workers=min(6, max(1, len(RSS_FEEDS)))) as pool:
+            futs = [pool.submit(_download_feed, u) for u in RSS_FEEDS]
+            for fut in as_completed(futs):
+                fetched_feeds.append(fut.result())
+
+        for feed_url, raw in fetched_feeds:
+            if not raw:
+                continue
+            try:
                 root = ET.fromstring(raw)
                 items = root.findall(".//item")
                 if not items:
@@ -580,7 +611,7 @@ class NewsIntelligenceEngine:
                 "category": art.get("category", "Company News"),
             })
 
-        avg_score = (total_score / len(articles)) if articles else 0.0
+        avg_score = (total_score / len(items)) if items else 0.0
         return round(max(-1.0, min(1.0, avg_score)), 3), items
 
     # ── Finnhub Earnings Calendar ───────────────────────────────────────────

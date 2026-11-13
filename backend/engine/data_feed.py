@@ -6,9 +6,12 @@ and estimates market micro-structure (spreads, depth, sentiment).
 import time
 import math
 import random
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
+from requests.adapters import HTTPAdapter
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 from .screener import MASTER_STOCK_UNIVERSE
 
@@ -23,18 +26,29 @@ BASE_PRICES.update({
 
 
 class MarketDataPoint:
-    def __init__(self, symbol: str, price: float, high: float, low: float, open_p: float, prev_close: float, volume: float, timestamp: float, source: str = "simulated"):
+    def __init__(
+        self,
+        symbol: str,
+        price: float,
+        high: Optional[float] = None,
+        low: Optional[float] = None,
+        open_p: Optional[float] = None,
+        prev_close: Optional[float] = None,
+        volume: float = 100000.0,
+        timestamp: Optional[float] = None,
+        source: str = "simulated",
+    ):
         self.symbol = symbol
-        self.price = price
-        self.high = high
-        self.low = low
-        self.open = open_p
-        self.prev_close = prev_close
-        self.volume = volume
-        self.timestamp = timestamp
+        self.price = float(price)
+        self.high = float(price if high is None else high)
+        self.low = float(price if low is None else low)
+        self.open = float(price if open_p is None else open_p)
+        self.prev_close = float(price if prev_close is None else prev_close)
+        self.volume = float(volume)
+        self.timestamp = time.time() if timestamp is None else float(timestamp)
         self.source = source
-        self.change = price - prev_close
-        self.change_pct = (self.change / prev_close) * 100.0 if prev_close > 0 else 0.0
+        self.change = self.price - self.prev_close
+        self.change_pct = (self.change / self.prev_close) * 100.0 if self.prev_close > 0 else 0.0
 
 from .indicators import TechnicalIndicators
 
@@ -51,8 +65,21 @@ class DataFeedManager:
         self.fmp_api_key = fmp_api_key.strip()
         self.alpha_vantage_api_key = alpha_vantage_api_key.strip()
 
+        self._lock = threading.RLock()
+        self._session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=16, pool_maxsize=32)
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
+
         self.history_windows: Dict[str, List[float]] = {}
+        self.high_windows: Dict[str, List[float]] = {}
+        self.low_windows: Dict[str, List[float]] = {}
+        self.open_windows: Dict[str, List[float]] = {}
         self.volume_windows: Dict[str, List[float]] = {}
+        self._bar_versions: Dict[str, int] = {}
+        self._indicator_cache: Dict[str, Tuple[Tuple[Any, ...], Dict[str, Any]]] = {}
+        self._ohlcv_hydrated: Dict[str, float] = {}
+
         self.last_quotes: Dict[str, MarketDataPoint] = {}
         self.simulated_states: Dict[str, Dict[str, float]] = {}
         self._quote_cache: Dict[str, Tuple[float, MarketDataPoint]] = {}
@@ -66,38 +93,229 @@ class DataFeedManager:
         self.api_latency_ms = 12.0
         self.active_feed_source = "finnhub"
         
-        # Initialize historical buffers with synthetic warmup
+        # Initialize historical buffers with synthetic warmup until hydrated from OHLCV API
         for symbol, base_p in BASE_PRICES.items():
             self._warmup_history(symbol, base_p)
 
     def _warmup_history(self, symbol: str, base_price: float):
-        """Generates initial 60 periods of price history for indicator readiness."""
-        prices = []
-        volumes = []
+        """Generates initial 60 periods of OHLCV warmup history until real bars hydrate."""
+        prices: List[float] = []
+        highs: List[float] = []
+        lows: List[float] = []
+        opens: List[float] = []
+        volumes: List[float] = []
         p = max(0.00000001, base_price * (1.0 - random.uniform(0.01, 0.03)))
         precision = 8 if base_price < 0.01 else (4 if base_price < 1.0 else 2)
         for _ in range(60):
+            open_p = round(p, precision)
             p = max(0.00000001, p + p * random.gauss(0.0001, 0.003))
-            prices.append(round(p, precision))
+            close_p = round(p, precision)
+            wick = max(10 ** (-precision), close_p * random.uniform(0.001, 0.004))
+            hi = round(max(open_p, close_p) + wick, precision)
+            lo = round(max(10 ** (-precision), min(open_p, close_p) - wick), precision)
+            opens.append(open_p)
+            prices.append(close_p)
+            highs.append(hi)
+            lows.append(lo)
             volumes.append(round(random.uniform(50000, 250000), 0))
-        self.history_windows[symbol] = prices
-        self.volume_windows[symbol] = volumes
-        self.simulated_states[symbol] = {
-            "price": prices[-1],
-            "drift": random.uniform(-0.0002, 0.0002),
-            "volatility": random.uniform(0.0015, 0.0040)
-        }
-        self.last_quotes[symbol] = MarketDataPoint(
-            symbol=symbol,
-            price=prices[-1],
-            high=max(prices[-10:]),
-            low=min(prices[-10:]),
-            open_p=prices[0],
-            prev_close=prices[0],
-            volume=volumes[-1],
-            timestamp=time.time(),
-            source="warmup"
-        )
+        with self._lock:
+            self.open_windows[symbol] = opens
+            self.history_windows[symbol] = prices
+            self.high_windows[symbol] = highs
+            self.low_windows[symbol] = lows
+            self.volume_windows[symbol] = volumes
+            self._bar_versions[symbol] = self._bar_versions.get(symbol, 0) + 1
+            self.simulated_states[symbol] = {
+                "price": prices[-1],
+                "drift": random.uniform(-0.0002, 0.0002),
+                "volatility": random.uniform(0.0015, 0.0040)
+            }
+            self.last_quotes[symbol] = MarketDataPoint(
+                symbol=symbol,
+                price=prices[-1],
+                high=max(highs[-10:]),
+                low=min(lows[-10:]),
+                open_p=opens[0],
+                prev_close=prices[0],
+                volume=volumes[-1],
+                timestamp=time.time(),
+                source="warmup"
+            )
+
+    def ingest_ohlcv_bars(self, symbol: str, bars: List[Dict[str, Any]], source: str = "ohlcv") -> bool:
+        """
+        Replaces rolling symbol OHLCV buffers with chronological real candle history
+        and bumps the indicator memoization version.
+        """
+        sym = symbol.upper().strip()
+        opens: List[float] = []
+        highs: List[float] = []
+        lows: List[float] = []
+        closes: List[float] = []
+        vols: List[float] = []
+        for b in bars[-120:]:
+            c = float(b.get("close", b.get("c", 0.0)) or 0.0)
+            if c <= 0:
+                continue
+            o = float(b.get("open", b.get("o", c)) or c)
+            h = float(b.get("high", b.get("h", max(o, c))) or max(o, c))
+            l = float(b.get("low", b.get("l", min(o, c))) or min(o, c))
+            v = float(b.get("volume", b.get("v", 100000.0)) or 100000.0)
+            opens.append(o)
+            highs.append(max(h, o, c))
+            lows.append(min(l, o, c))
+            closes.append(c)
+            vols.append(max(1.0, v))
+        if not closes:
+            return False
+        with self._lock:
+            self.open_windows[sym] = opens
+            self.high_windows[sym] = highs
+            self.low_windows[sym] = lows
+            self.history_windows[sym] = closes
+            self.volume_windows[sym] = vols
+            self._bar_versions[sym] = self._bar_versions.get(sym, 0) + 1
+            self._indicator_cache.pop(sym, None)
+            self._ohlcv_hydrated[sym] = time.time()
+            prev_c = closes[-2] if len(closes) >= 2 else closes[-1]
+            existing = self.last_quotes.get(sym)
+            if existing is None or existing.source in ("warmup", "simulated", "ohlcv"):
+                self.last_quotes[sym] = MarketDataPoint(
+                    symbol=sym,
+                    price=closes[-1],
+                    high=highs[-1],
+                    low=lows[-1],
+                    open_p=opens[-1],
+                    prev_close=prev_c,
+                    volume=vols[-1],
+                    timestamp=time.time(),
+                    source=source,
+                )
+        return True
+
+    def record_bar_point(self, symbol: str, quote: MarketDataPoint):
+        """Appends a new bar/tick into rolling OHLCV buffers and invalidates cached indicators."""
+        sym = symbol.upper().strip()
+        with self._lock:
+            if sym not in self.history_windows:
+                self._warmup_history(sym, quote.price)
+            for attr, val in (
+                (self.history_windows, float(quote.price)),
+                (self.high_windows, float(max(quote.high, quote.price))),
+                (self.low_windows, float(min(quote.low, quote.price))),
+                (self.open_windows, float(quote.open)),
+                (self.volume_windows, float(max(1.0, quote.volume))),
+            ):
+                buf = attr.setdefault(sym, [])
+                buf.append(val)
+                if len(buf) > 120:
+                    buf.pop(0)
+            self._bar_versions[sym] = self._bar_versions.get(sym, 0) + 1
+            self._indicator_cache.pop(sym, None)
+            self.last_quotes[sym] = quote
+
+    def _fetch_symbol_ohlcv(self, symbol: str, count: int = 60) -> Tuple[List[Dict[str, float]], str]:
+        """Fetches chronological daily OHLCV bars from Twelve Data, FMP, or Finnhub."""
+        sym = symbol.upper().strip()
+        if self.twelve_data_api_key and len(self.twelve_data_api_key) > 5:
+            try:
+                url = (
+                    f"https://api.twelvedata.com/time_series?symbol={sym}&interval=1day"
+                    f"&outputsize={count}&apikey={self.twelve_data_api_key}"
+                )
+                resp = self._session.get(url, timeout=3.0)
+                if resp.status_code == 200:
+                    vals = resp.json().get("values") or []
+                    if isinstance(vals, list) and len(vals) >= 15:
+                        bars = [
+                            {
+                                "open": float(v.get("open") or 0),
+                                "high": float(v.get("high") or 0),
+                                "low": float(v.get("low") or 0),
+                                "close": float(v.get("close") or 0),
+                                "volume": float(v.get("volume") or 100000.0),
+                            }
+                            for v in reversed(vals)
+                        ]
+                        return bars, "twelve_data"
+            except Exception:
+                pass
+
+        if self.fmp_api_key and len(self.fmp_api_key) > 5:
+            try:
+                url = f"https://financialmodelingprep.com/stable/historical-price-eod/full?symbol={sym}&apikey={self.fmp_api_key}"
+                resp = self._session.get(url, timeout=3.0)
+                if resp.status_code == 200:
+                    rows = resp.json()
+                    if isinstance(rows, dict):
+                        rows = rows.get("historical", [])
+                    if isinstance(rows, list) and len(rows) >= 15:
+                        bars = [
+                            {
+                                "open": float(r.get("open") or 0),
+                                "high": float(r.get("high") or 0),
+                                "low": float(r.get("low") or 0),
+                                "close": float(r.get("close") or 0),
+                                "volume": float(r.get("volume") or 100000.0),
+                            }
+                            for r in reversed(rows[:count])
+                        ]
+                        return bars, "fmp"
+            except Exception:
+                pass
+
+        if self.api_key and len(self.api_key) > 5:
+            try:
+                now_ts = int(time.time())
+                from_ts = now_ts - (count * 2 * 86400)
+                url = f"https://finnhub.io/api/v1/stock/candle?symbol={sym}&resolution=D&from={from_ts}&to={now_ts}&token={self.api_key}"
+                resp = self._session.get(url, timeout=3.0)
+                if resp.status_code == 200:
+                    d = resp.json()
+                    if d.get("s") == "ok" and isinstance(d.get("c"), list) and len(d["c"]) >= 15:
+                        c_arr, h_arr, l_arr, o_arr, v_arr = d["c"], d["h"], d["l"], d["o"], d["v"]
+                        bars = [
+                            {
+                                "open": float(o_arr[i]),
+                                "high": float(h_arr[i]),
+                                "low": float(l_arr[i]),
+                                "close": float(c_arr[i]),
+                                "volume": float(v_arr[i] or 100000.0),
+                            }
+                            for i in range(len(c_arr))
+                        ]
+                        return bars, "finnhub"
+            except Exception:
+                pass
+
+        return [], ""
+
+    def hydrate_historical_ohlcv(self, symbols: List[str], count: int = 60, max_workers: int = 4) -> int:
+        """Concurrently hydrates real OHLCV candle history for symbols missing recent real bars."""
+        now = time.time()
+        targets = [
+            s.upper().strip()
+            for s in dict.fromkeys(symbols)
+            if (now - self._ohlcv_hydrated.get(s.upper().strip(), 0.0)) >= 3600.0
+        ]
+        if not targets:
+            return 0
+        # Only attempt network hydration if at least one candle provider key is configured
+        if not (len(self.twelve_data_api_key) > 5 or len(self.fmp_api_key) > 5 or len(self.api_key) > 5):
+            return 0
+
+        hydrated = 0
+        with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(targets)))) as pool:
+            futs = {pool.submit(self._fetch_symbol_ohlcv, sym, count): sym for sym in targets[:25]}
+            for fut in as_completed(futs):
+                sym = futs[fut]
+                try:
+                    bars, src = fut.result()
+                    if bars and self.ingest_ohlcv_bars(sym, bars, source=src or "ohlcv"):
+                        hydrated += 1
+                except Exception:
+                    pass
+        return hydrated
 
     def set_api_key(self, key: str):
         self.api_key = key.strip()
@@ -114,59 +332,73 @@ class DataFeedManager:
 
     def get_latest_quote(self, symbol: str, max_cache_age_sec: float = 15.0, allow_external: bool = True) -> MarketDataPoint:
         """
-        Fetches live quote with 15s TTL caching and multi-provider failover:
+        Fetches live quote with 15s TTL caching, pooled HTTP connections, and multi-provider failover:
         1. Finnhub
         2. Twelve Data
         3. Financial Modeling Prep (FMP)
         4. Alpha Vantage
-        5. High-fidelity dynamic simulator
+        5. Recent real quote grace cache (< 120s) before simulated fallback
         """
+        sym = symbol.upper().strip()
         now = time.time()
         start_t = time.perf_counter()
 
         # 1. Fast Cache Hit (within TTL)
-        cached = self._quote_cache.get(symbol)
-        if cached:
-            cached_t, cached_quote = cached
-            if (now - cached_t) < max_cache_age_sec:
-                return cached_quote
+        with self._lock:
+            cached = self._quote_cache.get(sym)
+            if cached:
+                cached_t, cached_quote = cached
+                if (now - cached_t) < max_cache_age_sec:
+                    return cached_quote
 
         quote = None
-        
+
         # 2. External multi-provider cascade (only if allow_external is True)
         if allow_external:
-            # Priority 1: Finnhub API (Rate-limited to 1 call per 0.8s)
-            if self.api_key and len(self.api_key) > 5 and (now - self._last_finnhub_call) >= 0.8:
-                self._last_finnhub_call = now
+            # Priority 1: Finnhub API (Thread-safe rate window)
+            run_fh = False
+            if self.api_key and len(self.api_key) > 5:
+                with self._lock:
+                    if (now - self._last_finnhub_call) >= 0.45:
+                        self._last_finnhub_call = now
+                        run_fh = True
+            if run_fh:
                 try:
-                    url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={self.api_key}"
-                    resp = requests.get(url, timeout=1.5)
+                    url = f"https://finnhub.io/api/v1/quote?symbol={sym}&token={self.api_key}"
+                    resp = self._session.get(url, timeout=1.5)
                     if resp.status_code == 200:
                         data = resp.json()
                         c = data.get("c", 0.0)
                         if c and float(c) > 0:
-                            self.api_latency_ms = max(5.0, (time.perf_counter() - start_t) * 1000.0)
+                            self.api_latency_ms = max(1.0, (time.perf_counter() - start_t) * 1000.0)
+                            self.last_api_call_time = now
                             self.active_feed_source = "finnhub"
+                            prev_vol = self.volume_windows.get(sym, [150000.0])[-1]
                             quote = MarketDataPoint(
-                                symbol=symbol,
+                                symbol=sym,
                                 price=float(c),
-                                high=float(data.get("h", c)),
-                                low=float(data.get("l", c)),
-                                open_p=float(data.get("o", c)),
-                                prev_close=float(data.get("pc", c)),
-                                volume=random.uniform(100000, 500000),
-                                timestamp=float(data.get("t", time.time())),
+                                high=float(data.get("h") or c),
+                                low=float(data.get("l") or c),
+                                open_p=float(data.get("o") or c),
+                                prev_close=float(data.get("pc") or c),
+                                volume=prev_vol,
+                                timestamp=float(data.get("t") or time.time()),
                                 source="finnhub"
                             )
                 except Exception:
                     pass
 
             # Priority 2: Twelve Data API (if Finnhub missed or rate-limited)
-            if quote is None and self.twelve_data_api_key and len(self.twelve_data_api_key) > 5 and (now - self._last_twelve_call) >= 0.8:
-                self._last_twelve_call = now
+            run_td = False
+            if quote is None and self.twelve_data_api_key and len(self.twelve_data_api_key) > 5:
+                with self._lock:
+                    if (now - self._last_twelve_call) >= 0.45:
+                        self._last_twelve_call = now
+                        run_td = True
+            if run_td:
                 try:
-                    url = f"https://api.twelvedata.com/quote?symbol={symbol}&apikey={self.twelve_data_api_key}"
-                    resp = requests.get(url, timeout=1.8)
+                    url = f"https://api.twelvedata.com/quote?symbol={sym}&apikey={self.twelve_data_api_key}"
+                    resp = self._session.get(url, timeout=1.8)
                     if resp.status_code == 200:
                         data = resp.json()
                         c_str = data.get("close") or data.get("price")
@@ -177,11 +409,13 @@ class DataFeedManager:
                                 l = float(data.get("low") or c)
                                 o = float(data.get("open") or c)
                                 pc = float(data.get("previous_close") or c)
-                                vol = float(data.get("volume") or random.uniform(100000, 500000))
-                                self.api_latency_ms = max(5.0, (time.perf_counter() - start_t) * 1000.0)
+                                prev_vol = self.volume_windows.get(sym, [150000.0])[-1]
+                                vol = float(data.get("volume") or prev_vol)
+                                self.api_latency_ms = max(1.0, (time.perf_counter() - start_t) * 1000.0)
+                                self.last_api_call_time = now
                                 self.active_feed_source = "twelve_data"
                                 quote = MarketDataPoint(
-                                    symbol=symbol,
+                                    symbol=sym,
                                     price=c,
                                     high=h,
                                     low=l,
@@ -195,11 +429,16 @@ class DataFeedManager:
                     pass
 
             # Priority 3: Financial Modeling Prep (FMP Stable API)
-            if quote is None and self.fmp_api_key and len(self.fmp_api_key) > 5 and (now - self._last_fmp_call) >= 0.8:
-                self._last_fmp_call = now
+            run_fmp = False
+            if quote is None and self.fmp_api_key and len(self.fmp_api_key) > 5:
+                with self._lock:
+                    if (now - self._last_fmp_call) >= 0.45:
+                        self._last_fmp_call = now
+                        run_fmp = True
+            if run_fmp:
                 try:
-                    url = f"https://financialmodelingprep.com/stable/quote?symbol={symbol}&apikey={self.fmp_api_key}"
-                    resp = requests.get(url, timeout=1.8)
+                    url = f"https://financialmodelingprep.com/stable/quote?symbol={sym}&apikey={self.fmp_api_key}"
+                    resp = self._session.get(url, timeout=1.8)
                     if resp.status_code == 200:
                         data_list = resp.json()
                         if isinstance(data_list, list) and len(data_list) > 0:
@@ -210,11 +449,13 @@ class DataFeedManager:
                                 l = float(row.get("dayLow") or c)
                                 o = float(row.get("open") or c)
                                 pc = float(row.get("previousClose") or c)
-                                vol = float(row.get("volume") or random.uniform(100000, 500000))
-                                self.api_latency_ms = max(5.0, (time.perf_counter() - start_t) * 1000.0)
+                                prev_vol = self.volume_windows.get(sym, [150000.0])[-1]
+                                vol = float(row.get("volume") or prev_vol)
+                                self.api_latency_ms = max(1.0, (time.perf_counter() - start_t) * 1000.0)
+                                self.last_api_call_time = now
                                 self.active_feed_source = "fmp"
                                 quote = MarketDataPoint(
-                                    symbol=symbol,
+                                    symbol=sym,
                                     price=c,
                                     high=h,
                                     low=l,
@@ -228,11 +469,16 @@ class DataFeedManager:
                     pass
 
             # Priority 4: Alpha Vantage GLOBAL_QUOTE
-            if quote is None and self.alpha_vantage_api_key and len(self.alpha_vantage_api_key) > 5 and (now - self._last_av_call) >= 1.2:
-                self._last_av_call = now
+            run_av = False
+            if quote is None and self.alpha_vantage_api_key and len(self.alpha_vantage_api_key) > 5:
+                with self._lock:
+                    if (now - self._last_av_call) >= 0.9:
+                        self._last_av_call = now
+                        run_av = True
+            if run_av:
                 try:
-                    url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={self.alpha_vantage_api_key}"
-                    resp = requests.get(url, timeout=2.0)
+                    url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={sym}&apikey={self.alpha_vantage_api_key}"
+                    resp = self._session.get(url, timeout=2.0)
                     if resp.status_code == 200:
                         gq = resp.json().get("Global Quote", {})
                         p_str = gq.get("05. price")
@@ -243,11 +489,13 @@ class DataFeedManager:
                                 l = float(gq.get("04. low") or c)
                                 o = float(gq.get("02. open") or c)
                                 pc = float(gq.get("08. previous close") or c)
-                                vol = float(gq.get("06. volume") or random.uniform(100000, 500000))
-                                self.api_latency_ms = max(5.0, (time.perf_counter() - start_t) * 1000.0)
+                                prev_vol = self.volume_windows.get(sym, [150000.0])[-1]
+                                vol = float(gq.get("06. volume") or prev_vol)
+                                self.api_latency_ms = max(1.0, (time.perf_counter() - start_t) * 1000.0)
+                                self.last_api_call_time = now
                                 self.active_feed_source = "alpha_vantage"
                                 quote = MarketDataPoint(
-                                    symbol=symbol,
+                                    symbol=sym,
                                     price=c,
                                     high=h,
                                     low=l,
@@ -260,32 +508,130 @@ class DataFeedManager:
                 except Exception:
                     pass
 
-
-        # 6. Fallback to existing recent quote if available, or high-fidelity simulation
+        # 6. Graceful fallback: preserve recent real quote (< 120s) before simulated tick
         if quote is None:
-            if cached:
+            if cached and (cached[1].source not in ("simulated", "warmup") or not allow_external) and (now - cached[0]) < 120.0:
                 return cached[1]
-            self.api_latency_ms = max(4.0, (time.perf_counter() - start_t) * 1000.0 + random.uniform(2.0, 10.0))
+            self.api_latency_ms = max(1.0, (time.perf_counter() - start_t) * 1000.0)
             self.active_feed_source = "simulated"
-            quote = self._generate_simulated_tick(symbol)
+            quote = self._generate_simulated_tick(sym)
 
-        # Cache valid quote
-        self._quote_cache[symbol] = (now, quote)
-
-        # Update rolling buffer
-        if symbol not in self.history_windows:
-            self._warmup_history(symbol, quote.price)
-        
-        self.history_windows[symbol].append(quote.price)
-        if len(self.history_windows[symbol]) > 120:
-            self.history_windows[symbol].pop(0)
-            
-        self.volume_windows[symbol].append(quote.volume)
-        if len(self.volume_windows[symbol]) > 120:
-            self.volume_windows[symbol].pop(0)
-
-        self.last_quotes[symbol] = quote
+        # Cache valid quote and append bar point
+        with self._lock:
+            self._quote_cache[sym] = (now, quote)
+        self.record_bar_point(sym, quote)
         return quote
+
+    def fetch_quotes_batch(self, symbols: List[str], max_cache_age_sec: float = 15.0) -> Dict[str, MarketDataPoint]:
+        """
+        Pre-fetches quotes concurrently using multi-symbol batch endpoints (FMP / TwelveData)
+        and bounded parallel Finnhub requests so the analysis loop avoids sequential blocking.
+        """
+        results: Dict[str, MarketDataPoint] = {}
+        now = time.time()
+        unique_syms = [s.upper().strip() for s in dict.fromkeys(symbols) if s and s.strip()]
+        uncached: List[str] = []
+        with self._lock:
+            for sym in unique_syms:
+                cached = self._quote_cache.get(sym)
+                if cached and (now - cached[0]) < max_cache_age_sec:
+                    results[sym] = cached[1]
+                else:
+                    uncached.append(sym)
+
+        if not uncached:
+            return results
+
+        # Native batch fetch via FMP (up to 20 per call)
+        if self.fmp_api_key and len(self.fmp_api_key) > 5 and uncached:
+            still_needed: List[str] = []
+            for i in range(0, len(uncached), 20):
+                chunk = uncached[i:i + 20]
+                try:
+                    joined = ",".join(chunk)
+                    url = f"https://financialmodelingprep.com/stable/quote?symbol={joined}&apikey={self.fmp_api_key}"
+                    resp = self._session.get(url, timeout=2.5)
+                    if resp.status_code == 200 and isinstance(resp.json(), list):
+                        for row in resp.json():
+                            s = str(row.get("symbol") or "").upper().strip()
+                            c = float(row.get("price") or 0.0)
+                            if s and c > 0:
+                                q = MarketDataPoint(
+                                    symbol=s,
+                                    price=c,
+                                    high=float(row.get("dayHigh") or c),
+                                    low=float(row.get("dayLow") or c),
+                                    open_p=float(row.get("open") or c),
+                                    prev_close=float(row.get("previousClose") or c),
+                                    volume=float(row.get("volume") or 150000.0),
+                                    timestamp=now,
+                                    source="fmp"
+                                )
+                                results[s] = q
+                                with self._lock:
+                                    self._quote_cache[s] = (now, q)
+                                self.record_bar_point(s, q)
+                except Exception:
+                    pass
+                for s in chunk:
+                    if s not in results:
+                        still_needed.append(s)
+            uncached = still_needed
+
+        # Native batch fetch via Twelve Data (up to 8 per call)
+        if self.twelve_data_api_key and len(self.twelve_data_api_key) > 5 and uncached:
+            still_needed = []
+            for i in range(0, len(uncached), 8):
+                chunk = uncached[i:i + 8]
+                try:
+                    joined = ",".join(chunk)
+                    url = f"https://api.twelvedata.com/quote?symbol={joined}&apikey={self.twelve_data_api_key}"
+                    resp = self._session.get(url, timeout=2.5)
+                    if resp.status_code == 200:
+                        payload = resp.json()
+                        items = {chunk[0]: payload} if (len(chunk) == 1 and "close" in payload) else payload
+                        if isinstance(items, dict):
+                            for s_key, row in items.items():
+                                if not isinstance(row, dict):
+                                    continue
+                                c_str = row.get("close") or row.get("price")
+                                if c_str:
+                                    c = float(c_str)
+                                    if c > 0:
+                                        s = s_key.upper().strip()
+                                        q = MarketDataPoint(
+                                            symbol=s,
+                                            price=c,
+                                            high=float(row.get("high") or c),
+                                            low=float(row.get("low") or c),
+                                            open_p=float(row.get("open") or c),
+                                            prev_close=float(row.get("previous_close") or c),
+                                            volume=float(row.get("volume") or 150000.0),
+                                            timestamp=now,
+                                            source="twelve_data"
+                                        )
+                                        results[s] = q
+                                        with self._lock:
+                                            self._quote_cache[s] = (now, q)
+                                        self.record_bar_point(s, q)
+                except Exception:
+                    pass
+                for s in chunk:
+                    if s not in results:
+                        still_needed.append(s)
+            uncached = still_needed
+
+        # Bounded parallel fallback for any remaining symbols (e.g. Finnhub / simulated)
+        if uncached:
+            with ThreadPoolExecutor(max_workers=min(4, len(uncached))) as pool:
+                futs = {pool.submit(self.get_latest_quote, sym, max_cache_age_sec, True): sym for sym in uncached[:20]}
+                for fut in as_completed(futs):
+                    sym = futs[fut]
+                    try:
+                        results[sym] = fut.result()
+                    except Exception:
+                        pass
+        return results
 
 
     def _generate_simulated_tick(self, symbol: str) -> MarketDataPoint:
@@ -323,21 +669,43 @@ class DataFeedManager:
             timestamp=time.time()
         )
 
-    def get_technical_indicators(self, symbol: str) -> Dict[str, float]:
+    def get_technical_indicators(self, symbol: str) -> Dict[str, Any]:
         """
         Calculates comprehensive quantitative indicators based on cinar/indicator:
         EMA(9), EMA(21), RSI(14), MACD, Bollinger Bands, ATR, ADX, SuperTrend, VWAP, MFI, and Keltner Channels.
+        Uses real OHLCV candle buffers when available and memoizes by (bar_version, bar_shape).
         """
-        prices = np.array(self.history_windows.get(symbol, [100.0]))
-        volumes = np.array(self.volume_windows.get(symbol, [100000.0]))
-        
-        # Synthetic highs and lows from rolling prices
-        highs = prices * 1.004
-        lows = prices * 0.996
+        sym = symbol.upper().strip()
+        with self._lock:
+            prices = np.array(self.history_windows.get(sym, [100.0]), dtype=float)
+            volumes = np.array(self.volume_windows.get(sym, [100000.0]), dtype=float)
+            h_win = self.high_windows.get(sym)
+            l_win = self.low_windows.get(sym)
+            o_win = self.open_windows.get(sym)
+            bar_ver = self._bar_versions.get(sym, 0)
+
+        highs = np.array(h_win, dtype=float) if (h_win is not None and len(h_win) == len(prices)) else (prices * 1.004)
+        lows = np.array(l_win, dtype=float) if (l_win is not None and len(l_win) == len(prices)) else (prices * 0.996)
+        opens = np.array(o_win, dtype=float) if (o_win is not None and len(o_win) == len(prices)) else (
+            np.concatenate(([prices[0]], prices[:-1])) if len(prices) > 0 else np.array([100.0])
+        )
+
+        cache_sig = (
+            bar_ver,
+            len(prices),
+            float(prices[-1]) if len(prices) > 0 else 0.0,
+            float(highs[-1]) if len(highs) > 0 else 0.0,
+            float(lows[-1]) if len(lows) > 0 else 0.0,
+            float(volumes[-1]) if len(volumes) > 0 else 0.0,
+        )
+        with self._lock:
+            cached = self._indicator_cache.get(sym)
+            if cached and cached[0] == cache_sig:
+                return cached[1]
 
         if len(prices) < 20:
             p = float(prices[-1])
-            return {
+            short_res = {
                 "ema_9": p,
                 "ema_21": p,
                 "rsi_14": 50.0,
@@ -393,6 +761,9 @@ class DataFeedManager:
                 "wyckoff_sl": round(p * 0.98, 2),
                 "wyckoff_data": {}
             }
+            with self._lock:
+                self._indicator_cache[sym] = (cache_sig, short_res)
+            return short_res
 
         # 1. EMAs & MACD
         ema_9 = TechnicalIndicators.calc_ema(prices, 9)
@@ -469,7 +840,6 @@ class DataFeedManager:
         )
 
         # 16. je-suis-tm/quant-trading: Heikin-Ashi Candlestick Smoothing
-        opens = np.concatenate(([prices[0]], prices[:-1]))
         ha_res = TechnicalIndicators.calc_heikin_ashi(
             opens=opens,
             highs=highs,
@@ -483,10 +853,10 @@ class DataFeedManager:
             volumes=volumes,
             highs=highs,
             lows=lows,
-            symbol=symbol
+            symbol=sym
         )
 
-        return {
+        result = {
             "ema_9": round(ema_9, 2),
             "ema_21": round(ema_21, 2),
             "rsi_14": round(float(rsi), 2),
@@ -542,6 +912,9 @@ class DataFeedManager:
             "wyckoff_sl": wyckoff_res.get("trade_setup", {}).get("stop_loss", round(prices[-1] * 0.98, 2)),
             "wyckoff_data": wyckoff_res
         }
+        with self._lock:
+            self._indicator_cache[sym] = (cache_sig, result)
+        return result
 
     def get_news_sentiment(self, symbol: str) -> float:
         """
@@ -559,7 +932,7 @@ class DataFeedManager:
         if self.api_key and len(self.api_key) > 5 and not self._finnhub_sentiment_disabled:
             try:
                 url = f"https://finnhub.io/api/v1/news-sentiment?symbol={symbol}&token={self.api_key}"
-                resp = requests.get(url, timeout=1.0)
+                resp = self._session.get(url, timeout=1.0)
                 if resp.status_code == 200:
                     data = resp.json()
                     bullish_pct = data.get("sentiment", {}).get("bullishPercent", 0.5)
@@ -572,7 +945,7 @@ class DataFeedManager:
             except Exception:
                 pass
         
-        # 2. Mathematical momentum-derived sentiment
+        # 2. Mathematical momentum-derived sentiment (deterministic)
         hist = self.history_windows.get(symbol, [100.0])
         if len(hist) > 10:
             denom = hist[-10]
@@ -580,10 +953,10 @@ class DataFeedManager:
                 ret = (hist[-1] - denom) / denom
             else:
                 ret = 0.0
-            sentiment = math.tanh(ret * 20.0) + random.uniform(-0.05, 0.05)
+            sentiment = math.tanh(ret * 20.0)
             score = round(max(-1.0, min(1.0, sentiment)), 2)
         else:
-            score = 0.05
+            score = 0.0
 
         self._sentiment_cache[symbol] = (now, score)
         return score

@@ -85,6 +85,7 @@ class SimulatedBroker:
             existing_pos = self.positions.get(sym)
             horizon = getattr(existing_pos, "horizon", "swing")
             max_hold_until = getattr(existing_pos, "max_hold_until", None)
+            contributing_models = dict(getattr(existing_pos, "contributing_models", {}) or {})
 
             # Preserve tight stop-loss if local stop was tighter than eToro's -50% default
             if existing_pos and existing_pos.stop_loss > 0:
@@ -124,7 +125,8 @@ class SimulatedBroker:
                 entry_time=open_time,
                 max_hold_until=max_hold_until,
                 etoro_position_ids=all_pos_ids,
-                rationale="Active Live eToro Holding"
+                rationale="Active Live eToro Holding",
+                contributing_models=contributing_models
             )
         self.positions = live_positions
 
@@ -348,13 +350,18 @@ class SimulatedBroker:
             if pos.unrealized_pnl_pct <= -abs(active_max_pct):
                 should_close = True
                 reason = f"Live Stop Enforced: Max loss breach ({pos.unrealized_pnl_pct:.2f}% <= -{active_max_pct:.2f}%)"
-            elif pos.stop_loss > 0:
-                if pos.direction == "LONG" and pos.current_price <= pos.stop_loss:
-                    should_close = True
-                    reason = f"Live Stop Enforced: Price {pos.current_price:.2f} breached SL {pos.stop_loss:.2f}"
-                elif pos.direction == "SHORT" and pos.current_price >= pos.stop_loss:
-                    should_close = True
-                    reason = f"Live Stop Enforced: Price {pos.current_price:.2f} breached SL {pos.stop_loss:.2f}"
+            elif pos.stop_loss > 0 and (
+                (pos.direction == "LONG" and pos.current_price <= pos.stop_loss) or
+                (pos.direction == "SHORT" and pos.current_price >= pos.stop_loss)
+            ):
+                should_close = True
+                reason = f"Live Stop Enforced: Price {pos.current_price:.2f} breached SL {pos.stop_loss:.2f}"
+            elif pos.take_profit > 0 and (
+                (pos.direction == "LONG" and pos.current_price >= pos.take_profit) or
+                (pos.direction == "SHORT" and pos.current_price <= pos.take_profit)
+            ):
+                should_close = True
+                reason = f"Live Take Profit Enforced: Price {pos.current_price:.2f} reached TP {pos.take_profit:.2f}"
 
             if should_close:
                 inst_id = etoro_client.resolve_instrument_id(sym)
@@ -701,8 +708,24 @@ class SimulatedBroker:
             raw_trades = state.get("trade_ledger", [])
             self.trade_ledger = [TradeRecord(**t) for t in raw_trades]
 
-            if "learner_weights" in state:
-                self.learner.weights = state["learner_weights"]
+            if "learner_weights" in state and isinstance(state["learner_weights"], dict):
+                loaded_w = dict(state["learner_weights"])
+                defaults = {
+                    "momentum_trend": 0.15,
+                    "mean_reversion": 0.14,
+                    "volatility_breakout": 0.14,
+                    "pattern_recognition": 0.14,
+                    "wyckoff_engine": 0.15,
+                    "news_sentiment": 0.14,
+                    "ai_committee": 0.14,
+                }
+                if any(k not in loaded_w for k in defaults):
+                    for k, v in defaults.items():
+                        loaded_w.setdefault(k, v)
+                    total_w = sum(loaded_w.values())
+                    if total_w > 0:
+                        loaded_w = {k: round(v / total_w, 4) for k, v in loaded_w.items()}
+                self.learner.weights = loaded_w
             if "mistake_history" in state and isinstance(state["mistake_history"], list):
                 self.learner.mistake_history = [MistakeLogEntry(**m) for m in state["mistake_history"] if isinstance(m, dict)]
             if "total_trades_evaluated" in state:

@@ -18,20 +18,22 @@ class MetricsModule:
 
     def compute_all(self, market_indicators: Dict[str, float], actual_latency_ms: float = 12.0) -> Dict[str, float]:
         """
-        Computes the complete suite of execution telemetry metrics.
+        Computes deterministic execution telemetry metrics driven directly by
+        real volatility/ATR/volume ratios and measured HTTP latency.
         """
         t = time.time() - self.start_time
-        
-        # Real market volatility factor (normalized 0 to 1)
-        vol_std = market_indicators.get("volatility_std", 1.0)
-        price_ref = market_indicators.get("bb_mid", 100.0)
-        vol_factor = clamp(0.0, 1.0, (vol_std / max(1.0, price_ref)) * 50.0)
-        
-        risk = self.model_risk(t, vol_factor)
-        impact = self.model_impact(t, vol_factor)
+
+        vol_std = float(market_indicators.get("volatility_std", 1.0))
+        price_ref = max(1.0, float(market_indicators.get("bb_mid", 100.0)))
+        atr = float(market_indicators.get("atr", vol_std))
+        vol_surge = float(market_indicators.get("volume_surge", 1.0))
+        vol_factor = clamp(0.0, 1.0, max(vol_std / price_ref, atr / price_ref) * 20.0)
+
+        risk = self.model_risk(t, vol_factor, vol_surge)
+        impact = self.model_impact(t, vol_factor, vol_surge)
         slippage = self.model_slippage(t, vol_factor)
         latency = self.model_latency(t, actual_latency_ms)
-        
+
         self._last_metrics = {
             "risk": round(risk, 4),
             "impact": round(impact, 4),
@@ -40,35 +42,33 @@ class MetricsModule:
         }
         return self._last_metrics
 
-    def model_risk(self, t: float, market_vol: float = 0.0) -> float:
-        """
-        risk = clamp(0, 1, 0.35 + sin(t/8)*0.25 + noise + market_vol_offset)
-        """
-        noise = random.uniform(-0.04, 0.04)
-        base = 0.35 + math.sin(t / 8.0) * 0.25 + noise + (market_vol * 0.15)
+    def model_risk(self, t: float, market_vol: float = 0.0, volume_surge: float = 1.0) -> float:
+        """Deterministic volatility & volume-spike execution risk factor in [0, 1]."""
+        surge_pen = max(0.0, volume_surge - 1.5) * 0.08
+        base = 0.08 + (market_vol * 0.72) + surge_pen
         return clamp(0.0, 1.0, base)
 
-    def model_impact(self, t: float, market_vol: float = 0.0) -> float:
-        """
-        impact = clamp(0, 1, 0.40 + cos(t/10)*0.20 + noise + footprint)
-        """
-        noise = random.uniform(-0.03, 0.03)
-        base = 0.40 + math.cos(t / 10.0) * 0.20 + noise + (market_vol * 0.10)
+    def model_impact(self, t: float, market_vol: float = 0.0, volume_surge: float = 1.0) -> float:
+        """Deterministic market impact estimate in [0, 1] reflecting thin-volume vulnerability."""
+        thin_liquidity = max(0.0, 1.0 - volume_surge) * 0.25
+        base = 0.05 + (market_vol * 0.55) + thin_liquidity
         return clamp(0.0, 1.0, base)
 
     def model_slippage(self, t: float, market_vol: float = 0.0) -> float:
-        """
-        slippage = clamp(0, 1, 0.30 + sin(t/6)*0.30 + noise)
-        """
-        noise = random.uniform(-0.03, 0.03)
-        base = 0.30 + math.sin(t / 6.0) * 0.30 + noise + (market_vol * 0.12)
+        """Deterministic expected slippage score in [0, 1] proportional to market volatility."""
+        base = 0.04 + (market_vol * 0.60)
         return clamp(0.0, 1.0, base)
 
     def model_latency(self, t: float, real_telemetry_ms: float = 12.0) -> float:
         """
-        latency = max(1, 12 + sin(t/4)*6 + noise) blended with real API ping
+        Normalizes real HTTP round-trip telemetry against the AnomalyModule >20ms SLA:
+        - <= 800ms healthy REST calls map monotonically to [2.0, 17.0] ms score
+        - 800ms..1500ms sluggish calls ramp linearly to [17.0, 20.0]
+        - > 1500ms stalled/degraded calls breach >20.0 to trigger AnomalyModule.latency_spike
         """
-        noise = random.uniform(-1.5, 1.5)
-        sim_val = 12.0 + math.sin(t / 4.0) * 6.0 + noise
-        blended = (sim_val * 0.4) + (real_telemetry_ms * 0.6)
-        return max(1.0, blended)
+        ms = max(0.0, float(real_telemetry_ms))
+        if ms <= 800.0:
+            return round(2.0 + (ms / 800.0) * 15.0, 2)
+        if ms <= 1500.0:
+            return round(17.0 + ((ms - 800.0) / 700.0) * 3.0, 2)
+        return round(20.0 + (ms - 1500.0) / 100.0, 2)

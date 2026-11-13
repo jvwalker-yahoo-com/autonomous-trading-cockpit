@@ -15,7 +15,7 @@ ETORO_EXCHANGES_UK: Dict[str, Dict[str, Any]] = {
         "open_time_uk": (14, 30), # 14:30 UK (2:30 PM)
         "close_time_uk": (21, 0),  # 21:00 UK (9:00 PM)
         "daily_break": "21:00 - 14:30 UK",
-        "symbols": ["MARA", "IREN", "SOXL", "TQQQ", "MSFT", "META", "APLD", "SPY", "QQQ", "BULL", "URA", "HOOD", "SOFI", "NVDA", "AAPL", "TSLA", "AMZN", "GOOGL"]
+        "symbols": ["MARA", "IREN", "SOXL", "TQQQ", "MSFT", "META", "APLD", "SPY", "QQQ", "BULL", "URA", "HOOD", "SOFI", "NVDA", "AAPL", "TSLA", "AMZN", "GOOGL", "BA"]
     },
     "LSE": {
         "name": "London Stock Exchange (LSE)",
@@ -25,7 +25,7 @@ ETORO_EXCHANGES_UK: Dict[str, Dict[str, Any]] = {
         "open_time_uk": (8, 0),
         "close_time_uk": (16, 30),
         "daily_break": "16:30 - 08:00 UK",
-        "symbols": [".L", "LSE", "LON", "VUKE", "ISF", "VMID", "VUSA", "VOD", "LLOY", "BP", "SHEL", "AZN", "RR", "BARC", "GLEN", "GSK", "ULVR", "BATS", "NG", "RIO", "BA"]
+        "symbols": [".L", "LSE", "LON", "VUKE", "ISF", "VMID", "VUSA", "VOD", "LLOY", "BP", "SHEL", "AZN", "RR", "BARC", "GLEN", "GSK", "ULVR", "BATS", "NG", "RIO", "BA.L"]
     },
     "EUROPE_EQUITIES": {
         "name": "Frankfurt / Euronext / Madrid",

@@ -77,46 +77,92 @@ class TechnicalIndicators:
             tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
             tr_list.append(max(0.001, tr))
 
-        # Wilder smoothing
-        window = min(period, len(tr_list))
-        smoothed_tr = np.mean(tr_list[-window:])
-        smoothed_plus = np.mean(plus_dm[-window:])
-        smoothed_minus = np.mean(minus_dm[-window:])
+        # True Wilder smoothing for DI and ADX across full lookback
+        if len(tr_list) < period:
+            return 22.0, 20.0, 20.0
 
-        if smoothed_tr == 0:
+        smoothed_tr = float(sum(tr_list[:period]))
+        smoothed_plus = float(sum(plus_dm[:period]))
+        smoothed_minus = float(sum(minus_dm[:period]))
+
+        if smoothed_tr <= 1e-9:
             return 20.0, 20.0, 20.0
 
+        dx_series: List[float] = []
         plus_di = (smoothed_plus / smoothed_tr) * 100.0
         minus_di = (smoothed_minus / smoothed_tr) * 100.0
         di_sum = plus_di + minus_di
+        dx_series.append((abs(plus_di - minus_di) / di_sum * 100.0) if di_sum > 0 else 0.0)
 
-        dx = (abs(plus_di - minus_di) / di_sum * 100.0) if di_sum > 0 else 0.0
-        adx = dx * 0.4 + 20.0 * 0.6 # Smoothed estimate
+        for k in range(period, len(tr_list)):
+            smoothed_tr = smoothed_tr - (smoothed_tr / period) + tr_list[k]
+            smoothed_plus = smoothed_plus - (smoothed_plus / period) + plus_dm[k]
+            smoothed_minus = smoothed_minus - (smoothed_minus / period) + minus_dm[k]
+            if smoothed_tr > 1e-9:
+                plus_di = (smoothed_plus / smoothed_tr) * 100.0
+                minus_di = (smoothed_minus / smoothed_tr) * 100.0
+            else:
+                plus_di, minus_di = 0.0, 0.0
+            di_sum = plus_di + minus_di
+            dx_series.append((abs(plus_di - minus_di) / di_sum * 100.0) if di_sum > 0 else 0.0)
+
+        if len(dx_series) >= period:
+            adx = float(np.mean(dx_series[:period]))
+            for dx_val in dx_series[period:]:
+                adx = ((adx * (period - 1)) + dx_val) / period
+        else:
+            adx = float(np.mean(dx_series)) if dx_series else 20.0
+
         return round(float(adx), 2), round(float(plus_di), 2), round(float(minus_di), 2)
 
     @staticmethod
     def calc_supertrend(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 10, multiplier: float = 3.0) -> Tuple[float, int]:
         """
-        SuperTrend indicator algorithm from cinar/indicator.
+        Stateful iterative SuperTrend indicator algorithm (cinar/indicator).
+        Bands ratchet strictly in trend direction and flip only on close crossing the trailing stop band.
         Returns: (supertrend_value, trend_direction: +1 for Bullish, -1 for Bearish)
         """
-        if len(closes) < period:
-            return float(closes[-1]), 1
+        n = len(closes)
+        if n < period or len(highs) != n or len(lows) != n:
+            return (float(closes[-1]) if n > 0 else 0.0), 1
 
-        atr = TechnicalIndicators.calc_atr(highs, lows, closes, period)
-        hl2 = (highs[-1] + lows[-1]) / 2.0
-        upper_basic = hl2 + (multiplier * atr)
-        lower_basic = hl2 - (multiplier * atr)
+        tr = np.empty(n, dtype=float)
+        tr[0] = float(highs[0] - lows[0])
+        for i in range(1, n):
+            h_l = float(highs[i] - lows[i])
+            h_pc = abs(float(highs[i] - closes[i - 1]))
+            l_pc = abs(float(lows[i] - closes[i - 1]))
+            tr[i] = max(h_l, h_pc, l_pc)
 
-        close = closes[-1]
-        prev_close = closes[-2] if len(closes) > 1 else close
+        atr_arr = np.zeros(n, dtype=float)
+        i0 = period - 1
+        atr_arr[i0] = float(np.mean(tr[:period]))
+        for i in range(period, n):
+            atr_arr[i] = ((atr_arr[i - 1] * (period - 1)) + tr[i]) / period
 
-        if close > upper_basic:
-            return round(lower_basic, 2), 1 # Bullish
-        elif close < lower_basic:
-            return round(upper_basic, 2), -1 # Bearish
-        else:
-            return round(lower_basic if close >= prev_close else upper_basic, 2), (1 if close >= prev_close else -1)
+        hl2_0 = (float(highs[i0]) + float(lows[i0])) / 2.0
+        final_upper = hl2_0 + (multiplier * atr_arr[i0])
+        final_lower = hl2_0 - (multiplier * atr_arr[i0])
+        trend = 1 if closes[i0] >= closes[0] else -1
+
+        for i in range(i0 + 1, n):
+            hl2 = (float(highs[i]) + float(lows[i])) / 2.0
+            basic_upper = hl2 + (multiplier * atr_arr[i])
+            basic_lower = hl2 - (multiplier * atr_arr[i])
+            prev_close = float(closes[i - 1])
+
+            final_upper = basic_upper if (basic_upper < final_upper or prev_close > final_upper) else final_upper
+            final_lower = basic_lower if (basic_lower > final_lower or prev_close < final_lower) else final_lower
+
+            close = float(closes[i])
+            if trend == 1 and close < final_lower:
+                trend = -1
+            elif trend == -1 and close > final_upper:
+                trend = 1
+
+        st_val = final_lower if trend == 1 else final_upper
+        prec = 4 if st_val < 1.0 else 2
+        return round(float(st_val), prec), int(trend)
 
     @staticmethod
     def calc_vwap(prices: np.ndarray, volumes: np.ndarray) -> float:

@@ -14,10 +14,12 @@ import uuid
 import random
 import json
 import logging
+import threading
+from urllib.parse import quote, unquote_plus
 import requests
 import asyncio
 import concurrent.futures
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, Set, Union
 from dotenv import load_dotenv
 
 # Ensure environment variables are loaded
@@ -205,6 +207,10 @@ class EToroClient:
         self._last_auth_error: str = ""
         self._recent_order_timestamps: Dict[str, float] = {}
         self._order_duplicate_window_sec: float = 15.0
+        self._watchlist_lock = threading.RLock()
+        self._watchlist_id_cache: Dict[str, Union[int, str]] = {}
+        self._watchlist_meta_cache: Dict[str, Dict[str, Any]] = {}
+        self._watchlist_synced_items: Dict[str, Set[int]] = {}
 
     def is_in_auth_cooldown(self) -> bool:
         """Returns True if client is in cooldown following an HTTP 401 Unauthorized rejection."""
@@ -986,78 +992,216 @@ class EToroClient:
     # ETORO WATCHLIST MANAGEMENT & SYNC
     # =========================================================================
 
+    @staticmethod
+    def _normalize_watchlist_name(name: Optional[str]) -> str:
+        """Normalizes watchlist names across space/+/%20 encoding and case variants."""
+        if not name:
+            return ""
+        return " ".join(unquote_plus(str(name)).split()).lower()
+
+    @staticmethod
+    def _coerce_watchlist_id(raw_id: Any) -> Optional[Union[int, str]]:
+        """Preserves numeric watchlist IDs as int and UUID/alphanumeric IDs as str."""
+        if raw_id is None or isinstance(raw_id, bool):
+            return None
+        s = str(raw_id).strip()
+        if not s:
+            return None
+        return int(s) if s.isdigit() else s
+
+    @classmethod
+    def _extract_watchlist_id(cls, data: Any) -> Optional[Union[int, str]]:
+        """Extracts watchlistId from flat or WatchlistsResponse-nested eToro payloads."""
+        if isinstance(data, (int, str)) and not isinstance(data, bool):
+            return cls._coerce_watchlist_id(data)
+        if isinstance(data, list) and data:
+            return cls._extract_watchlist_id(data[0])
+        if isinstance(data, dict):
+            for key in ("WatchlistID", "watchlistId", "watchlist_id", "id"):
+                val = cls._coerce_watchlist_id(data.get(key))
+                if val is not None:
+                    return val
+            nested = data.get("watchlists")
+            if isinstance(nested, list) and nested:
+                return cls._extract_watchlist_id(nested[0])
+        return None
+
+    @staticmethod
+    def _extract_watchlist_item_ids(wl: Dict[str, Any]) -> Set[int]:
+        """Extracts already-populated instrument IDs from a WatchlistResponse payload."""
+        items = wl.get("items") or wl.get("WatchlistItems") or []
+        result: Set[int] = set()
+        if isinstance(items, list):
+            for it in items:
+                if isinstance(it, dict):
+                    raw = it.get("itemId") or it.get("ItemId") or it.get("instrumentId") or it.get("id")
+                    if raw is not None and str(raw).strip().isdigit():
+                        result.add(int(str(raw).strip()))
+        return result
+
+    @staticmethod
+    def _extract_error_reason_and_message(status_code: int, data: Any) -> Tuple[str, str]:
+        if isinstance(data, dict):
+            exc = data.get("exception") if isinstance(data.get("exception"), dict) else {}
+            reason = str(exc.get("reason") or data.get("reason") or data.get("errorCode") or "").lower()
+            msg = str(exc.get("message") or data.get("message") or "").lower()
+            return reason, msg
+        return "", ""
+
+    @classmethod
+    def _is_duplicate_watchlist_error(cls, status_code: int, data: Any) -> bool:
+        if status_code not in (400, 409, 422):
+            return False
+        reason, msg = cls._extract_error_reason_and_message(status_code, data)
+        return "duplicate" in reason or "already exists" in msg
+
+    @classmethod
+    def _is_invalid_watchlist_id_error(cls, status_code: int, data: Any) -> bool:
+        if status_code not in (400, 404, 422):
+            return False
+        reason, msg = cls._extract_error_reason_and_message(status_code, data)
+        return "invalidwatchlistid" in reason or ("watchlist" in msg and "not found" in msg)
+
+    def _record_watchlist_cache(
+        self,
+        name: str,
+        wl_id: Union[int, str],
+        wl_data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        norm_target = self._normalize_watchlist_name(name)
+        if norm_target:
+            self._watchlist_id_cache[norm_target] = wl_id
+        key = str(wl_id)
+        if isinstance(wl_data, dict):
+            self._watchlist_meta_cache[key] = wl_data
+            self._watchlist_synced_items.setdefault(key, set()).update(self._extract_watchlist_item_ids(wl_data))
+        else:
+            self._watchlist_synced_items.setdefault(key, set())
+
+    def _lookup_watchlist_by_name(self, name: str) -> Tuple[Dict[str, Any], Optional[Union[int, str]]]:
+        norm_target = self._normalize_watchlist_name(name)
+        for wl in self.get_user_watchlists():
+            wl_name = wl.get("Name") or wl.get("name")
+            if wl_name and self._normalize_watchlist_name(wl_name) == norm_target:
+                wl_id = self._extract_watchlist_id(wl)
+                if wl_id is not None:
+                    return wl, wl_id
+        return {}, None
+
     def get_user_watchlists(self) -> List[Dict[str, Any]]:
         """Fetches all watchlists belonging to the authenticated eToro account."""
         if not self.is_configured():
             return []
-        for ep in ("/api/v1/watchlists/user", "/api/v1/user/watchlists", "/api/v1/watchlists"):
-            success, code, data = self._request("GET", ep, suppress_error_log=True)
-            if success:
-                if isinstance(data, list):
-                    return data
-                elif isinstance(data, dict):
-                    return data.get("watchlists", data.get("items", [data]))
+        success, code, data = self._request("GET", "/api/v1/watchlists", suppress_error_log=True)
+        if not success:
+            return []
+        if isinstance(data, list):
+            return [wl for wl in data if isinstance(wl, dict)]
+        if isinstance(data, dict):
+            watchlists = data.get("watchlists")
+            if isinstance(watchlists, list):
+                return [wl for wl in watchlists if isinstance(wl, dict)]
+            items = data.get("items")
+            if isinstance(items, list):
+                return [wl for wl in items if isinstance(wl, dict)]
+            if self._extract_watchlist_id(data) is not None:
+                return [data]
         return []
 
     def create_watchlist(self, name: str, instrument_ids: Optional[List[int]] = None) -> Dict[str, Any]:
-        """Creates a new watchlist on eToro according to OpenAPI Swagger spec."""
+        """Creates a new watchlist on eToro according to OpenAPI spec using %20 encoding."""
         if not self.is_configured():
             return {"success": False, "status_code": 401, "data": {}}
-        
-        # In official OpenAPI Swagger: POST /api/v1/watchlists?name=...&type=Static
-        success, code, data = self._request("POST", "/api/v1/watchlists", params={"name": name, "type": "Static"})
-        if not success:
-            # Fallback attempts
-            payload = {"name": name, "instrumentIds": instrument_ids or []}
-            success, code, data = self._request("POST", "/api/v1/watchlists/user", json_data=payload, suppress_error_log=True)
+
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            return {"success": False, "status_code": 400, "data": {"error": "empty_watchlist_name"}}
+
+        encoded_name = quote(clean_name, safe="")
+        endpoint = f"/api/v1/watchlists?name={encoded_name}&type=Static"
+        success, code, data = self._request("POST", endpoint)
 
         if success:
-            wl_id = None
-            if isinstance(data, dict):
-                wl_id = data.get("WatchlistID") or data.get("watchlistId") or data.get("id")
-            elif isinstance(data, (int, str)):
-                wl_id = data
-
-            if wl_id and instrument_ids:
-                self.add_items_to_watchlist(int(wl_id), instrument_ids)
-
+            wl_id = self._extract_watchlist_id(data)
+            with self._watchlist_lock:
+                if wl_id is not None:
+                    self._record_watchlist_cache(clean_name, wl_id, data if isinstance(data, dict) else {})
+            if wl_id is not None and instrument_ids:
+                add_res = self.add_items_to_watchlist(wl_id, instrument_ids)
+                if add_res.get("success"):
+                    with self._watchlist_lock:
+                        self._watchlist_synced_items.setdefault(str(wl_id), set()).update(
+                            int(i) for i in instrument_ids
+                        )
             return {"success": True, "status_code": code, "data": data, "watchlist_id": wl_id}
 
         return {"success": False, "status_code": code, "data": data}
 
-    def add_items_to_watchlist(self, watchlist_id: int, instrument_ids: List[int]) -> Dict[str, Any]:
+    def add_items_to_watchlist(
+        self,
+        watchlist_id: Optional[Union[int, str]],
+        instrument_ids: List[int]
+    ) -> Dict[str, Any]:
         """Adds instrument IDs to an existing eToro watchlist using WatchlistItemDto array."""
         if not self.is_configured():
             return {"success": False, "status_code": 401, "data": {}}
+        if watchlist_id is None or str(watchlist_id).strip() == "":
+            return {"success": False, "status_code": 400, "data": {"error": "missing_watchlist_id"}}
+        if not instrument_ids:
+            return {"success": True, "status_code": 200, "data": {"skipped": True, "reason": "no_items"}}
 
-        # Official OpenAPI Swagger Schema: array of WatchlistItemDto
         items_payload = [
             {"itemId": int(iid), "itemType": "Instrument", "itemRank": idx + 1}
             for idx, iid in enumerate(instrument_ids)
         ]
-        
-        success, code, data = self._request("POST", f"/api/v1/watchlists/{watchlist_id}/items", json_data=items_payload)
-        if not success:
-            # Fallback legacy body
-            payload = {"instrumentIds": instrument_ids}
-            success, code, data = self._request("POST", f"/api/v1/watchlists/{watchlist_id}/items", json_data=payload, suppress_error_log=True)
-
+        success, code, data = self._request(
+            "POST",
+            f"/api/v1/watchlists/{watchlist_id}/items",
+            json_data=items_payload
+        )
         return {"success": success, "status_code": code, "data": data}
 
-    def get_or_create_cockpit_watchlist(self, name: str = "Autonomous Cockpit") -> Tuple[Optional[int], Dict[str, Any]]:
+    def get_or_create_cockpit_watchlist(
+        self,
+        name: str = "Autonomous Cockpit",
+        force_refresh: bool = False
+    ) -> Tuple[Optional[Union[int, str]], Dict[str, Any]]:
         """Retrieves or creates the primary Autonomous Cockpit watchlist on eToro."""
-        watchlists = self.get_user_watchlists()
-        for wl in watchlists:
-            wl_name = wl.get("Name") or wl.get("name")
-            if wl_name and wl_name.lower() == name.lower():
-                wl_id = wl.get("WatchlistID") or wl.get("watchlistId") or wl.get("id")
-                return int(wl_id), wl
+        if not self.is_configured():
+            return None, {"error": "not_configured"}
 
-        # Create new watchlist or return virtual ID
-        res = self.create_watchlist(name)
-        data = res.get("data", {})
-        wl_id = data.get("WatchlistID") or data.get("watchlistId") or data.get("id") or 101
-        return int(wl_id), data
+        norm_target = self._normalize_watchlist_name(name)
+        with self._watchlist_lock:
+            if not force_refresh and norm_target in self._watchlist_id_cache:
+                cached_id = self._watchlist_id_cache[norm_target]
+                cached_meta = self._watchlist_meta_cache.get(str(cached_id), {"watchlistId": str(cached_id)})
+                return cached_id, cached_meta
+
+            matched_wl, matched_id = self._lookup_watchlist_by_name(name)
+            if matched_id is not None:
+                self._record_watchlist_cache(name, matched_id, matched_wl)
+                return matched_id, matched_wl
+
+            res = self.create_watchlist(name)
+            data = res.get("data", {}) if isinstance(res.get("data"), dict) else {}
+            if res.get("success"):
+                wl_id = res.get("watchlist_id") or self._extract_watchlist_id(res.get("data"))
+                if wl_id is not None:
+                    self._record_watchlist_cache(name, wl_id, data)
+                    return wl_id, data
+
+            # Duplicate name (e.g. legacy 'Autonomous+Cockpit'): recover existing watchlist instead of failing
+            if self._is_duplicate_watchlist_error(res.get("status_code", 0), res.get("data")):
+                matched_wl, matched_id = self._lookup_watchlist_by_name(name)
+                if matched_id is not None:
+                    self._record_watchlist_cache(name, matched_id, matched_wl)
+                    return matched_id, matched_wl
+
+            logger.warning(
+                f"[eToro Watchlist] Unable to resolve or create '{name}' "
+                f"(status={res.get('status_code')}); skipping sync instead of using fallback ID."
+            )
+            return None, data
 
     def sync_symbols_to_watchlist(
         self,
@@ -1073,7 +1217,7 @@ class EToroClient:
             if inst_id:
                 resolved[s.upper()] = inst_id
 
-        inst_ids = list(resolved.values())
+        inst_ids = list(dict.fromkeys(resolved.values()))
         if not self.is_configured():
             return {
                 "status": "simulated",
@@ -1083,16 +1227,76 @@ class EToroClient:
                 "watchlist_name": watchlist_name
             }
 
-        wl_id, wl_data = self.get_or_create_cockpit_watchlist(watchlist_name)
-        add_res = self.add_items_to_watchlist(wl_id or 101, inst_ids)
-        return {
-            "status": "success",
-            "message": f"✓ Synchronized {len(resolved)} stocks to Watchlist '{watchlist_name}'.",
-            "watchlist_id": wl_id or 101,
-            "synced_symbols": list(resolved.keys()),
-            "instrument_ids": inst_ids,
-            "details": add_res
-        }
+        with self._watchlist_lock:
+            wl_id, wl_data = self.get_or_create_cockpit_watchlist(watchlist_name)
+            if wl_id is None:
+                return {
+                    "status": "error",
+                    "message": f"Could not resolve or create eToro watchlist '{watchlist_name}'. Sync skipped.",
+                    "watchlist_id": None,
+                    "synced_symbols": [],
+                    "instrument_ids": inst_ids,
+                    "details": wl_data,
+                }
+
+            already_synced = self._watchlist_synced_items.setdefault(str(wl_id), set())
+            pending_ids = [iid for iid in inst_ids if iid not in already_synced]
+            if not pending_ids:
+                return {
+                    "status": "success",
+                    "message": f"✓ Watchlist '{watchlist_name}' already up to date ({len(resolved)} stocks cached).",
+                    "watchlist_id": wl_id,
+                    "synced_symbols": list(resolved.keys()),
+                    "instrument_ids": inst_ids,
+                    "details": {"success": True, "status_code": 200, "cached": True},
+                }
+
+            add_res = self.add_items_to_watchlist(wl_id, pending_ids)
+
+            if not add_res.get("success") and self._is_invalid_watchlist_id_error(
+                add_res.get("status_code", 0), add_res.get("data")
+            ):
+                norm_name = self._normalize_watchlist_name(watchlist_name)
+                self._watchlist_id_cache.pop(norm_name, None)
+                self._watchlist_meta_cache.pop(str(wl_id), None)
+                self._watchlist_synced_items.pop(str(wl_id), None)
+                wl_id, wl_data = self.get_or_create_cockpit_watchlist(watchlist_name, force_refresh=True)
+                if wl_id is None:
+                    return {
+                        "status": "error",
+                        "message": f"Could not re-resolve eToro watchlist '{watchlist_name}'. Sync skipped.",
+                        "watchlist_id": None,
+                        "synced_symbols": [],
+                        "instrument_ids": inst_ids,
+                        "details": wl_data,
+                    }
+                already_synced = self._watchlist_synced_items.setdefault(str(wl_id), set())
+                pending_ids = [iid for iid in inst_ids if iid not in already_synced]
+                add_res = (
+                    self.add_items_to_watchlist(wl_id, pending_ids)
+                    if pending_ids
+                    else {"success": True, "status_code": 200, "cached": True}
+                )
+
+            if add_res.get("success"):
+                self._watchlist_synced_items.setdefault(str(wl_id), set()).update(pending_ids)
+                return {
+                    "status": "success",
+                    "message": f"✓ Synchronized {len(resolved)} stocks to Watchlist '{watchlist_name}'.",
+                    "watchlist_id": wl_id,
+                    "synced_symbols": list(resolved.keys()),
+                    "instrument_ids": inst_ids,
+                    "details": add_res
+                }
+
+            return {
+                "status": "error",
+                "message": f"Failed to synchronize items to Watchlist '{watchlist_name}'.",
+                "watchlist_id": wl_id,
+                "synced_symbols": [],
+                "instrument_ids": inst_ids,
+                "details": add_res
+            }
 
     # =========================================================================
     # OFFICIAL ETORO MCP SERVER & WEBSOCKET OPERATIONS
