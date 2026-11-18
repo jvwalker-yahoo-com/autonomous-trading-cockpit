@@ -62,8 +62,7 @@ INITIAL_SEED_INSTRUMENTS: List[Dict[str, Any]] = [
     {"symbol": "ARM", "instrument_id": 1365, "name": "ARM Holdings PLC", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "SMCI", "instrument_id": 1069, "name": "Super Micro Computer, Inc", "category": "AI Servers", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "TSM", "instrument_id": 1026, "name": "Taiwan Semiconductor", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "QCOM", "instrument_id": 1011, "name": "Qualcomm Inc", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "INTC", "instrument_id": 1010, "name": "Intel Corp", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    # Unverified legacy IDs removed to prevent colliding with BA=1010 / BAC=1011; resolve via live eToro API or portfolio sync.
     {"symbol": "MU", "instrument_id": 1014, "name": "Micron Technology", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "ASML", "instrument_id": 1015, "name": "ASML Holding NV", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "AMAT", "instrument_id": 1030, "name": "Applied Materials", "category": "Semiconductors", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
@@ -115,6 +114,8 @@ INITIAL_SEED_INSTRUMENTS: List[Dict[str, Any]] = [
     {"symbol": "LMT", "instrument_id": 1070, "name": "Lockheed Martin", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "RTX", "instrument_id": 1071, "name": "RTX Corp", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "BA", "instrument_id": 1010, "name": "Boeing Co", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "BAC", "instrument_id": 1011, "name": "Bank of America Corp", "category": "Financials & Fintech", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    {"symbol": "FVD", "instrument_id": 1087, "name": "First Trust Value Line Dividend Index Fund", "category": "ETFs", "asset_class": "ETF", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "KTOS", "instrument_id": 1073, "name": "Kratos Defense", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "PL", "instrument_id": 1074, "name": "Planet Labs PBC", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "LUNR", "instrument_id": 1075, "name": "Intuitive Machines", "category": "Space & Defense", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
@@ -127,7 +128,7 @@ INITIAL_SEED_INSTRUMENTS: List[Dict[str, Any]] = [
     # Clean Energy, Nuclear & Next-Gen Power
     {"symbol": "CEG", "instrument_id": 1085, "name": "Constellation Energy", "category": "Nuclear & Power", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "VST", "instrument_id": 1086, "name": "Vistra Corp", "category": "Nuclear & Power", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    {"symbol": "TLN", "instrument_id": 1087, "name": "Talen Energy", "category": "Nuclear & Power", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    # Unverified legacy ID removed for TLN (1087 belongs to FVD on live eToro).
     {"symbol": "CCJ", "instrument_id": 1088, "name": "Cameco Corp", "category": "Nuclear & Power", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "SMR", "instrument_id": 1089, "name": "NuScale Power Corp", "category": "Nuclear & Power", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     {"symbol": "OKLO", "instrument_id": 1090, "name": "Oklo Inc", "category": "Nuclear & Power", "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
@@ -284,6 +285,13 @@ class InstrumentsDBManager:
     def _seed_if_empty(self):
         """Seeds or updates master universe instruments so authoritative IDs are always present."""
         with self._get_connection() as conn:
+            # Remove stale legacy colliding seed rows so INTC/QCOM/TLN never hijack BA=1010, BAC=1011, FVD=1087
+            conn.execute("""
+                DELETE FROM instruments
+                WHERE (symbol = 'INTC' AND instrument_id = 1010)
+                   OR (symbol = 'QCOM' AND instrument_id = 1011)
+                   OR (symbol = 'TLN' AND instrument_id = 1087);
+            """)
             now_str = datetime.now(timezone.utc).isoformat()
             for inst in INITIAL_SEED_INSTRUMENTS:
                 conn.execute("""
@@ -538,6 +546,67 @@ class InstrumentsDBManager:
             "instruments_updated": updated_count,
             "total_instruments": total_now
         }
+
+    def seed_from_portfolio(
+        self,
+        portfolio_data: Dict[str, Any],
+        instrument_cache: Optional[Dict[str, int]] = None,
+    ) -> int:
+        """
+        Seeds verified symbol -> instrument_id mappings directly from live eToro
+        portfolio holdings or raw positions so every held asset is immediately resolvable.
+        """
+        if not isinstance(portfolio_data, dict):
+            return 0
+
+        entries: List[Tuple[str, int, str]] = []
+        for holding in portfolio_data.get("holdings", []) or []:
+            if not isinstance(holding, dict):
+                continue
+            mkt = holding.get("market") or {}
+            sym = str(mkt.get("symbol") or holding.get("symbol") or "").upper().strip()
+            raw_iid = mkt.get("instrumentId") or mkt.get("InstrumentID") or holding.get("instrumentId") or holding.get("InstrumentID")
+            name = str(mkt.get("name") or holding.get("name") or f"{sym} (eToro Holding)")
+            if sym and raw_iid is not None:
+                try:
+                    iid = int(raw_iid)
+                    if iid > 0:
+                        entries.append((sym, iid, name))
+                except (TypeError, ValueError):
+                    pass
+
+        cp = portfolio_data.get("clientPortfolio") or {}
+        raw_positions = (
+            (cp.get("positions") if isinstance(cp, dict) else None)
+            or portfolio_data.get("positions")
+            or []
+        )
+        for pos in raw_positions:
+            if not isinstance(pos, dict):
+                continue
+            sym = str(pos.get("symbol") or pos.get("instrumentName") or pos.get("internalSymbolFull") or "").upper().strip()
+            raw_iid = pos.get("instrumentId") or pos.get("InstrumentID") or pos.get("instrumentID")
+            if sym and raw_iid is not None:
+                try:
+                    iid = int(raw_iid)
+                    if iid > 0:
+                        entries.append((sym, iid, f"{sym} (eToro Position)"))
+                except (TypeError, ValueError):
+                    pass
+
+        seeded = 0
+        seen: set = set()
+        for sym, iid, name in entries:
+            if sym in seen:
+                continue
+            seen.add(sym)
+            existing_id = self.get_instrument_id(sym)
+            if existing_id != iid:
+                self.upsert_instrument(symbol=sym, instrument_id=iid, name=name)
+                seeded += 1
+            if instrument_cache is not None:
+                instrument_cache[sym] = iid
+        return seeded
 
 
 # Singleton manager instance

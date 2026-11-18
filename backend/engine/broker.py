@@ -80,6 +80,10 @@ class SimulatedBroker:
             direction = "SHORT" if is_short else "LONG"
             sl = float(first_pos.get("stopLossRate") or first_pos.get("stopLoss") or 0.0)
             tp = float(first_pos.get("takeProfitRate") or first_pos.get("takeProfit") or 0.0)
+            if first_pos.get("isNoStopLoss") is True or (open_rate > 0.01 and 0.0 < sl <= 0.001):
+                sl = 0.0
+            if first_pos.get("isNoTakeProfit") is True or (open_rate > 0.01 and 0.0 < tp <= 0.001):
+                tp = 0.0
             
             # Check pre-existing local position metadata
             existing_pos = self.positions.get(sym)
@@ -87,13 +91,22 @@ class SimulatedBroker:
             max_hold_until = getattr(existing_pos, "max_hold_until", None)
             contributing_models = dict(getattr(existing_pos, "contributing_models", {}) or {})
 
-            # Preserve tight stop-loss if local stop was tighter than eToro's -50% default
-            if existing_pos and existing_pos.stop_loss > 0:
-                if direction == "SHORT" and (sl <= 0 or sl > existing_pos.stop_loss):
+            entry_aligned = (
+                existing_pos is not None
+                and open_rate > 0
+                and abs(existing_pos.entry_price - open_rate) / open_rate <= 0.01
+            )
+
+            # Preserve tight stop-loss if local stop was tighter than eToro's -50% default AND entry price aligns with open_rate
+            if existing_pos and existing_pos.stop_loss > 0 and entry_aligned:
+                valid_short_sl = direction == "SHORT" and (existing_pos.stop_loss > open_rate or (cur_rate < open_rate and existing_pos.stop_loss > cur_rate))
+                valid_long_sl = direction == "LONG" and (existing_pos.stop_loss < open_rate or (cur_rate > open_rate and existing_pos.stop_loss < cur_rate))
+                if valid_short_sl and (sl <= 0 or sl > existing_pos.stop_loss):
                     sl = existing_pos.stop_loss
-                elif direction == "LONG" and (sl <= 0 or sl < existing_pos.stop_loss):
+                elif valid_long_sl and (sl <= 0 or sl < existing_pos.stop_loss):
                     sl = existing_pos.stop_loss
-            elif sl <= 0 and open_rate > 0:
+
+            if sl <= 0 and open_rate > 0:
                 # For spot assets (unleveraged stocks), eToro does not attach broker-side stops at open.
                 # Initialize default synthetic software stop loss based on trade horizon:
                 def_sl = 0.015 if horizon == "day" else 0.025
@@ -101,9 +114,12 @@ class SimulatedBroker:
                 sl = round(open_rate * (1.0 + def_sl if direction == "SHORT" else 1.0 - def_sl), sl_prec)
 
             # Preserve or initialize synthetic software take-profit for spot holdings
-            if existing_pos and existing_pos.take_profit > 0 and tp <= 0:
-                tp = existing_pos.take_profit
-            elif tp <= 0 and open_rate > 0:
+            if existing_pos and existing_pos.take_profit > 0 and tp <= 0 and entry_aligned:
+                valid_short_tp = direction == "SHORT" and existing_pos.take_profit < open_rate
+                valid_long_tp = direction == "LONG" and existing_pos.take_profit > open_rate
+                if valid_short_tp or valid_long_tp:
+                    tp = existing_pos.take_profit
+            if tp <= 0 and open_rate > 0:
                 def_tp = 0.030 if horizon == "day" else 0.050
                 tp_prec = 4 if open_rate < 1.0 else 2
                 tp = round(open_rate * (1.0 - def_tp if direction == "SHORT" else 1.0 + def_tp), tp_prec)
@@ -146,11 +162,41 @@ class SimulatedBroker:
         if not isinstance(raw_trades, list):
             return
 
+        existing_by_id: Dict[str, TradeRecord] = {t.id: t for t in self.trade_ledger}
+        existing_by_sym_time: Dict[Tuple[str, str], TradeRecord] = {
+            (t.symbol.upper(), str(t.entry_time)[:16]): t for t in self.trade_ledger if t.entry_time
+        }
+
+        def _infer_horizon(open_t: str, close_t: str) -> str:
+            if not open_t or not close_t:
+                return "swing"
+            try:
+                o_clean = open_t.replace("Z", "+00:00")
+                c_clean = close_t.replace("Z", "+00:00")
+                if "+" not in o_clean and "-" in o_clean[10:]:
+                    pass
+                elif "+" not in o_clean:
+                    o_clean += "+00:00"
+                if "+" not in c_clean and "-" in c_clean[10:]:
+                    pass
+                elif "+" not in c_clean:
+                    c_clean += "+00:00"
+                o_dt = datetime.fromisoformat(o_clean)
+                c_dt = datetime.fromisoformat(c_clean)
+                hours_held = max(0.0, (c_dt - o_dt).total_seconds() / 3600.0)
+                if o_dt.date() == c_dt.date() or hours_held <= 6.5:
+                    return "day"
+            except Exception:
+                if open_t[:10] and open_t[:10] == close_t[:10]:
+                    return "day"
+            return "swing"
+
         synced_ledger: List[TradeRecord] = []
         for t in raw_trades:
             if not isinstance(t, dict):
                 continue
             pos_id = str(t.get("positionId") or uuid.uuid4().hex[:8])
+            rec_id = f"etoro-{pos_id}"
             sym = str(t.get("market", {}).get("symbol") or t.get("symbol") or "UNKNOWN").upper().strip()
             direction = str(t.get("direction", "LONG")).upper()
             shares = float(t.get("units", 0.0))
@@ -165,10 +211,18 @@ class SimulatedBroker:
             open_time = str(t.get("openTime", ""))
             close_time = str(t.get("closeTime", ""))
 
+            prev_rec = existing_by_id.get(rec_id) or existing_by_sym_time.get((sym, open_time[:16]))
+            horizon = prev_rec.horizon if prev_rec else _infer_horizon(open_time, close_time)
+            contrib_models = dict(prev_rec.contributing_models) if prev_rec and prev_rec.contributing_models else {}
+            entry_rat = prev_rec.entry_rationale if prev_rec and prev_rec.entry_rationale else "eToro Live Closed Position"
+            exit_rat = prev_rec.exit_rationale if prev_rec and prev_rec.exit_rationale else f"Closed on eToro (Net: ${realized_pnl:+.2f})"
+            mistake_note = prev_rec.mistake_analysis if prev_rec else None
+
             trade_record = TradeRecord(
-                id=f"etoro-{pos_id}",
+                id=rec_id,
                 symbol=sym,
                 direction=direction,
+                horizon=horizon,
                 shares=round(shares, 6),
                 entry_price=round(open_rate, 4),
                 exit_price=round(close_rate, 4),
@@ -179,9 +233,10 @@ class SimulatedBroker:
                 win=realized_pnl > 0.0,
                 entry_time=open_time,
                 exit_time=close_time,
-                entry_rationale="eToro Live Closed Position",
-                exit_rationale=f"Closed on eToro (Net: ${realized_pnl:+.2f})",
-                contributing_models={}
+                entry_rationale=entry_rat,
+                exit_rationale=exit_rat,
+                contributing_models=contrib_models,
+                mistake_analysis=mistake_note,
             )
             synced_ledger.append(trade_record)
 
@@ -278,18 +333,23 @@ class SimulatedBroker:
         exit_rationale: str = "EOD Auto-Flatten: Closing intraday day trade before market close",
         data_feed = None,
         etoro_client = None,
-        is_live: bool = False
+        is_live: bool = False,
+        only_expired: bool = False,
+        now_iso: Optional[str] = None,
     ) -> List[TradeRecord]:
         """
-        Auto-liquidates all active positions with horizon == 'day' before market close.
+        Auto-liquidates active positions with horizon == 'day' before market close
+        (or only those whose max_hold_until has elapsed when only_expired=True).
         Crucially:
         - Frees capital so no intraday day trade carries overnight gap or financing risk.
         - Supports both simulation and live eToro execution.
         """
         closed_trades = []
+        ref_iso = now_iso or datetime.now(timezone.utc).isoformat()
         day_symbols = [
             sym for sym, pos in list(self.positions.items())
             if getattr(pos, "horizon", "swing") == "day"
+            and (not only_expired or (pos.max_hold_until and ref_iso >= pos.max_hold_until))
         ]
 
         for sym in day_symbols:
@@ -307,18 +367,23 @@ class SimulatedBroker:
                 except Exception:
                     pass
 
+            close_ok = True
             if is_live and etoro_client and etoro_client.is_configured():
                 inst_id = etoro_client.resolve_instrument_id(sym)
                 ids_to_close = pos.etoro_position_ids or [pos.id]
+                close_ok = False
                 for pid in ids_to_close:
                     try:
-                        etoro_client.close_position(position_id=str(pid), mode="real", instrument_id=inst_id)
+                        res = etoro_client.close_position(position_id=str(pid), mode="real", instrument_id=inst_id)
+                        if res is None or (isinstance(res, dict) and res.get("success", False)):
+                            close_ok = True
                     except Exception as ex:
                         logger.warning(f"Live auto-flatten eToro close error for {sym} (lot {pid}): {ex}")
 
-            tr = self.close_position(sym, price, exit_rationale=exit_rationale)
-            if tr:
-                closed_trades.append(tr)
+            if close_ok:
+                tr = self.close_position(sym, price, exit_rationale=exit_rationale)
+                if tr:
+                    closed_trades.append(tr)
 
         if closed_trades:
             self.save_state()

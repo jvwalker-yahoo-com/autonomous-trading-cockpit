@@ -30,7 +30,10 @@ class ArbitrationModule:
         active_day_trades: int = 0,
         max_active_day_trades: int = 4,
         day_trading_enabled: bool = True,
-        regime_trend: str = "CHOPPY"
+        regime_trend: str = "CHOPPY",
+        day_trade_exposure_pct: float = 0.0,
+        max_day_trade_allocation_pct: float = 1.0,
+        eod_flatten_window_active: bool = False
     ) -> ArbitrationOutput:
         """
         Arbitrates final execution mode and trade clearance based on risk gates,
@@ -92,6 +95,14 @@ class ArbitrationModule:
             if active_day_trades >= max_active_day_trades:
                 day_trade_ok = False
                 reasons.append(f"Max active day trades reached ({active_day_trades}/{max_active_day_trades})")
+
+            if day_trade_exposure_pct >= max_day_trade_allocation_pct:
+                day_trade_ok = False
+                reasons.append(f"Max day trade allocation reached ({day_trade_exposure_pct*100:.1f}% >= {max_day_trade_allocation_pct*100:.1f}%)")
+
+            if eod_flatten_window_active:
+                day_trade_ok = False
+                reasons.append("EOD flatten window active: new day trade entries blocked before market close")
 
             # Spread filter for intraday trades
             if estimated_spread_pct > max_spread_pct_day_trade:

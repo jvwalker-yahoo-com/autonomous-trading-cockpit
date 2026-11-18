@@ -66,7 +66,9 @@ SYMBOL_TO_ETORO_ID: Dict[str, int] = {
 
     # === US EQUITIES (Tech, AI, Growth, Blue Chips) ===
     "AAPL":     1001,
-    "BA":       1010,     # Apple — CONFIRMED from official eToro API docs
+    "BA":       1010,     # Boeing Co — CONFIRMED from live eToro portfolio (1010)
+    "BAC":      1011,     # Bank of America Corp — CONFIRMED from live eToro portfolio (1011)
+    "FVD":      1087,     # First Trust Value Line Dividend Index Fund — CONFIRMED from live eToro portfolio (1087)
     "NVDA":     1137,     # NVIDIA Corp — CONFIRMED via MCP
     "MSFT":     1004,     # Microsoft — CONFIRMED via MCP
     "TSLA":     1111,     # Tesla Motors — CONFIRMED via MCP
@@ -86,7 +88,7 @@ SYMBOL_TO_ETORO_ID: Dict[str, int] = {
     "ASTS":     10088,    # AST SpaceMobile — CONFIRMED via MCP
     "RKLB":     9085,     # Rocket Lab — CONFIRMED via MCP
     "LLY":      1567,     # Eli Lilly — CONFIRMED via MCP
-    "INTC":     1010,     # Intel
+    # Removed unverified INTC:1010 collision with BA:1010
     "AVGO":     1012,     # Broadcom
     "RIVN":     1022,     # Rivian Automotive
     "BABA":     1025,     # Alibaba Group
@@ -610,6 +612,16 @@ class EToroClient:
             success, code, data = self._request("GET", "/api/v1/balances/accounts")
         return {"success": success, "status_code": code, "data": data}
 
+    def _seed_portfolio_instruments(self, portfolio_data: Any) -> None:
+        """Best-effort seeding of verified holding instrument IDs into memory cache and SQLite."""
+        if not isinstance(portfolio_data, dict):
+            return
+        try:
+            from backend.engine.instruments_db import get_instruments_db
+            get_instruments_db().seed_from_portfolio(portfolio_data, instrument_cache=self._instrument_cache)
+        except Exception as e:
+            logger.debug(f"[eToro Portfolio ID Seed Notice]: {e}")
+
     def get_portfolio(self, mode: str = "real") -> Dict[str, Any]:
         """Fetches active open positions and portfolio details via official MCP gateway or fallback."""
         if not self.is_configured() or self.is_in_auth_cooldown():
@@ -620,7 +632,9 @@ class EToroClient:
         # 1. Try MCP tool get-my-portfolio-summary (full) with 5s timeout
         mcp_res = self.call_mcp_tool("get-my-portfolio-summary", {"account": account, "includePositions": True}, timeout=5.0, trigger_cooldown_on_auth_fail=True)
         if mcp_res.get("success") and isinstance(mcp_res.get("data"), dict) and not mcp_res.get("data", {}).get("error"):
-            return {"success": True, "status_code": 200, "data": mcp_res.get("data")}
+            pf_data = mcp_res.get("data")
+            self._seed_portfolio_instruments(pf_data)
+            return {"success": True, "status_code": 200, "data": pf_data}
 
         if self.is_in_auth_cooldown():
             return {"success": False, "status_code": 401, "data": {}, "error": "Auth cooldown"}
@@ -652,18 +666,20 @@ class EToroClient:
             if isinstance(bal_data, dict):
                 avail_cash = float(bal_data.get("availableCash") or bal_data.get("cashBalance") or 0.0)
                 tot_value = float(bal_data.get("totalEquity") or bal_data.get("totalValue") or avail_cash)
+            pf_payload = {
+                "totals": {
+                    "availableCash": avail_cash,
+                    "totalValue": tot_value,
+                    "invested": sum(h["invested"] for h in holdings),
+                    "unrealizedPnL": sum(h["pnl"] for h in holdings)
+                },
+                "holdings": holdings
+            }
+            self._seed_portfolio_instruments(pf_payload)
             return {
                 "success": True,
                 "status_code": 200,
-                "data": {
-                    "totals": {
-                        "availableCash": avail_cash,
-                        "totalValue": tot_value,
-                        "invested": sum(h["invested"] for h in holdings),
-                        "unrealizedPnL": sum(h["pnl"] for h in holdings)
-                    },
-                    "holdings": holdings
-                }
+                "data": pf_payload
             }
 
         if self.is_in_auth_cooldown():
@@ -674,6 +690,7 @@ class EToroClient:
         ep = f"/api/v1/trading/info/{'demo/' if is_demo else ''}portfolio"
         success, code, data = self._request("GET", ep, timeout=5.0, suppress_error_log=True)
         if success:
+            self._seed_portfolio_instruments(data)
             return {"success": True, "status_code": code, "data": data}
         return {"success": False, "status_code": code, "data": {}}
 
@@ -1879,6 +1896,105 @@ class EToroClient:
                 return {"success": True, "status_code": code, "result": data}
 
         return {"success": False, "status_code": 404, "position_id": position_id}
+
+    def update_position(
+        self,
+        position_id: Union[str, int],
+        stop_loss_rate: Optional[float] = None,
+        take_profit_rate: Optional[float] = None,
+        stop_loss_type: Optional[str] = "fixed",
+        clear_stop_loss: Optional[bool] = None,
+        clear_take_profit: Optional[bool] = None,
+        mode: str = "real",
+    ) -> Dict[str, Any]:
+        """
+        Modifies stop-loss and/or take-profit settings on an open position via:
+        1. Official eToro MCP execute-write on PATCH /api/v2/trading/[demo/]positions/{positionId}
+        2. Direct REST v2 fallback: PATCH /api/v2/trading/[demo/]positions/{positionId}
+        """
+        if not self.is_configured():
+            return {"success": False, "status_code": 401, "error": "eToro credentials not configured."}
+
+        pid_str = str(position_id).strip()
+        is_demo = mode.lower() == "demo"
+        rel_path = f"/api/v2/trading/{'demo/' if is_demo else ''}positions/{pid_str}"
+
+        body: Dict[str, Any] = {}
+        if stop_loss_rate is not None:
+            body["stopLossRate"] = round(float(stop_loss_rate), 4)
+        if take_profit_rate is not None:
+            body["takeProfitRate"] = round(float(take_profit_rate), 4)
+        if stop_loss_type is not None and (stop_loss_rate is not None or stop_loss_type in ("fixed", "trailing")):
+            body["stopLossType"] = str(stop_loss_type).lower().strip()
+        if clear_stop_loss is not None:
+            body["clearStopLoss"] = bool(clear_stop_loss)
+        if clear_take_profit is not None:
+            body["clearTakeProfit"] = bool(clear_take_profit)
+
+        if not body:
+            return {"success": False, "status_code": 400, "error": "At least one SL/TP field is required."}
+
+        # 1. Try MCP execute-write
+        try:
+            mcp_res = self.call_mcp_tool(
+                "execute-write",
+                {
+                    "path": rel_path,
+                    "method": "PATCH",
+                    "body": json.dumps(body),
+                },
+                timeout=15.0,
+            )
+            if mcp_res.get("success") and isinstance(mcp_res.get("data"), dict):
+                mdata = mcp_res["data"]
+                sc = int(mdata.get("statusCode") or (202 if mdata.get("isSuccess") else 0))
+                raw_body = mdata.get("body")
+                parsed_body = raw_body
+                if isinstance(raw_body, str) and raw_body.strip():
+                    try:
+                        parsed_body = json.loads(raw_body)
+                    except Exception:
+                        parsed_body = raw_body
+                if mdata.get("isSuccess") or sc in (200, 201, 202, 204):
+                    return {
+                        "success": True,
+                        "method": "mcp",
+                        "status_code": sc or 202,
+                        "position_id": pid_str,
+                        "request_body": body,
+                        "result": parsed_body,
+                    }
+                if sc in (400, 401, 403, 404, 409, 422, 429):
+                    return {
+                        "success": False,
+                        "method": "mcp",
+                        "status_code": sc,
+                        "position_id": pid_str,
+                        "request_body": body,
+                        "error": parsed_body or mdata.get("error"),
+                    }
+        except Exception as e:
+            logger.debug(f"[eToro MCP update_position notice on {pid_str}]: {e}")
+
+        # 2. Direct REST v2 PATCH fallback
+        success, code, data = self._request("PATCH", rel_path, json_data=body)
+        if success or code in (200, 201, 202, 204):
+            return {
+                "success": True,
+                "method": "rest",
+                "status_code": code,
+                "position_id": pid_str,
+                "request_body": body,
+                "result": data,
+            }
+        return {
+            "success": False,
+            "method": "rest",
+            "status_code": code,
+            "position_id": pid_str,
+            "request_body": body,
+            "error": data,
+        }
 
     def close_all_positions(self, mode: str = "real", only_crypto: bool = False) -> Dict[str, Any]:
         """

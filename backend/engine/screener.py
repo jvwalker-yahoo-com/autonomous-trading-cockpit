@@ -228,7 +228,9 @@ MASTER_STOCK_UNIVERSE: Dict[str, Dict[str, Any]] = {
     "GE": {"name": "GE Aerospace", "category": "Aerospace & Defense", "base_price": 188.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     "XOM": {"name": "Exxon Mobil Corp", "category": "Energy & Oil", "base_price": 122.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
     "CVX": {"name": "Chevron Corp", "category": "Energy & Oil", "base_price": 150.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
-    "OXY": {"name": "Occidental Petroleum", "category": "Energy & Oil", "base_price": 52.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"}
+    "OXY": {"name": "Occidental Petroleum", "category": "Energy & Oil", "base_price": 52.00, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "BAC": {"name": "Bank of America Corp", "category": "Financials & Fintech", "base_price": 50.70, "asset_class": "Stock", "trading_hours": "14:30 - 21:00 UK"},
+    "FVD": {"name": "First Trust Value Line Dividend Index Fund", "category": "ETFs", "base_price": 51.75, "asset_class": "ETF", "trading_hours": "14:30 - 21:00 UK"}
 }
 
 # Pre-Built Preset Watchlists for 1-Click Multi-Asset Loading
@@ -582,8 +584,15 @@ class MarketScreener:
             tv_consensus_1d = str(tv_entry.get("consensus_1d", "NEUTRAL"))
             tv_consensus_1h = str(tv_entry.get("consensus_1h", "NEUTRAL"))
             tv_consensus_15m = str(tv_entry.get("consensus_15m", "NEUTRAL"))
-            tv_rec_score = float(tv_entry.get("recommend_score_1d", tv_entry.get("recommend_score", 0.0)) or 0.0)
-            norm_score = round(max(-1.0, min(1.0, norm_score * 0.75 + tv_rec_score * 0.25)), 3)
+            rec_1d = float(tv_entry.get("recommend_score_1d", tv_entry.get("recommend_score", 0.0)) or 0.0)
+            rec_1h = float(tv_entry.get("recommend_score_1h", rec_1d) or 0.0)
+            rec_15m = float(tv_entry.get("recommend_score_15m", rec_1h) or 0.0)
+            rvol_tv = float(tv_entry.get("relative_volume", 1.0) or 1.0)
+            tv_rec_score = rec_15m * 0.40 + rec_1h * 0.35 + rec_1d * 0.25
+            norm_score = round(max(-1.0, min(1.0, norm_score * 0.70 + tv_rec_score * 0.30)), 3)
+            if (abs(rec_15m) >= 0.25 and (rec_15m * rec_1h) > 0) or rvol_tv >= 1.25:
+                ev["recommended_horizon"] = "DAY"
+                ev["is_day_setup"] = True
 
         screen_res = {
             "symbol": sym,

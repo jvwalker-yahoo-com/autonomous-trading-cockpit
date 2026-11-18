@@ -241,6 +241,28 @@ class TelemetryModule:
         else:
             return True, f"eToro UK Active Session ({exch['name']}: {open_h:02d}:{open_m:02d} - {close_h:02d}:{close_m:02d} UK)"
 
+    def get_minutes_until_close(self, symbol: str = "SPY", now_utc: Optional[datetime] = None) -> Optional[int]:
+        """
+        Returns minutes remaining until the eToro UK trading session closes for `symbol`
+        (using UK local time GMT/BST), or None if the asset trades 24/7 or is not on an active trading day.
+        """
+        now_dt = now_utc or datetime.now(timezone.utc)
+        month = now_dt.month
+        is_bst = 3 < month < 10 or (month == 3 and now_dt.day >= 25) or (month == 10 and now_dt.day <= 25)
+        uk_hour = (now_dt.hour + (1 if is_bst else 0)) % 24
+        uk_minute = now_dt.minute
+        weekday = now_dt.weekday()
+
+        exch = self.get_exchange_for_symbol(symbol)
+        if weekday not in exch["days"]:
+            return None
+        close_h, close_m = exch["close_time_uk"]
+        if close_h == 24:
+            return None
+        current_mins = uk_hour * 60 + uk_minute
+        close_mins = close_h * 60 + close_m
+        return close_mins - current_mins
+
     def check_trading_hours_before_trade(self, symbol: str) -> Tuple[bool, str]:
         """
         Direct gateway method: verifies trading hours for an asset before checking

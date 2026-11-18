@@ -12,7 +12,7 @@ import logging
 import numpy as np
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -215,6 +215,13 @@ def sync_live_etoro_portfolio_if_live(force: bool = False):
     try:
         pf_res = etoro_client.get_portfolio(mode="real")
         if pf_res.get("success") and pf_res.get("data"):
+            try:
+                from .engine import instruments_db as _instruments_db_mod
+                _instruments_db_mod.get_instruments_db().seed_from_portfolio(
+                    pf_res["data"], instrument_cache=etoro_client._instrument_cache
+                )
+            except Exception as _seed_err:
+                logger.debug(f"Portfolio instrument ID seeding notice: {_seed_err}")
             broker.sync_live_etoro_portfolio(pf_res["data"])
             _cockpit_snapshot_cache.clear()
             logger.info(f"🔄 [eToro Live Portfolio Synced] Cash: ${broker.cash:.2f}, Equity: ${broker.get_equity():.2f}, Positions: {len(broker.positions)}")
@@ -310,6 +317,131 @@ CRYPTO_SYMBOLS = {
 }
 CRYPTO_TRADING_DISABLED = True
 
+
+def _default_is_known_etoro_symbol(sym: str) -> bool:
+    """True when symbol has a registered eToro ID or belongs to static core/universe catalog."""
+    s = str(sym or "").upper().strip()
+    if not s or s in CRYPTO_SYMBOLS:
+        return False
+    if s in CORE_ANCHOR_SYMBOLS or s in etoro_client._instrument_cache:
+        return True
+    if instruments_db.get_instrument_id(s) is not None:
+        return True
+    meta = MASTER_STOCK_UNIVERSE.get(s)
+    return bool(meta and meta.get("category") != "Volume Breakout Movers")
+
+
+def build_prioritized_watchlist(
+    open_syms: List[str],
+    active_symbol: str,
+    smart_buys: List[str],
+    tv_breakouts: List[str],
+    screened_syms: List[str],
+    existing_watchlist: List[str],
+    core_anchors: Optional[List[str]] = None,
+    rot_offset: int = 0,
+    is_known_etoro_symbol: Optional[Any] = None,
+    max_size: int = 75,
+) -> List[str]:
+    """
+    Orders the autonomous watchlist so open holdings, active_symbol, eToro-verified
+    anchors/candidates always sit ahead of unverified TradingView breakout micro-caps.
+    """
+    anchors = list(core_anchors or CORE_ANCHOR_SYMBOLS)
+    if anchors:
+        rot = rot_offset % len(anchors)
+        rotated_anchors = anchors[rot:] + anchors[:rot]
+    else:
+        rotated_anchors = []
+
+    known_fn = is_known_etoro_symbol or _default_is_known_etoro_symbol
+    clean_open = [s.upper().strip() for s in open_syms if s and s.upper().strip() not in CRYPTO_SYMBOLS]
+    act = active_symbol.upper().strip() if active_symbol else ""
+    active_list = [act] if act and act not in CRYPTO_SYMBOLS else []
+
+    verified_smart = [s for s in smart_buys if s not in CRYPTO_SYMBOLS and known_fn(s)]
+    verified_screened = [s for s in screened_syms if s not in CRYPTO_SYMBOLS and known_fn(s)]
+    verified_tv = [s for s in tv_breakouts if s not in CRYPTO_SYMBOLS and known_fn(s)]
+    unverified_tail = [s for s in (tv_breakouts + screened_syms) if s not in CRYPTO_SYMBOLS and not known_fn(s)][:10]
+    clean_existing = [s for s in existing_watchlist if s not in CRYPTO_SYMBOLS]
+
+    combined = list(dict.fromkeys(
+        clean_open
+        + active_list
+        + verified_smart
+        + rotated_anchors
+        + verified_screened[:25]
+        + verified_tv[:15]
+        + unverified_tail
+        + clean_existing
+    ))
+    return combined[:max_size]
+
+
+def select_cycle_prefetch_batch(
+    watchlist: List[str],
+    open_syms: List[str],
+    active_symbol: str,
+    cycle_cursor: int = 0,
+    max_bg_batch: int = 12,
+) -> Tuple[List[str], List[str]]:
+    """
+    Splits each background tick into (priority_batch, sliding_bg_batch) so open holdings
+    and active_symbol update rapidly without hammering Finnhub for 75 tickers every 5s.
+    """
+    act = active_symbol.upper().strip() if active_symbol else ""
+    priority_batch = list(dict.fromkeys(
+        [s.upper().strip() for s in open_syms if s and s.upper().strip() not in CRYPTO_SYMBOLS]
+        + ([act] if act and act not in CRYPTO_SYMBOLS else [])
+    ))
+    bg_pool = [s for s in watchlist if s not in priority_batch and s not in CRYPTO_SYMBOLS]
+    if not bg_pool or max_bg_batch <= 0:
+        return priority_batch, []
+    take = min(max_bg_batch, len(bg_pool))
+    start = cycle_cursor % len(bg_pool)
+    if start + take <= len(bg_pool):
+        bg_batch = bg_pool[start:start + take]
+    else:
+        bg_batch = bg_pool[start:] + bg_pool[:(start + take) % len(bg_pool)]
+    return priority_batch, bg_batch
+
+
+def _format_wyckoff_pattern_desc(
+    signal: str,
+    wyck_sig: str,
+    wyck_phase: str,
+    wyck_struct: str,
+    spring_q: int,
+    utad_q: int,
+) -> Optional[str]:
+    """
+    Aligns Wyckoff pattern badge with directional structure/signal so bearish DISTRIBUTION
+    or SHORT setups never emit 'Wyckoff Spring' and bullish ACCUMULATION/BUY setups never emit 'Wyckoff UTAD'.
+    """
+    allow_spring = (
+        spring_q >= 40
+        and signal != "SHORT"
+        and wyck_sig != "SHORT"
+        and wyck_struct != "DISTRIBUTION"
+    )
+    allow_utad = (
+        utad_q >= 40
+        and signal != "BUY"
+        and wyck_sig != "BUY"
+        and wyck_struct != "ACCUMULATION"
+    )
+    if allow_spring:
+        return f"Wyckoff Spring (Score: {spring_q})"
+    if allow_utad:
+        return f"Wyckoff UTAD (Score: {utad_q})"
+    if wyck_phase in ("D", "E") and wyck_struct != "NEUTRAL":
+        if (signal == "SHORT" and wyck_struct == "ACCUMULATION") or (
+            signal == "BUY" and wyck_struct == "DISTRIBUTION"
+        ):
+            return None
+        return f"Wyckoff {wyck_struct} ({wyck_phase})"
+    return None
+
 async def autonomous_background_worker_loop():
     logger.info("Autonomous Background Trading Loop initialized (Crypto Permanently Disabled).")
     # Startup grace period: allows Uvicorn to bind port 0.0.0.0:$PORT and pass Render health checks
@@ -325,6 +457,7 @@ async def autonomous_background_worker_loop():
     last_auth_warn = 0.0
     last_prune_check = 0.0
     last_keepalive_ping = 0.0
+    bg_prefetch_cursor = 0
 
     # Ensure core anchor assets are in watchlist on boot (strictly excluding any crypto)
     config.watchlist = [s for s in dict.fromkeys(CORE_ANCHOR_SYMBOLS + config.watchlist) if s not in CRYPTO_SYMBOLS]
@@ -451,13 +584,17 @@ async def autonomous_background_worker_loop():
                 mins_to_close = (config.market_close_hour_utc * 60 + config.market_close_minute_utc) - (now_utc.hour * 60 + now_utc.minute)
                 should_eod_flatten = (0 <= mins_to_close <= config.day_trade_eod_flatten_minutes_before_close)
                 
-                # Check individual position expiration
+                # Check individual position expiration and per-exchange UK close window
                 has_expired_day_trades = False
                 now_iso = now_utc.isoformat()
                 for p in broker.positions.values():
-                    if getattr(p, "horizon", "swing") == "day" and p.max_hold_until and now_iso >= p.max_hold_until:
+                    if getattr(p, "horizon", "swing") != "day":
+                        continue
+                    sym_mins_to_close = telemetry_module.get_minutes_until_close(p.symbol, now_utc)
+                    if sym_mins_to_close is not None and 0 <= sym_mins_to_close <= config.day_trade_eod_flatten_minutes_before_close:
+                        should_eod_flatten = True
+                    if p.max_hold_until and now_iso >= p.max_hold_until:
                         has_expired_day_trades = True
-                        break
 
                 if should_eod_flatten or has_expired_day_trades:
                     reason = "EOD Auto-Flatten: Approaching market close" if should_eod_flatten else "Day Trade Max Hold Duration Expired"
@@ -467,7 +604,9 @@ async def autonomous_background_worker_loop():
                         reason,
                         data_feed,
                         etoro_client,
-                        (config.execution_mode == "live")
+                        (config.execution_mode == "live"),
+                        (has_expired_day_trades and not should_eod_flatten),
+                        now_iso,
                     )
                     if flattened:
                         logger.info(f"☀️ [EOD AUTO-FLATTEN] Liquidated {len(flattened)} intraday day trades ({[t.symbol for t in flattened]}). Long-term holdings preserved.")
@@ -499,20 +638,27 @@ async def autonomous_background_worker_loop():
                     tv_breakouts = [b["symbol"] for b in screener.scan_tradingview_volume_breakouts(1.3, 5.0, 30, False) if b.get("symbol") and b["symbol"] not in CRYPTO_SYMBOLS]
                     screened_syms = [s["symbol"] for s in top_screened if s.get("opportunity_score", 0) >= 45 and s["symbol"] not in CRYPTO_SYMBOLS]
                     
-                    all_candidates = list(dict.fromkeys(smart_buys + tv_breakouts + screened_syms))
+                    all_candidates = list(dict.fromkeys(smart_buys + screened_syms + tv_breakouts))
                     if all_candidates:
                         clean_watchlist = [s for s in config.watchlist if s not in CRYPTO_SYMBOLS]
                         open_syms = [s for s in broker.positions.keys() if s not in CRYPTO_SYMBOLS]
                         rot = int(now // 300) % max(1, len(CORE_ANCHOR_SYMBOLS))
-                        rotated_anchors = CORE_ANCHOR_SYMBOLS[rot:] + CORE_ANCHOR_SYMBOLS[:rot]
-                        priority_syms = open_syms + ([active_symbol] if active_symbol not in CRYPTO_SYMBOLS else []) + all_candidates[:35]
-                        combined = list(dict.fromkeys(priority_syms + rotated_anchors + clean_watchlist))[:75]
+                        combined = build_prioritized_watchlist(
+                            open_syms=open_syms,
+                            active_symbol=active_symbol,
+                            smart_buys=smart_buys,
+                            tv_breakouts=tv_breakouts,
+                            screened_syms=screened_syms,
+                            existing_watchlist=clean_watchlist,
+                            core_anchors=CORE_ANCHOR_SYMBOLS,
+                            rot_offset=rot,
+                        )
                         config.watchlist = combined
                         logger.info(f"✨ [AUTONOMOUS ASSET SELECTION] Rotated active universe to {len(combined)} opportunities (Screened: {len(screened_syms)}, TV Breakouts: {len(tv_breakouts)}, Smart Money: {len(smart_buys)}). Top: {combined[:10]}")
                 except Exception as ex:
                     logger.warning(f"Dynamic asset discovery notice: {ex}")
 
-            # Filter open-market symbols first, pre-fetch quotes concurrently, then run analysis
+            # Filter open-market symbols first, budget quote prefetch to protect provider quota, then analyze
             cycle_syms: List[str] = []
             for sym in list(config.watchlist):
                 if config.enforce_market_hours:
@@ -522,8 +668,19 @@ async def autonomous_background_worker_loop():
                 cycle_syms.append(sym)
 
             if cycle_syms:
+                open_hold_syms = [s for s in broker.positions.keys() if s in cycle_syms and s not in CRYPTO_SYMBOLS]
+                priority_batch, bg_batch = select_cycle_prefetch_batch(
+                    watchlist=cycle_syms,
+                    open_syms=open_hold_syms,
+                    active_symbol=active_symbol,
+                    cycle_cursor=bg_prefetch_cursor,
+                    max_bg_batch=12,
+                )
+                bg_pool_len = max(1, len([s for s in cycle_syms if s not in priority_batch]))
+                bg_prefetch_cursor = (bg_prefetch_cursor + len(bg_batch)) % bg_pool_len
+                cycle_eval_syms = list(dict.fromkeys(priority_batch + bg_batch))
                 try:
-                    await asyncio.to_thread(data_feed.fetch_quotes_batch, cycle_syms)
+                    await asyncio.to_thread(data_feed.fetch_quotes_batch, cycle_eval_syms, 15.0)
                 except Exception as bqe:
                     logger.debug(f"Batch quote prefetch notice: {bqe}")
 
@@ -556,12 +713,12 @@ async def autonomous_background_worker_loop():
                                         macro_context=m_ctx,
                                     )
                                     refreshed += 1
-                        comm_targets = list(dict.fromkeys([s for s in broker.positions.keys() if s not in CRYPTO_SYMBOLS] + [active_symbol] + cycle_syms[:12]))
+                        comm_targets = list(dict.fromkeys([s for s in broker.positions.keys() if s not in CRYPTO_SYMBOLS] + [active_symbol] + cycle_eval_syms[:12]))
                         await asyncio.to_thread(_refresh_committee_batch, comm_targets)
                     except Exception as ce:
                         logger.debug(f"Background AI Committee refresh notice: {ce}")
 
-                for sym in cycle_syms:
+                for sym in cycle_eval_syms:
                     await asyncio.to_thread(run_analysis_cycle, sym)
                     await asyncio.sleep(0)
 
@@ -877,8 +1034,16 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
     session_msg = str(pre_trade_intel["etoro_data"]["session_msg"])
 
     daily_drawdown_usd, daily_drawdown_pct = broker.get_daily_drawdown()
-    active_day_trades = len([p for p in broker.positions.values() if getattr(p, "horizon", "swing") == "day"])
+    day_positions_list = [p for p in broker.positions.values() if getattr(p, "horizon", "swing") == "day"]
+    active_day_trades = len(day_positions_list)
+    day_trade_invested = sum(p.market_value_usd for p in day_positions_list)
+    day_trade_exposure_pct = day_trade_invested / max(1.0, equity)
     estimated_spread_pct = float(pre_trade_intel["etoro_data"]["estimated_spread_pct"])
+    sym_mins_to_close = telemetry_module.get_minutes_until_close(symbol) if (config.enforce_market_hours and market_open) else None
+    eod_window_active = bool(
+        sym_mins_to_close is not None
+        and 0 <= sym_mins_to_close <= config.day_trade_eod_flatten_minutes_before_close
+    )
 
     arbitration = arbitration_module.arbitration(
         main_mode=regime.mode,
@@ -902,93 +1067,93 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
         active_day_trades=active_day_trades,
         max_active_day_trades=config.day_trade_max_active,
         day_trading_enabled=config.enable_day_trading,
-        regime_trend=regime.trend
+        regime_trend=regime.trend,
+        day_trade_exposure_pct=day_trade_exposure_pct,
+        max_day_trade_allocation_pct=getattr(config, "day_trade_allocation_pct", 1.0),
+        eod_flatten_window_active=eod_window_active,
     )
 
     # 9. Decision Engine & Autonomous Execution
-    # Check trading hours before checking whether to place a trade
+    # Always evaluate chart / Wyckoff patterns and setup horizon from live indicators
     signal = "HOLD"
     allocated_usd = 0.0
     target_shares = 0.0
-    trade_horizon = "swing"
-    pattern_desc = None
-    sl_pct = config.default_stop_loss_pct
-    tp_pct = config.default_take_profit_pct
+    conv_thresh = getattr(config, "min_conviction_score", 0.08)
+    raw_confidence = abs(federation.federated_score)
+    raw_signal = "HOLD"
+    if federation.federated_score >= conv_thresh:
+        raw_signal = "BUY"
+    elif federation.federated_score <= -conv_thresh:
+        raw_signal = "SHORT"
+
+    vol_surge = float(indicators.get("volume_surge", 1.0))
+    breakout = str(indicators.get("breakout_type", "NONE"))
+    dt_sig = str(indicators.get("dual_thrust_signal", "NONE"))
+    lon_sig = str(indicators.get("london_breakout_signal", "NONE"))
+    ha_trend = str(indicators.get("heikin_ashi_trend", "CHOPPY"))
+    db_det = float(indicators.get("double_bottom_detected", 0.0)) > 0
+    dt_det = float(indicators.get("double_top_detected", 0.0)) > 0
+    adx_val = float(indicators.get("adx", 20.0))
+
+    wyck_sig = str(indicators.get("wyckoff_signal", "HOLD"))
+    wyck_phase = str(indicators.get("wyckoff_phase_code", "A"))
+    wyck_struct = str(indicators.get("wyckoff_structure", "NEUTRAL"))
+    spring_q = int(indicators.get("wyckoff_spring_score", 0))
+    utad_q = int(indicators.get("wyckoff_utad_score", 0))
+
+    wyck_desc = _format_wyckoff_pattern_desc(
+        signal=raw_signal,
+        wyck_sig=wyck_sig,
+        wyck_phase=wyck_phase,
+        wyck_struct=wyck_struct,
+        spring_q=spring_q,
+        utad_q=utad_q,
+    )
+    pattern_desc = wyck_desc or ("Double Bottom" if db_det else ("Double Top" if dt_det else (breakout if breakout != "NONE" else (f"DualThrust {dt_sig}" if dt_sig != "NONE" else (f"London {lon_sig}" if lon_sig != "NONE" else None)))))
+
+    screener_horizon = str(pre_trade_intel["screener_stocks"].get("recommended_horizon", "LONG-TERM"))
+    screener_opp = float(pre_trade_intel["screener_stocks"].get("opportunity_score", 50.0))
+    is_day_setup = (
+        vol_surge >= 1.15
+        or breakout != "NONE"
+        or spring_q >= 40 or utad_q >= 40
+        or (wyck_sig in ("BUY", "SHORT") and wyck_phase in ("C", "D", "E"))
+        or dt_sig != "NONE"
+        or (lon_sig != "NONE" and symbol in ("UK100", "GER40", "FRA40"))
+        or (ha_trend in ("BULLISH", "BEARISH") and adx_val >= 22.0)
+        or db_det or dt_det
+        or (adx_val >= 25.0 and raw_confidence >= 0.10)
+        or abs(catalyst_score) >= 0.25
+        or abs(flow_score) >= 0.20
+        or (screener_horizon == "DAY" and screener_opp >= 70.0)
+    )
+    trade_horizon = "day" if (config.enable_day_trading and is_day_setup) else "swing"
+    if trade_horizon == "day":
+        sl_pct = config.day_trade_stop_loss_pct
+        tp_pct = config.day_trade_take_profit_pct
+    else:
+        sl_pct = config.default_stop_loss_pct
+        tp_pct = config.default_take_profit_pct
 
     if config.enforce_market_hours and not market_open:
         confidence = 0.0
         rationale = f"Trading hours closed for {symbol}: {session_msg}. Autonomous trade checks bypassed. {pre_trade_intel['summary_tag']}"
         logger.debug(f"[TRADING HOURS CLOSED] {symbol}: {session_msg} - trade evaluation bypassed.")
     else:
-        confidence = abs(federation.federated_score)
+        confidence = raw_confidence
+        signal = raw_signal
         rationale = f"Ensemble score: {federation.federated_score:+.2f} | Winning model: {federation.federation} | {pre_trade_intel['summary_tag']}"
 
-        # Determine directional signal
-        conv_thresh = getattr(config, "min_conviction_score", 0.60)
-        if federation.federated_score >= conv_thresh:
-            signal = "BUY"
-        elif federation.federated_score <= -conv_thresh:
-            signal = "SHORT"
-
-        # Evaluate Trade Horizon (Day Trading vs Long-Term / Swing)
-        vol_surge = float(indicators.get("volume_surge", 1.0))
-        breakout = str(indicators.get("breakout_type", "NONE"))
-        dt_sig = str(indicators.get("dual_thrust_signal", "NONE"))
-        lon_sig = str(indicators.get("london_breakout_signal", "NONE"))
-        ha_trend = str(indicators.get("heikin_ashi_trend", "CHOPPY"))
-        db_det = float(indicators.get("double_bottom_detected", 0.0)) > 0
-        dt_det = float(indicators.get("double_top_detected", 0.0)) > 0
-        adx_val = float(indicators.get("adx", 20.0))
-
-        # Wyckoff Range Engine Events & Phases
-        wyck_sig = str(indicators.get("wyckoff_signal", "HOLD"))
-        wyck_phase = str(indicators.get("wyckoff_phase_code", "A"))
-        wyck_struct = str(indicators.get("wyckoff_structure", "NEUTRAL"))
-        spring_q = int(indicators.get("wyckoff_spring_score", 0))
-        utad_q = int(indicators.get("wyckoff_utad_score", 0))
-
-        if spring_q >= 40:
-            wyck_desc = f"Wyckoff Spring (Score: {spring_q})"
-        elif utad_q >= 40:
-            wyck_desc = f"Wyckoff UTAD (Score: {utad_q})"
-        elif wyck_phase in ("D", "E") and wyck_struct != "NEUTRAL":
-            wyck_desc = f"Wyckoff {wyck_struct} ({wyck_phase})"
-        else:
-            wyck_desc = None
-
-        pattern_desc = wyck_desc or ("Double Bottom" if db_det else ("Double Top" if dt_det else (breakout if breakout != "NONE" else (f"DualThrust {dt_sig}" if dt_sig != "NONE" else (f"London {lon_sig}" if lon_sig != "NONE" else None)))))
-
-        # Day Trading as PRIMARY mode: prefer intraday unless market conditions suggest swing
-        # Day setup: volume surge OR breakout OR Wyckoff Spring/UTAD OR Dual Thrust OR London breakout OR Heikin-Ashi trend OR pattern OR strong trend OR significant news/screener/congress catalyst
-        screener_horizon = str(pre_trade_intel["screener_stocks"].get("recommended_horizon", "LONG-TERM"))
-        screener_opp = float(pre_trade_intel["screener_stocks"].get("opportunity_score", 50.0))
-        is_day_setup = (
-            vol_surge >= 1.15              # Lower vol threshold (was 1.25)
-            or breakout != "NONE"          # Any range breakout
-            or spring_q >= 40 or utad_q >= 40 # Wyckoff Spring or UTAD shakeout
-            or (wyck_sig in ("BUY", "SHORT") and wyck_phase in ("C", "D", "E")) # Wyckoff directional transition
-            or dt_sig != "NONE"            # Dual Thrust quantitative breakout (from quant-trading)
-            or (lon_sig != "NONE" and symbol in ("UK100", "GER40", "FRA40"))  # London open breakout (European coverage)
-            or (ha_trend in ("BULLISH", "BEARISH") and adx_val >= 22.0)      # Heikin-Ashi smoothed trend
-            or db_det or dt_det            # Pattern recognition
-            or (adx_val >= 25.0 and confidence >= 0.10)  # Strong trend + conviction
-            or abs(catalyst_score) >= 0.25  # Significant Finnhub/EDGAR news catalyst
-            or abs(flow_score) >= 0.20      # Significant Congress / Smart Money conviction
-            or (screener_horizon == "DAY" and screener_opp >= 70.0) # Screener high-conviction day setup
-        )
-        can_day_trade = config.enable_day_trading and arbitration.day_trade_approved and is_day_setup
-
-        trade_horizon = "day" if can_day_trade else "swing"
-        
-        if trade_horizon == "day":
-            sl_pct = config.day_trade_stop_loss_pct
-            tp_pct = config.day_trade_take_profit_pct
-        else:
-            sl_pct = config.default_stop_loss_pct
-            tp_pct = config.default_take_profit_pct
+        # Never silently convert a blocked day trade into an unapproved overnight swing trade
+        if signal in ("BUY", "SHORT") and trade_horizon == "day" and not arbitration.day_trade_approved:
+            signal = "HOLD"
+            rationale = f"{rationale} | Day trade blocked by risk gate: {'; '.join(arbitration.reasons)}"
+        elif signal in ("BUY", "SHORT") and arbitration.daily_loss_circuit_breaker_active:
+            signal = "HOLD"
+            rationale = f"{rationale} | Daily loss circuit breaker active"
 
         # Execution if arbitration approved AND all 5 pre-trade intelligence sources verified
-        if arbitration.approved and signal in ("BUY", "SHORT"):
+        if arbitration.approved and signal in ("BUY", "SHORT") and (trade_horizon != "day" or arbitration.day_trade_approved):
             if not pre_trade_intel.get("all_sources_read") or not pre_trade_intel["etoro_data"].get("tradable", True):
                 logger.warning(f"🛑 [PRE-TRADE INTEL GATE BLOCKED] {symbol}: tradable={pre_trade_intel['etoro_data'].get('tradable')} | all_sources_read={pre_trade_intel.get('all_sources_read')}")
                 signal = "HOLD"
@@ -997,6 +1162,15 @@ def run_analysis_cycle(symbol: str) -> Dict[str, Any]:
                 is_index = symbol in ("UK100", "GER40", "FRA40", "SPX500", "NSDQ100", "DJ30")
                 min_alloc = 100.0 if is_index else 20.0
                 max_alloc = min(config.max_position_size_usd, min(250.0 if is_index else 150.0, max(min_alloc, equity * 0.20)))
+                if trade_horizon == "day":
+                    rem_day_budget = max(0.0, equity * getattr(config, "day_trade_allocation_pct", 1.0) - day_trade_invested)
+                    if rem_day_budget < min_alloc:
+                        signal = "HOLD"
+                        rationale = f"{rationale} | Day trade budget exhausted (${rem_day_budget:.2f} < ${min_alloc:.2f})"
+                    else:
+                        max_alloc = min(max_alloc, rem_day_budget)
+
+            if signal in ("BUY", "SHORT"):
                 # JEV Fractional Kelly Sizing: f = 0.25 × max(0, 2p-1) applied to max_alloc
                 # Falls back to confidence-scaled sizing if Kelly fraction is zero (no statistical edge)
                 kelly_f = getattr(federation, 'kelly_fraction', None)
@@ -1765,11 +1939,18 @@ def get_day_trading_status():
     mins_flatten = flatten_hour * 60 + flatten_min
     mins_remaining = max(0, mins_flatten - mins_now) if mins_now < mins_flatten else 0
 
+    equity = broker.get_equity()
+    day_exposure_usd = round(sum(p.market_value_usd for p in day_positions), 2)
+    day_exposure_pct = round((day_exposure_usd / max(1.0, equity)) * 100.0, 2)
+
     return {
         "status": "success",
         "enabled": config.enable_day_trading,
         "active_day_trades_count": len(day_positions),
         "max_active_day_trades": config.day_trade_max_active,
+        "day_trade_allocation_pct": config.day_trade_allocation_pct,
+        "day_trade_exposure_usd": day_exposure_usd,
+        "day_trade_exposure_pct": day_exposure_pct,
         "daily_loss_usd": daily_loss_usd,
         "daily_loss_limit_usd": config.max_daily_loss_usd,
         "daily_loss_pct": round(daily_loss_pct * 100.0, 2),
@@ -1884,6 +2065,33 @@ def get_etoro_status():
         "auth_cooldown_remaining_sec": max(0, int(etoro_client._auth_cooldown_until - time.time())) if etoro_client.is_in_auth_cooldown() else 0,
         "last_auth_error": etoro_client._last_auth_error,
     }
+
+
+class PositionUpdateRequest(BaseModel):
+    stop_loss_rate: Optional[float] = None
+    take_profit_rate: Optional[float] = None
+    stop_loss_type: Optional[str] = "fixed"
+    clear_stop_loss: Optional[bool] = None
+    clear_take_profit: Optional[bool] = None
+    mode: Optional[str] = None
+
+
+@app.patch("/api/etoro/positions/{position_id}", tags=["eToro Live Integration"])
+def update_etoro_position_endpoint(position_id: str, req: PositionUpdateRequest):
+    """Updates stop-loss and/or take-profit on an open eToro position via PATCH /api/v2/trading/[demo/]positions/{positionId}."""
+    target_mode = (req.mode or ("real" if config.execution_mode == "live" else "demo")).lower()
+    res = etoro_client.update_position(
+        position_id=position_id,
+        stop_loss_rate=req.stop_loss_rate,
+        take_profit_rate=req.take_profit_rate,
+        stop_loss_type=req.stop_loss_type,
+        clear_stop_loss=req.clear_stop_loss,
+        clear_take_profit=req.clear_take_profit,
+        mode=target_mode,
+    )
+    if not res.get("success"):
+        raise HTTPException(status_code=int(res.get("status_code") or 400), detail=res)
+    return res
 
 
 @app.post("/api/etoro/test_connection", tags=["eToro Live Integration"])

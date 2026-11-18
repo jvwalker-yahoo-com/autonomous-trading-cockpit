@@ -670,3 +670,740 @@ def test_etoro_watchlist_invalidates_stale_cached_id_on_422():
     assert res["watchlist_id"] == 9001
     assert client._watchlist_id_cache["autonomous cockpit"] == 9001
     assert ("POST", "/api/v1/watchlists/9001/items") in calls
+
+
+# ── P2.4: Quote Cooldowns, Anti-Simulated Poisoning, Portfolio ID Seeding, Wyckoff Alignment ──
+
+def test_data_feed_provider_cooldown_tv_fallback_and_concurrent_finnhub_no_simulated():
+    """
+    Verifies three quote-feed integrity guarantees:
+    1. Exhausted providers (HTTP 429 / AV limit banner) enter cooldown and are NOT re-hammered
+       on subsequent symbols in the same batch or immediate retries.
+    2. Concurrent get_latest_quote/fetch_quotes_batch calls on Finnhub pace safely instead of
+       lock-skipping threads 2..N straight into 'simulated'.
+    3. TradingView Scanner batch quote fallback resolves remaining US equities when paid batch
+       feeds fail, and transient CFD/symbol misses never poison _quote_cache or active_feed_source
+       with 'simulated' while real quotes are active.
+    """
+    # Subtest A: Provider 429/limit cooldown + TradingView batch fallback + non-poisoning CFD miss
+    feed = DataFeedManager()
+    feed.api_key = "fh_test_key_12345"
+    feed.twelve_data_api_key = "td_test_key_12345"
+    feed.fmp_api_key = "fmp_test_key_12345"
+    feed.alpha_vantage_api_key = "av_test_key_12345"
+    feed._quote_cache.clear()
+
+    provider_hits = {"finnhub": [], "twelvedata": 0, "fmp": 0, "alphavantage": 0, "tradingview": 0}
+
+    class FakeResp:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+            self.text = str(payload)
+
+        def json(self):
+            return self._payload
+
+    def fake_get(url, timeout=3.0, **kwargs):
+        if "twelvedata.com" in url:
+            provider_hits["twelvedata"] += 1
+            return FakeResp(429, {"code": 429, "status": "error", "message": "You have run out of API credits."})
+        if "financialmodelingprep.com" in url:
+            provider_hits["fmp"] += 1
+            return FakeResp(429, {"Error Message": "Limit Reach."})
+        if "alphavantage.co" in url:
+            provider_hits["alphavantage"] += 1
+            return FakeResp(200, {"Information": "Our standard API rate limit is 25 requests per day."})
+        if "finnhub.io/api/v1/quote" in url:
+            sym = url.split("symbol=")[1].split("&")[0]
+            provider_hits["finnhub"].append(sym)
+            if sym == "AAPL":
+                return FakeResp(200, {"c": 358.6, "h": 360.8, "l": 357.3, "o": 357.9, "pc": 354.9})
+            if sym == "UK100":
+                return FakeResp(200, {"c": 0, "h": 0, "l": 0, "o": 0, "pc": 0})
+            return FakeResp(429, {"error": "API limit reached"})
+        raise AssertionError(f"Unexpected GET URL: {url}")
+
+    def fake_post(url, json=None, timeout=5.0, **kwargs):
+        if "scanner.tradingview.com" in url:
+            provider_hits["tradingview"] += 1
+            tv_rows = {
+                "AAPL": {"s": "NASDAQ:AAPL", "d": ["AAPL", 358.6, 360.8, 357.3, 357.9, 14908821, 1.05]},
+                "FVD": {"s": "AMEX:FVD", "d": ["FVD", 51.76, 51.90, 51.58, 51.74, 200047, 0.45]},
+                "BAC": {"s": "NYSE:BAC", "d": ["BAC", 50.69, 50.92, 50.43, 50.89, 6427985, 0.35]},
+                "MSFT": {"s": "NASDAQ:MSFT", "d": ["MSFT", 412.5, 415.0, 410.0, 411.0, 12000000, 0.60]},
+            }
+            req_syms = []
+            for f in (json or {}).get("filter", []):
+                if f.get("left") == "name":
+                    req_syms = f.get("right", [])
+            matched = [tv_rows[s] for s in req_syms if s in tv_rows]
+            return FakeResp(200, {"totalCount": len(matched), "data": matched})
+        raise AssertionError(f"Unexpected POST URL: {url}")
+
+    with patch.object(feed._session, "get", side_effect=fake_get), \
+         patch.object(feed._session, "post", side_effect=fake_post):
+        quotes = feed.fetch_quotes_batch(["AAPL", "FVD", "BAC", "MSFT", "UK100"])
+
+    # Exhausted providers must enter cooldown (hit at most once each across all 5 symbols)
+    assert provider_hits["fmp"] == 1
+    assert provider_hits["twelvedata"] == 1
+    assert provider_hits["alphavantage"] <= 1
+    assert quotes["AAPL"].source in ("finnhub", "tradingview")
+    assert quotes["FVD"].source == "tradingview"
+    assert abs(quotes["FVD"].price - 51.76) < 0.01
+    assert quotes["BAC"].source == "tradingview"
+    assert abs(quotes["BAC"].price - 50.69) < 0.01
+    assert quotes["MSFT"].source == "tradingview"
+    # UK100 simulated miss must NOT leave active_feed_source stuck at 'simulated' or poison _quote_cache
+    assert feed.active_feed_source != "simulated"
+    if "UK100" in feed._quote_cache:
+        assert feed._quote_cache["UK100"][1].source != "simulated"
+
+    # Subtest B: Concurrent threads hitting Finnhub must pace rather than instant-skip to simulated
+    conc_feed = DataFeedManager()
+    conc_feed.api_key = "fh_conc_key_12345"
+    conc_feed.twelve_data_api_key = ""
+    conc_feed.fmp_api_key = ""
+    conc_feed.alpha_vantage_api_key = ""
+    conc_feed._quote_cache.clear()
+    # Force TradingView fallback off so we strictly test Finnhub thread pacing
+    with patch.object(conc_feed._session, "get", return_value=FakeResp(200, {"c": 199.5, "h": 201.0, "l": 198.0, "o": 199.0, "pc": 197.5})), \
+         patch.object(conc_feed._session, "post", return_value=FakeResp(503, {})):
+        conc_quotes = conc_feed.fetch_quotes_batch(["AAPL", "MSFT", "NVDA", "META"])
+
+    for sym in ("AAPL", "MSFT", "NVDA", "META"):
+        assert conc_quotes[sym].source == "finnhub", f"{sym} fell back to {conc_quotes[sym].source} under concurrency"
+
+
+def test_watchlist_priority_prevents_tv_microcap_starvation_and_budgets_prefetch():
+    """
+    Non-DB TradingView micro-cap movers must never crowd out open holdings, active_symbol,
+    or CORE_ANCHOR_SYMBOLS; cycle prefetch must budget external requests within quota.
+    """
+    from backend import server
+
+    open_syms = ["BA", "FVD", "BAC"]
+    tv_microcaps = [f"MICRO{i}" for i in range(1, 31)]
+    screened = ["NVDA", "PLTR", "MSFT"]
+    smart_buys = ["META"]
+    existing_wl = ["AAPL", "AMZN"]
+
+    prioritized = server.build_prioritized_watchlist(
+        open_syms=open_syms,
+        active_symbol="AAPL",
+        smart_buys=smart_buys,
+        tv_breakouts=tv_microcaps,
+        screened_syms=screened,
+        existing_watchlist=existing_wl,
+        is_known_etoro_symbol=lambda s: s in ("BA", "FVD", "BAC", "AAPL", "AMZN", "NVDA", "PLTR", "MSFT", "META") or s in server.CORE_ANCHOR_SYMBOLS,
+    )
+
+    assert prioritized[:4] == ["BA", "FVD", "BAC", "AAPL"]
+    # Core anchor symbols & eToro-screened candidates must precede arbitrary unverified TV micro-caps
+    micro_indices = [prioritized.index(m) for m in tv_microcaps if m in prioritized]
+    anchor_idx = prioritized.index("UK100") if "UK100" in prioritized else prioritized.index("NVDA")
+    if micro_indices:
+        assert min(micro_indices) > anchor_idx
+        assert len(micro_indices) <= 10
+
+    priority_batch, bg_batch = server.select_cycle_prefetch_batch(
+        watchlist=prioritized,
+        open_syms=open_syms,
+        active_symbol="AAPL",
+        cycle_cursor=0,
+        max_bg_batch=15,
+    )
+    assert set(open_syms + ["AAPL"]).issubset(set(priority_batch))
+    assert len(priority_batch) + len(bg_batch) <= 30
+
+
+def test_etoro_portfolio_sync_seeds_instrument_ids_and_resolves_fvd_bac_no_collision():
+    """
+    Verifies authoritative FVD=1087 and BAC=1011 IDs, no collisions on 1010/1011/1087 with
+    INTC/QCOM/TLN (including cleanup of stale colliding rows in existing SQLite DBs), and
+    automatic instrument_id seeding during live eToro portfolio sync.
+    """
+    from backend.engine.instruments_db import get_etoro_id, INITIAL_SEED_INSTRUMENTS, InstrumentsDBManager
+    from src.services.etoro.client import SYMBOL_TO_ETORO_ID, EToroClient
+    from backend import server
+
+    # 1. Seed dictionaries must have FVD=1087, BAC=1011, BA=1010 with zero ID collisions
+    assert get_etoro_id("FVD") == 1087
+    assert get_etoro_id("BAC") == 1011
+    assert get_etoro_id("BA") == 1010
+    assert SYMBOL_TO_ETORO_ID.get("FVD") == 1087
+    assert SYMBOL_TO_ETORO_ID.get("BAC") == 1011
+    assert SYMBOL_TO_ETORO_ID.get("INTC") != 1010
+
+    seed_by_id = {}
+    for row in INITIAL_SEED_INSTRUMENTS:
+        iid = row["instrument_id"]
+        if iid in (1010, 1011, 1087):
+            seed_by_id.setdefault(iid, []).append(row["symbol"])
+    assert seed_by_id[1010] == ["BA"]
+    assert seed_by_id[1011] == ["BAC"]
+    assert seed_by_id[1087] == ["FVD"]
+
+    # 2. Existing SQLite DB with legacy wrong colliding IDs must be repaired on init & seed new holdings
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "legacy_instruments.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS instruments (symbol TEXT PRIMARY KEY, instrument_id INTEGER NOT NULL, name TEXT, category TEXT, asset_class TEXT, trading_hours TEXT, is_active INTEGER DEFAULT 1, last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+        )
+        conn.execute("INSERT INTO instruments VALUES ('INTC', 1010, 'Intel Old', 'Semi', 'Stock', 'US', 1, 0)")
+        conn.execute("INSERT INTO instruments VALUES ('QCOM', 1011, 'QCOM Old', 'Semi', 'Stock', 'US', 1, 0)")
+        conn.execute("INSERT INTO instruments VALUES ('TLN', 1087, 'TLN Old', 'Power', 'Stock', 'US', 1, 0)")
+        conn.commit()
+        conn.close()
+
+        db = InstrumentsDBManager(db_path=db_path)
+        assert db.get_instrument_id("BA") == 1010
+        assert db.get_instrument_id("BAC") == 1011
+        assert db.get_instrument_id("FVD") == 1087
+        assert db.get_instrument_id("INTC") is None
+        assert db.get_instrument_id("QCOM") is None
+        assert db.get_instrument_id("TLN") is None
+
+        # 3. Live portfolio sync must automatically seed newly seen holdings into DB and etoro cache
+        fake_portfolio = {
+            "totals": {"availableCash": 400.0, "totalValue": 1100.0, "invested": 700.0, "unrealizedPnL": 0.0},
+            "holdings": [
+                {"market": {"symbol": "NEWETF", "instrumentId": 98765, "name": "New Held ETF"}, "invested": 100.0, "value": 102.0, "pnl": 2.0, "pnlPercent": 2.0, "units": 2.0, "avgOpenRate": 50.0, "currentRate": 51.0},
+                {"market": {"symbol": "FVD", "instrumentId": 1087}, "invested": 50.0, "value": 51.7, "pnl": 1.7, "pnlPercent": 3.4, "units": 1.0, "avgOpenRate": 50.0, "currentRate": 51.7},
+            ],
+        }
+        et = EToroClient(api_key="test_k", user_key="ey_test_u")
+        seeded_count = db.seed_from_portfolio(fake_portfolio, instrument_cache=et._instrument_cache)
+        assert seeded_count >= 1
+        assert db.get_instrument_id("NEWETF") == 98765
+        assert et._instrument_cache.get("NEWETF") == 98765
+
+        # Also verify EToroClient.get_portfolio() itself seeds instruments_db without swallowed errors
+        with patch("backend.engine.instruments_db.get_instruments_db", return_value=db), \
+             patch.object(et, "is_configured", return_value=True), \
+             patch.object(et, "is_in_auth_cooldown", return_value=False), \
+             patch.object(et, "call_mcp_tool", return_value={"success": True, "data": {"holdings": [{"market": {"symbol": "MCPHLD", "instrumentId": 77777, "name": "MCP Held Asset"}}]}}):
+            mcp_out = et.get_portfolio(mode="real")
+        assert mcp_out["success"] is True
+        assert db.get_instrument_id("MCPHLD") == 77777
+        assert et._instrument_cache.get("MCPHLD") == 77777
+
+        # Also test server.sync_live_etoro_portfolio_if_live() seeds DB automatically
+        fake_portfolio["holdings"].append(
+            {"market": {"symbol": "LIVEHLD", "instrumentId": 54321, "name": "Live Holding"}, "invested": 60.0, "value": 60.0, "pnl": 0.0, "pnlPercent": 0.0, "units": 1.0, "avgOpenRate": 60.0, "currentRate": 60.0}
+        )
+        orig_mode = server.config.execution_mode
+        try:
+            server.config.execution_mode = "live"
+            with patch.object(server.etoro_client, "is_configured", return_value=True), \
+                 patch.object(server.etoro_client, "get_portfolio", return_value={"success": True, "data": fake_portfolio}), \
+                 patch("backend.engine.instruments_db.get_instruments_db", return_value=db), \
+                 patch.object(server.broker, "sync_live_etoro_portfolio"):
+                server.sync_live_etoro_portfolio_if_live(force=True)
+            assert db.get_instrument_id("LIVEHLD") == 54321
+            assert server.etoro_client._instrument_cache.get("LIVEHLD") == 54321
+        finally:
+            server.config.execution_mode = orig_mode
+
+
+def test_wyckoff_pattern_desc_aligns_with_signal_and_structure():
+    """
+    A bearish DISTRIBUTION setup or SHORT signal with stale spring_quality_score >= 40
+    must never be labeled 'Wyckoff Spring', and a bullish ACCUMULATION/BUY setup with
+    utad_quality_score >= 40 must never be labeled 'Wyckoff UTAD'.
+    """
+    from backend import server
+
+    fake_quote = MarketDataPoint(
+        symbol="NU", price=13.20, high=13.30, low=12.10,
+        open_p=12.40, prev_close=11.83, volume=80_000_000.0, source="tradingview"
+    )
+    bearish_nu_indicators = {
+        "ema_9": 12.8, "ema_21": 13.5, "rsi_14": 42.0,
+        "macd_line": -0.2, "macd_signal": -0.1,
+        "bb_upper": 14.0, "bb_lower": 11.8, "bb_mid": 12.9,
+        "atr": 0.45, "volatility_std": 0.3, "adx": 28.0,
+        "plus_di": 15.0, "minus_di": 28.0,
+        "supertrend_val": 13.6, "supertrend_dir": -1.0,
+        "vwap": 13.4, "mfi": 40.0, "volume_surge": 1.6,
+        "breakout_type": "NONE", "breakout_level": 0.0,
+        "double_bottom_detected": 0.0, "double_top_detected": 0.0,
+        "dual_thrust_signal": "NONE", "london_breakout_signal": "NONE",
+        "heikin_ashi_trend": "BEARISH", "heikin_ashi_consecutive": 3,
+        "wyckoff_structure": "DISTRIBUTION",
+        "wyckoff_phase": "Phase E: Markdown In Progress",
+        "wyckoff_phase_code": "E",
+        "wyckoff_bias": "BEARISH",
+        "wyckoff_signal": "SHORT",
+        "wyckoff_creek": 14.0, "wyckoff_ice": 12.5,
+        "wyckoff_climax_score": 50,
+        "wyckoff_spring_score": 73,
+        "wyckoff_utad_score": 0,
+        "wyckoff_tp1": 12.0, "wyckoff_tp2": 11.5, "wyckoff_tp3": 11.0, "wyckoff_sl": 13.8,
+        "wyckoff_data": {"structure_type": "DISTRIBUTION", "phase_code": "E", "signal": "SHORT", "spring_quality_score": 73, "utad_quality_score": 0},
+    }
+
+    orig_mode = server.config.execution_mode
+    orig_sim = server.config.simulation_mode
+    try:
+        server.config.execution_mode = "paper"
+        server.config.simulation_mode = True
+        with patch.object(server.data_feed, "get_latest_quote", return_value=fake_quote), \
+             patch.object(server.data_feed, "get_technical_indicators", return_value=bearish_nu_indicators):
+            out = server.run_analysis_cycle("NU")
+        pat = out["decision"].pattern_detected or ""
+        assert "Spring" not in pat, f"Bearish DISTRIBUTION setup mislabeled as {pat!r}"
+        assert pat == "Wyckoff DISTRIBUTION (E)"
+    finally:
+        server.config.execution_mode = orig_mode
+        server.config.simulation_mode = orig_sim
+
+    # Direct directional helper contract across all combinations
+    assert server._format_wyckoff_pattern_desc("BUY", "BUY", "C", "ACCUMULATION", 75, 0) == "Wyckoff Spring (Score: 75)"
+    assert server._format_wyckoff_pattern_desc("BUY", "BUY", "E", "ACCUMULATION", 0, 100) == "Wyckoff ACCUMULATION (E)"
+    assert server._format_wyckoff_pattern_desc("SHORT", "SHORT", "C", "DISTRIBUTION", 45, 80) == "Wyckoff UTAD (Score: 80)"
+    assert server._format_wyckoff_pattern_desc("HOLD", "SHORT", "E", "DISTRIBUTION", 73, 0) == "Wyckoff DISTRIBUTION (E)"
+    assert server._format_wyckoff_pattern_desc("SHORT", "BUY", "E", "ACCUMULATION", 65, 0) is None
+
+
+# ── P2.5: Day Trading End-to-End Correctness, Churn Prevention & Intraday Execution ──
+
+def test_day_trading_gate_blocks_instead_of_silent_swing_conversion_and_enforces_allocation_and_eod_window():
+    """
+    Verifies:
+    1. ArbitrationModule blocks day trades when day_trade_exposure_pct >= max_day_trade_allocation_pct
+       or when eod_flatten_window_active is True.
+    2. In run_analysis_cycle, when a symbol is a day setup (enable_day_trading=True, is_day_setup=True)
+       and arbitration.day_trade_approved is False (e.g., max active day trades reached, daily loss CB hit,
+       allocation cap reached, or EOD flatten window active), the engine keeps horizon='day' and blocks
+       the entry (signal='HOLD') instead of silently converting it into an overnight 'swing' trade.
+    """
+    from backend.engine.arbitration import ArbitrationModule
+    from backend import server
+
+    arb_mod = ArbitrationModule()
+
+    # 1a. Day trade capital allocation cap gate
+    alloc_arb = arb_mod.arbitration(
+        main_mode="OK",
+        quadrant="LOW",
+        anomaly_detected=False,
+        current_drawdown_pct=0.01,
+        max_drawdown_limit_pct=0.15,
+        current_exposure_pct=0.55,
+        max_exposure_limit_pct=0.85,
+        active_positions_count=3,
+        max_concurrent_positions=15,
+        market_open=True,
+        enforce_market_hours=True,
+        active_day_trades=2,
+        max_active_day_trades=8,
+        day_trading_enabled=True,
+        day_trade_exposure_pct=0.52,
+        max_day_trade_allocation_pct=0.50,
+    )
+    assert alloc_arb.day_trade_approved is False
+    assert any("day trade allocation" in r.lower() for r in alloc_arb.reasons)
+
+    # 1b. EOD flatten window gate blocks new day trade entries before market close
+    eod_arb = arb_mod.arbitration(
+        main_mode="OK",
+        quadrant="LOW",
+        anomaly_detected=False,
+        current_drawdown_pct=0.01,
+        max_drawdown_limit_pct=0.15,
+        current_exposure_pct=0.20,
+        max_exposure_limit_pct=0.85,
+        active_positions_count=1,
+        max_concurrent_positions=15,
+        market_open=True,
+        enforce_market_hours=True,
+        active_day_trades=1,
+        max_active_day_trades=8,
+        day_trading_enabled=True,
+        eod_flatten_window_active=True,
+    )
+    assert eod_arb.day_trade_approved is False
+    assert any("eod flatten window" in r.lower() for r in eod_arb.reasons)
+
+    # 2. run_analysis_cycle must NOT silently convert a blocked day trade into an executed swing trade
+    fake_quote = MarketDataPoint(
+        symbol="NVDA", price=140.0, high=142.0, low=138.0,
+        open_p=139.0, prev_close=137.5, volume=50_000_000.0, source="finnhub"
+    )
+    bullish_day_indicators = {
+        "ema_9": 141.5, "ema_21": 138.0, "rsi_14": 60.0,
+        "macd_line": 1.2, "macd_signal": 0.8,
+        "bb_upper": 144.0, "bb_lower": 135.0, "bb_mid": 139.5,
+        "keltner_upper": 139.0, "keltner_lower": 135.0,
+        "atr": 2.1, "volatility_std": 1.5, "adx": 32.0,
+        "plus_di": 34.0, "minus_di": 12.0,
+        "supertrend_val": 136.5, "supertrend_dir": 1.0,
+        "vwap": 138.8, "mfi": 62.0, "volume_surge": 1.8,
+        "breakout_type": "BULL_BREAKOUT", "breakout_level": 139.5,
+        "double_bottom_detected": 0.0, "double_top_detected": 0.0,
+        "dual_thrust_signal": "BUY", "london_breakout_signal": "NONE",
+        "heikin_ashi_trend": "BULLISH", "heikin_ashi_consecutive": 4,
+        "wyckoff_structure": "ACCUMULATION",
+        "wyckoff_phase": "Phase D: Sign of Strength (SOS)",
+        "wyckoff_phase_code": "D",
+        "wyckoff_bias": "BULLISH",
+        "wyckoff_signal": "BUY",
+        "wyckoff_spring_score": 65,
+        "wyckoff_utad_score": 0,
+        "wyckoff_climax_score": 40,
+        "wyckoff_data": {"structure_type": "ACCUMULATION", "phase_code": "D", "signal": "BUY"},
+    }
+
+    orig_mode = server.config.execution_mode
+    orig_sim = server.config.simulation_mode
+    orig_hours = server.config.enforce_market_hours
+    orig_dt = server.config.enable_day_trading
+    orig_max_dt = server.config.day_trade_max_active
+    orig_conv = server.config.min_conviction_score
+    orig_positions = dict(server.broker.positions)
+    try:
+        server.config.execution_mode = "paper"
+        server.config.simulation_mode = True
+        server.config.enforce_market_hours = False
+        server.config.enable_day_trading = True
+        server.config.day_trade_max_active = 0  # Force day_trade_approved=False while overall approved=True
+        server.config.min_conviction_score = 0.08
+        server.broker.positions.clear()
+
+        with patch.object(server.data_feed, "get_latest_quote", return_value=fake_quote), \
+             patch.object(server.data_feed, "get_technical_indicators", return_value=bullish_day_indicators):
+            res = server.run_analysis_cycle("NVDA")
+
+        assert res["arbitration"].approved is True
+        assert res["arbitration"].day_trade_approved is False
+        assert res["decision"].horizon == "day"
+        assert res["decision"].signal == "HOLD"
+        assert "NVDA" not in server.broker.positions, "Blocked day trade was falsely opened as a swing position!"
+    finally:
+        server.config.execution_mode = orig_mode
+        server.config.simulation_mode = orig_sim
+        server.config.enforce_market_hours = orig_hours
+        server.config.enable_day_trading = orig_dt
+        server.config.day_trade_max_active = orig_max_dt
+        server.config.min_conviction_score = orig_conv
+        server.broker.positions = orig_positions
+
+
+def test_auto_flatten_only_expired_preserves_active_day_trades():
+    """
+    When one day trade exceeds max_hold_until mid-session (only_expired=True),
+    auto_flatten_day_trades must close ONLY the expired day trade and preserve
+    newly opened day trades whose holding window has not expired.
+    """
+    from datetime import datetime, timezone, timedelta
+    from backend.engine.broker import SimulatedBroker
+
+    b = SimulatedBroker(initial_capital=3000.0)
+    old_pos = b.execute_order(
+        symbol="AMD", direction="LONG", allocated_usd=200.0, current_price=150.0,
+        stop_loss_pct=0.015, take_profit_pct=0.030, horizon="day", max_hold_hours=4.0
+    )
+    fresh_pos = b.execute_order(
+        symbol="META", direction="LONG", allocated_usd=200.0, current_price=500.0,
+        stop_loss_pct=0.015, take_profit_pct=0.030, horizon="day", max_hold_hours=4.0
+    )
+    swing_pos = b.execute_order(
+        symbol="MSFT", direction="LONG", allocated_usd=200.0, current_price=400.0,
+        stop_loss_pct=0.025, take_profit_pct=0.050, horizon="swing"
+    )
+    assert old_pos and fresh_pos and swing_pos
+
+    # Expire AMD's max_hold_until while keeping META 3 hours in the future
+    b.positions["AMD"].max_hold_until = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    b.positions["META"].max_hold_until = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+
+    expired_closed = b.auto_flatten_day_trades(
+        current_prices={"AMD": 151.0, "META": 502.0, "MSFT": 401.0},
+        exit_rationale="Day Trade Max Hold Duration Expired",
+        only_expired=True,
+    )
+    assert [t.symbol for t in expired_closed] == ["AMD"]
+    assert "AMD" not in b.positions
+    assert "META" in b.positions
+    assert "MSFT" in b.positions
+
+    # Full EOD flatten (only_expired=False) closes remaining day trade (META) and keeps swing (MSFT)
+    eod_closed = b.auto_flatten_day_trades(
+        current_prices={"META": 503.0, "MSFT": 402.0},
+        exit_rationale="EOD Auto-Flatten",
+        only_expired=False,
+    )
+    assert [t.symbol for t in eod_closed] == ["META"]
+    assert "META" not in b.positions
+    assert "MSFT" in b.positions
+
+
+def test_sync_live_etoro_portfolio_ignores_0001_placeholder_and_prevents_mismatched_entry_stop_churn():
+    """
+    Verifies two critical live stop-loss protections:
+    1. eToro raw positions with stopLossRate=0.0001 (and/or isNoStopLoss=True) are treated
+       as having NO broker stop-loss and receive a proper synthetic stop-loss anchored to openRate.
+    2. If a pre-existing local position had a mismatched entry_price (e.g. $185.00 from an
+       external quote with stop_loss=$180.38) while eToro's actual fill avgOpenRate is $172.47,
+       sync_live_etoro_portfolio re-anchors stop_loss below $172.47 so enforce_live_stops does NOT
+       falsely liquidate the newly opened position 8 seconds later.
+    """
+    from backend.engine.broker import SimulatedBroker
+    from backend.engine.models import Position
+
+    b = SimulatedBroker(initial_capital=1300.0)
+    # Pre-existing local position created from external quote ($185.00) before eToro fill ($172.47) synced
+    b.positions["BA"] = Position(
+        id="pos_temp1234",
+        symbol="BA",
+        direction="LONG",
+        horizon="day",
+        shares=0.8108,
+        entry_price=185.00,
+        current_price=185.00,
+        cost_basis_usd=150.0,
+        market_value_usd=150.0,
+        unrealized_pnl_usd=0.0,
+        unrealized_pnl_pct=0.0,
+        stop_loss=182.22,
+        take_profit=190.55,
+        entry_time="2026-11-13T13:15:50Z",
+        max_hold_until="2026-11-13T17:15:50Z",
+        rationale="Autonomous [DAY] LONG entry on BA",
+        contributing_models={"momentum_trend": 0.65},
+    )
+
+    b.sync_live_etoro_portfolio({
+        "totals": {"totalValue": 1295.0, "availableCash": 995.0, "frozenCash": 0.0},
+        "holdings": [
+            {
+                "market": {"instrumentId": 1010, "symbol": "BA", "name": "Boeing"},
+                "invested": 150.0,
+                "value": 149.11,
+                "pnl": -0.89,
+                "pnlPercent": -0.59,
+                "units": 0.869716,
+                "avgOpenRate": 172.47,
+                "currentRate": 171.45,
+                "positions": [
+                    {
+                        "positionId": 3636110990,
+                        "openTime": "2026-11-13T13:15:53.32",
+                        "openRate": 172.47,
+                        "currentRate": 171.45,
+                        "units": 0.869716,
+                        "invested": 150.0,
+                        "pnl": -0.89,
+                        "pnlPercent": -0.59,
+                        "direction": "long",
+                        "stopLossRate": 0.0001,
+                        "isNoStopLoss": True,
+                        "takeProfitRate": 0.0,
+                        "isNoTakeProfit": True,
+                    }
+                ],
+            }
+        ],
+    })
+
+    ba = b.positions["BA"]
+    assert ba.horizon == "day"
+    assert ba.entry_price == 172.47
+    # Stop loss must be re-anchored below 172.47 (172.47 * (1 - 0.015) = 169.88), never 182.22 or 0.0001!
+    assert 165.0 < ba.stop_loss < 171.0, f"Expected stop_loss anchored below 172.47, got {ba.stop_loss}"
+    assert ba.take_profit > 172.47
+
+    # enforce_live_stops must NOT close BA when current_price is 171.45 (-0.59% < 1.5% day SL)
+    class DummyEtoro:
+        def is_configured(self):
+            return True
+        def resolve_instrument_id(self, sym):
+            return 1010
+        def close_position(self, position_id, mode="real", instrument_id=None):
+            raise AssertionError("enforce_live_stops should NOT close BA at -0.59%!")
+
+    enforced = b.enforce_live_stops(etoro_client=DummyEtoro(), max_loss_pct=0.025, day_trade_max_loss_pct=0.015)
+    assert enforced == []
+    assert "BA" in b.positions
+
+
+def test_sync_live_etoro_trading_history_preserves_and_infers_day_trade_horizon():
+    """
+    sync_live_etoro_trading_history must:
+    1. Preserve existing TradeRecord metadata (horizon='day', contributing_models, mistake_analysis)
+       when re-syncing closed trades.
+    2. Classify intraday eToro closed trades (opened and closed on the same day / <= 6h) as horizon='day'
+       so live day-trading win rate and P&L metrics remain accurate.
+    """
+    from backend.engine.broker import SimulatedBroker
+    from backend.engine.models import TradeRecord
+
+    b = SimulatedBroker(initial_capital=1300.0)
+    b.trade_ledger = [
+        TradeRecord(
+            id="etoro-111",
+            symbol="NVDA",
+            direction="LONG",
+            horizon="day",
+            shares=1.0,
+            entry_price=135.0,
+            exit_price=139.0,
+            cost_basis_usd=135.0,
+            exit_value_usd=139.0,
+            realized_pnl_usd=4.0,
+            realized_pnl_pct=2.96,
+            win=True,
+            entry_time="2026-11-13T14:35:00Z",
+            exit_time="2026-11-13T16:10:00Z",
+            entry_rationale="Autonomous [DAY] LONG entry on NVDA",
+            exit_rationale="Live Take Profit Enforced",
+            contributing_models={"momentum_trend": 0.72},
+        )
+    ]
+
+    b.sync_live_etoro_trading_history([
+        {
+            "positionId": 111,
+            "symbol": "NVDA",
+            "direction": "LONG",
+            "units": 1.0,
+            "openRate": 135.0,
+            "closeRate": 139.0,
+            "investment": 135.0,
+            "netProfit": 4.0,
+            "fees": 0.0,
+            "openTime": "2026-11-13T14:35:00Z",
+            "closeTime": "2026-11-13T16:10:00Z",
+        },
+        {
+            "positionId": 222,
+            "symbol": "AAPL",
+            "direction": "LONG",
+            "units": 0.5,
+            "openRate": 350.0,
+            "closeRate": 355.0,
+            "investment": 175.0,
+            "netProfit": 2.5,
+            "fees": 0.0,
+            "openTime": "2026-11-13T15:00:00Z",
+            "closeTime": "2026-11-13T18:30:00Z",
+        },
+        {
+            "positionId": 333,
+            "symbol": "IWP",
+            "direction": "LONG",
+            "units": 0.9,
+            "openRate": 132.49,
+            "closeRate": 129.25,
+            "investment": 120.18,
+            "netProfit": -2.94,
+            "fees": 0.0,
+            "openTime": "2026-11-11T17:56:10Z",
+            "closeTime": "2026-11-13T14:50:52Z",
+        },
+    ])
+
+    by_id = {t.id: t for t in b.trade_ledger}
+    assert by_id["etoro-111"].horizon == "day"
+    assert by_id["etoro-111"].contributing_models == {"momentum_trend": 0.72}
+    assert by_id["etoro-222"].horizon == "day"
+    assert by_id["etoro-333"].horizon == "swing"
+
+    summary = b.get_portfolio_summary()
+    assert summary.day_trades_count == 2
+    assert summary.day_trades_realized_pnl_usd == 6.5
+    assert summary.day_trades_win_rate_pct == 100.0
+
+
+def test_record_bar_point_rescales_unhydrated_warmup_on_first_real_quote_and_screener_blends_intraday_tv():
+    """
+    Verifies:
+    1. When the first real quote arrives for an unhydrated symbol whose warmup buffer was seeded
+       around BASE_PRICES (e.g. AAPL warmup ~$225 vs live $358.60), record_bar_point rescales the
+       warmup history to prev_close ($354.90) so indicators do not see a fake +60% single-bar cliff.
+    2. MarketScreener.get_symbol_screen blends 15m, 1h, and 1d TradingView technical consensus
+       for intraday day-trading responsiveness.
+    """
+    from backend.engine.screener import MarketScreener
+
+    feed = DataFeedManager()
+    assert "AAPL" not in feed._ohlcv_hydrated
+    real_q = MarketDataPoint(
+        symbol="AAPL", price=358.60, high=360.80, low=357.30,
+        open_p=357.90, prev_close=354.90, volume=14_900_000.0, source="finnhub"
+    )
+    feed.record_bar_point("AAPL", real_q)
+    closes = feed.history_windows["AAPL"]
+    # Second-to-last bar must be anchored near prev_close (354.90), not stale BASE_PRICES (~225.0)
+    assert abs(closes[-2] - 354.90) < 5.0, f"Unhydrated warmup cliff persisted: closes[-2]={closes[-2]}"
+    assert closes[-1] == 358.60
+
+    # Verify MarketScreener multi-timeframe 15m/1h/1d intraday consensus blending
+    MarketScreener._tv_consensus_cache["AAPL"] = {
+        "symbol": "AAPL",
+        "close": 358.60,
+        "change_pct": 1.04,
+        "recommend_score_1d": 0.10,
+        "recommend_score_1h": 0.60,
+        "recommend_score_15m": 0.70,
+        "consensus_1d": "BUY",
+        "consensus_1h": "STRONG_BUY",
+        "consensus_15m": "STRONG_BUY",
+        "rsi": 58.0,
+        "relative_volume": 1.45,
+        "source": "TradingView Scanner",
+    }
+    screen = MarketScreener.get_symbol_screen("AAPL", data_feed_manager=feed)
+    # Blended TV score = 0.40*0.70 + 0.35*0.60 + 0.25*0.10 = 0.515 (stronger than 1d-only 0.10)
+    assert screen["tv_recommend_score"] >= 0.45
+    assert screen["recommended_horizon"] == "DAY"
+
+
+def test_etoro_update_position_patch_sl_tp():
+    """
+    Verifies EToroClient.update_position dispatches PATCH /api/v2/trading/[demo/]positions/{positionId}
+    with stopLossRate, takeProfitRate, and stopLossType ('fixed' or 'trailing').
+    """
+    from src.services.etoro.client import EToroClient
+
+    client = EToroClient(api_key="pub_key_123456", user_key="ey_user_key_123456")
+    mcp_calls = []
+
+    def fake_mcp(tool_name, arguments=None, timeout=12.0, **kwargs):
+        mcp_calls.append((tool_name, arguments))
+        return {
+            "success": True,
+            "data": {
+                "statusCode": 202,
+                "isSuccess": True,
+                "body": '{"operationId":"op-123","positionId":3636110990,"referenceId":"ref-456"}',
+            },
+        }
+
+    with patch.object(client, "call_mcp_tool", side_effect=fake_mcp):
+        res = client.update_position(
+            position_id="3636110990",
+            stop_loss_rate=167.16,
+            take_profit_rate=180.10,
+            stop_loss_type="fixed",
+            mode="real",
+        )
+
+    assert res["success"] is True
+    assert res["status_code"] == 202
+    assert len(mcp_calls) == 1
+    assert mcp_calls[0][0] == "execute-write"
+    assert mcp_calls[0][1]["path"] == "/api/v2/trading/positions/3636110990"
+    assert mcp_calls[0][1]["method"] == "PATCH"
+    import json as _json
+    sent_body = _json.loads(mcp_calls[0][1]["body"])
+    assert sent_body == {
+        "stopLossRate": 167.16,
+        "takeProfitRate": 180.10,
+        "stopLossType": "fixed",
+    }
+
+

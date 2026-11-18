@@ -6,6 +6,7 @@ and estimates market micro-structure (spreads, depth, sentiment).
 import time
 import math
 import random
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
@@ -14,6 +15,8 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 from .screener import MASTER_STOCK_UNIVERSE
+
+logger = logging.getLogger("auton-cockpit.data_feed")
 
 # Reference seed prices for all 100+ US equities, high-beta assets & ETFs
 BASE_PRICES: Dict[str, float] = {
@@ -92,6 +95,9 @@ class DataFeedManager:
         self.last_api_call_time = 0.0
         self.api_latency_ms = 12.0
         self.active_feed_source = "finnhub"
+        self._provider_cooldowns: Dict[str, float] = {}
+        self._provider_unsupported: Dict[Tuple[str, str], float] = {}
+        self._last_real_quote_time = 0.0
         
         # Initialize historical buffers with synthetic warmup until hydrated from OHLCV API
         for symbol, base_p in BASE_PRICES.items():
@@ -199,6 +205,22 @@ class DataFeedManager:
         with self._lock:
             if sym not in self.history_windows:
                 self._warmup_history(sym, quote.price)
+            elif (
+                sym not in self._ohlcv_hydrated
+                and quote.source not in ("simulated", "warmup", "offline_fallback")
+                and self.last_quotes.get(sym) is not None
+                and self.last_quotes[sym].source == "warmup"
+                and self.history_windows.get(sym)
+            ):
+                last_warm_p = float(self.history_windows[sym][-1])
+                anchor_p = float(quote.prev_close if (quote.prev_close and quote.prev_close > 0) else quote.price)
+                if last_warm_p > 0 and anchor_p > 0 and abs(last_warm_p - anchor_p) / anchor_p > 0.03:
+                    scale = anchor_p / last_warm_p
+                    prec = 8 if anchor_p < 0.01 else (4 if anchor_p < 1.0 else 2)
+                    self.history_windows[sym] = [round(v * scale, prec) for v in self.history_windows[sym]]
+                    self.high_windows[sym] = [round(v * scale, prec) for v in self.high_windows.get(sym, [])]
+                    self.low_windows[sym] = [round(v * scale, prec) for v in self.low_windows.get(sym, [])]
+                    self.open_windows[sym] = [round(v * scale, prec) for v in self.open_windows.get(sym, [])]
             for attr, val in (
                 (self.history_windows, float(quote.price)),
                 (self.high_windows, float(max(quote.high, quote.price))),
@@ -217,15 +239,16 @@ class DataFeedManager:
     def _fetch_symbol_ohlcv(self, symbol: str, count: int = 60) -> Tuple[List[Dict[str, float]], str]:
         """Fetches chronological daily OHLCV bars from Twelve Data, FMP, or Finnhub."""
         sym = symbol.upper().strip()
-        if self.twelve_data_api_key and len(self.twelve_data_api_key) > 5:
+        if self.twelve_data_api_key and len(self.twelve_data_api_key) > 5 and self._is_provider_available("twelvedata"):
             try:
                 url = (
                     f"https://api.twelvedata.com/time_series?symbol={sym}&interval=1day"
                     f"&outputsize={count}&apikey={self.twelve_data_api_key}"
                 )
                 resp = self._session.get(url, timeout=3.0)
-                if resp.status_code == 200:
-                    vals = resp.json().get("values") or []
+                payload = resp.json() if resp.status_code in (200, 402, 429) else None
+                if not self._handle_rate_limit_response("twelvedata", resp.status_code, payload) and resp.status_code == 200 and isinstance(payload, dict):
+                    vals = payload.get("values") or []
                     if isinstance(vals, list) and len(vals) >= 15:
                         bars = [
                             {
@@ -241,12 +264,12 @@ class DataFeedManager:
             except Exception:
                 pass
 
-        if self.fmp_api_key and len(self.fmp_api_key) > 5:
+        if self.fmp_api_key and len(self.fmp_api_key) > 5 and self._is_provider_available("fmp"):
             try:
                 url = f"https://financialmodelingprep.com/stable/historical-price-eod/full?symbol={sym}&apikey={self.fmp_api_key}"
                 resp = self._session.get(url, timeout=3.0)
-                if resp.status_code == 200:
-                    rows = resp.json()
+                rows = resp.json() if resp.status_code in (200, 402, 429) else None
+                if not self._handle_rate_limit_response("fmp", resp.status_code, rows) and resp.status_code == 200:
                     if isinstance(rows, dict):
                         rows = rows.get("historical", [])
                     if isinstance(rows, list) and len(rows) >= 15:
@@ -264,14 +287,14 @@ class DataFeedManager:
             except Exception:
                 pass
 
-        if self.api_key and len(self.api_key) > 5:
+        if self.api_key and len(self.api_key) > 5 and self._is_provider_available("finnhub_candle"):
             try:
                 now_ts = int(time.time())
                 from_ts = now_ts - (count * 2 * 86400)
                 url = f"https://finnhub.io/api/v1/stock/candle?symbol={sym}&resolution=D&from={from_ts}&to={now_ts}&token={self.api_key}"
                 resp = self._session.get(url, timeout=3.0)
-                if resp.status_code == 200:
-                    d = resp.json()
+                d = resp.json() if resp.status_code in (200, 401, 403, 429) else None
+                if not self._handle_rate_limit_response("finnhub_candle", resp.status_code, d) and resp.status_code == 200 and isinstance(d, dict):
                     if d.get("s") == "ok" and isinstance(d.get("c"), list) and len(d["c"]) >= 15:
                         c_arr, h_arr, l_arr, o_arr, v_arr = d["c"], d["h"], d["l"], d["o"], d["v"]
                         bars = [
@@ -330,211 +353,405 @@ class DataFeedManager:
         if alpha_vantage_key:
             self.alpha_vantage_api_key = alpha_vantage_key.strip()
 
+    _NON_US_EQUITY_SYMBOLS = frozenset({
+        "UK100", "GER40", "FRA40", "ESP35", "JPN225", "HKG50", "AUS200",
+        "SPX500", "NSDQ100", "DJ30", "RUSSELL2000", "USDOLLAR",
+        "GOLD", "SILVER", "OIL", "NATGAS", "COPPER", "PLATINUM", "PALLADIUM",
+        "GASOLINE", "SUGAR", "COTTON", "COCOA", "COFFEE", "WHEAT", "CORN",
+    })
+
+    def _is_provider_available(self, provider: str, now: Optional[float] = None) -> bool:
+        t = time.time() if now is None else now
+        with self._lock:
+            return t >= self._provider_cooldowns.get(provider, 0.0)
+
+    def _mark_provider_cooldown(self, provider: str, cooldown_sec: float = 300.0, reason: str = "") -> None:
+        now = time.time()
+        until = now + max(1.0, cooldown_sec)
+        with self._lock:
+            prev = self._provider_cooldowns.get(provider, 0.0)
+            if until > prev:
+                self._provider_cooldowns[provider] = until
+                if reason:
+                    logger.warning(f"[DataFeed] {provider} entering {int(cooldown_sec)}s cooldown: {reason}")
+
+    def _is_symbol_unsupported(self, provider: str, sym: str, now: Optional[float] = None) -> bool:
+        t = time.time() if now is None else now
+        with self._lock:
+            return t < self._provider_unsupported.get((provider, sym), 0.0)
+
+    def _mark_symbol_unsupported(self, provider: str, sym: str, ttl_sec: float = 600.0) -> None:
+        with self._lock:
+            self._provider_unsupported[(provider, sym)] = time.time() + max(10.0, ttl_sec)
+
+    def _reserve_provider_slot(
+        self, provider: str, attr_name: str, min_interval: float, max_wait: float = 2.0
+    ) -> Tuple[bool, float]:
+        with self._lock:
+            now = time.time()
+            if now < self._provider_cooldowns.get(provider, 0.0):
+                return False, 0.0
+            last_t = getattr(self, attr_name, 0.0)
+            next_allowed = max(now, last_t + min_interval)
+            wait_sec = next_allowed - now
+            if wait_sec > max_wait:
+                return False, 0.0
+            setattr(self, attr_name, next_allowed)
+            return True, max(0.0, wait_sec)
+
+    def _handle_rate_limit_response(self, provider: str, status_code: int, payload: Any = None) -> bool:
+        """Detects HTTP 402/429 and provider quota JSON payloads and applies cooldown."""
+        if status_code == 429 or status_code == 402:
+            cd = 15.0 if provider == "finnhub" else (60.0 if provider == "tradingview" else 300.0)
+            self._mark_provider_cooldown(provider, cd, f"HTTP {status_code}")
+            return True
+        if provider in ("finnhub", "finnhub_candle") and status_code in (401, 403):
+            self._mark_provider_cooldown(provider, 300.0, f"HTTP {status_code}")
+            return True
+        if isinstance(payload, dict):
+            if provider == "twelvedata" and (
+                payload.get("status") == "error"
+                or payload.get("code") in (402, 429)
+                or "credit" in str(payload.get("message", "")).lower()
+            ):
+                self._mark_provider_cooldown(provider, 300.0, str(payload.get("message", "quota exceeded"))[:80])
+                return True
+            if provider == "fmp" and "limit reach" in str(payload.get("Error Message", "")).lower():
+                self._mark_provider_cooldown(provider, 300.0, "FMP Limit Reach")
+                return True
+            if provider == "alphavantage" and ("Information" in payload or "Note" in payload):
+                self._mark_provider_cooldown(provider, 300.0, "AlphaVantage rate limit banner")
+                return True
+            if provider == "finnhub" and "limit" in str(payload.get("error", "")).lower():
+                self._mark_provider_cooldown(provider, 15.0, "Finnhub limit error")
+                return True
+        return False
+
+    def _record_real_quote(self, sym: str, quote: MarketDataPoint, start_t: float, now: Optional[float] = None) -> None:
+        t = time.time() if now is None else now
+        with self._lock:
+            self.api_latency_ms = max(1.0, (time.perf_counter() - start_t) * 1000.0)
+            self.last_api_call_time = t
+            self._last_real_quote_time = t
+            self.active_feed_source = quote.source
+            self._quote_cache[sym] = (t, quote)
+        self.record_bar_point(sym, quote)
+
+    def _fetch_finnhub_quote(self, sym: str, start_t: float) -> Optional[MarketDataPoint]:
+        if not (self.api_key and len(self.api_key) > 5) or self._is_symbol_unsupported("finnhub", sym):
+            return None
+        reserved, wait_sec = self._reserve_provider_slot("finnhub", "_last_finnhub_call", 0.45, max_wait=2.0)
+        if not reserved:
+            return None
+        if wait_sec > 0:
+            time.sleep(wait_sec)
+        if not self._is_provider_available("finnhub"):
+            return None
+        try:
+            url = f"https://finnhub.io/api/v1/quote?symbol={sym}&token={self.api_key}"
+            resp = self._session.get(url, timeout=1.5)
+            data = None
+            try:
+                data = resp.json()
+            except Exception:
+                data = None
+            if self._handle_rate_limit_response("finnhub", resp.status_code, data):
+                return None
+            if resp.status_code == 200 and isinstance(data, dict):
+                c = data.get("c", 0.0)
+                if c and float(c) > 0:
+                    prev_vol = self.volume_windows.get(sym, [150000.0])[-1]
+                    return MarketDataPoint(
+                        symbol=sym,
+                        price=float(c),
+                        high=float(data.get("h") or c),
+                        low=float(data.get("l") or c),
+                        open_p=float(data.get("o") or c),
+                        prev_close=float(data.get("pc") or c),
+                        volume=prev_vol,
+                        timestamp=float(data.get("t") or time.time()),
+                        source="finnhub",
+                    )
+                self._mark_symbol_unsupported("finnhub", sym, 600.0)
+        except Exception:
+            pass
+        return None
+
+    def _fetch_tradingview_quotes_batch(self, symbols: List[str]) -> Dict[str, MarketDataPoint]:
+        """Batch-fetches US equity/ETF OHLCV quotes from TradingView Scanner in one POST."""
+        if not symbols or not self._is_provider_available("tradingview"):
+            return {}
+        query_syms = [
+            s.upper().strip()
+            for s in dict.fromkeys(symbols)
+            if s and s.strip() and s.upper().strip() not in self._NON_US_EQUITY_SYMBOLS
+        ]
+        if not query_syms:
+            return {}
+
+        start_t = time.perf_counter()
+        out: Dict[str, MarketDataPoint] = {}
+        best_score: Dict[str, Tuple[int, float]] = {}
+        preferred_exchanges = ("NASDAQ:", "NYSE:", "AMEX:", "ARCA:", "BATS:")
+        try:
+            url = "https://scanner.tradingview.com/america/scan"
+            payload = {
+                "filter": [{"left": "name", "operation": "in_range", "right": query_syms[:60]}],
+                "columns": ["name", "close", "high", "low", "open", "volume", "change"],
+                "range": [0, max(20, len(query_syms[:60]) * 3)],
+            }
+            resp = self._session.post(url, json=payload, timeout=2.5)
+            if resp.status_code == 429:
+                self._handle_rate_limit_response("tradingview", resp.status_code)
+                return {}
+            if resp.status_code != 200:
+                return {}
+            body = resp.json()
+            rows = body.get("data", []) if isinstance(body, dict) else []
+            allowed_set = set(query_syms)
+            now = time.time()
+            for item in rows:
+                d = item.get("d", []) if isinstance(item, dict) else []
+                if len(d) < 7:
+                    continue
+                s_name = str(d[0] or "").upper().strip()
+                if s_name not in allowed_set:
+                    continue
+                close_v = d[1]
+                if not isinstance(close_v, (int, float)) or float(close_v) <= 0:
+                    continue
+                c = float(close_v)
+                ticker_full = str(item.get("s") or "").upper()
+                ex_rank = 1 if ticker_full.startswith(preferred_exchanges) else 0
+                vol_v = float(d[5]) if isinstance(d[5], (int, float)) and d[5] > 0 else self.volume_windows.get(s_name, [150000.0])[-1]
+                rank = (ex_rank, vol_v)
+                if s_name in best_score and rank <= best_score[s_name]:
+                    continue
+                best_score[s_name] = rank
+
+                h = float(d[2]) if isinstance(d[2], (int, float)) and d[2] > 0 else c
+                l = float(d[3]) if isinstance(d[3], (int, float)) and d[3] > 0 else c
+                o = float(d[4]) if isinstance(d[4], (int, float)) and d[4] > 0 else c
+                chg_pct = d[6]
+                if isinstance(chg_pct, (int, float)) and abs(1.0 + float(chg_pct) / 100.0) > 1e-6:
+                    pc = round(c / (1.0 + float(chg_pct) / 100.0), 4)
+                else:
+                    pc = o
+                out[s_name] = MarketDataPoint(
+                    symbol=s_name,
+                    price=c,
+                    high=h,
+                    low=l,
+                    open_p=o,
+                    prev_close=pc,
+                    volume=vol_v,
+                    timestamp=now,
+                    source="tradingview",
+                )
+            for s_name, q in out.items():
+                self._record_real_quote(s_name, q, start_t, now)
+        except Exception:
+            pass
+        return out
+
     def get_latest_quote(self, symbol: str, max_cache_age_sec: float = 15.0, allow_external: bool = True) -> MarketDataPoint:
         """
-        Fetches live quote with 15s TTL caching, pooled HTTP connections, and multi-provider failover:
-        1. Finnhub
+        Fetches live quote with 15s TTL caching, pooled HTTP connections, provider cooldowns,
+        and multi-provider failover:
+        1. Finnhub (paced slot reservation)
         2. Twelve Data
         3. Financial Modeling Prep (FMP)
         4. Alpha Vantage
-        5. Recent real quote grace cache (< 120s) before simulated fallback
+        5. TradingView Scanner US equity fallback
+        6. Recent real quote grace cache before simulated fallback (never poisoning _quote_cache)
         """
         sym = symbol.upper().strip()
         now = time.time()
         start_t = time.perf_counter()
 
-        # 1. Fast Cache Hit (within TTL)
+        # 1. Fast Cache Hit (within TTL; never serve stale simulated cache to external callers)
         with self._lock:
             cached = self._quote_cache.get(sym)
             if cached:
                 cached_t, cached_quote = cached
                 if (now - cached_t) < max_cache_age_sec:
-                    return cached_quote
+                    if (not allow_external) or cached_quote.source not in ("simulated", "warmup", "offline_fallback"):
+                        return cached_quote
 
         quote = None
 
         # 2. External multi-provider cascade (only if allow_external is True)
         if allow_external:
-            # Priority 1: Finnhub API (Thread-safe rate window)
-            run_fh = False
-            if self.api_key and len(self.api_key) > 5:
-                with self._lock:
-                    if (now - self._last_finnhub_call) >= 0.45:
-                        self._last_finnhub_call = now
-                        run_fh = True
-            if run_fh:
-                try:
-                    url = f"https://finnhub.io/api/v1/quote?symbol={sym}&token={self.api_key}"
-                    resp = self._session.get(url, timeout=1.5)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        c = data.get("c", 0.0)
-                        if c and float(c) > 0:
-                            self.api_latency_ms = max(1.0, (time.perf_counter() - start_t) * 1000.0)
-                            self.last_api_call_time = now
-                            self.active_feed_source = "finnhub"
-                            prev_vol = self.volume_windows.get(sym, [150000.0])[-1]
-                            quote = MarketDataPoint(
-                                symbol=sym,
-                                price=float(c),
-                                high=float(data.get("h") or c),
-                                low=float(data.get("l") or c),
-                                open_p=float(data.get("o") or c),
-                                prev_close=float(data.get("pc") or c),
-                                volume=prev_vol,
-                                timestamp=float(data.get("t") or time.time()),
-                                source="finnhub"
-                            )
-                except Exception:
-                    pass
+            # Priority 1: Finnhub API (Thread-safe paced slot reservation)
+            quote = self._fetch_finnhub_quote(sym, start_t)
 
             # Priority 2: Twelve Data API (if Finnhub missed or rate-limited)
-            run_td = False
-            if quote is None and self.twelve_data_api_key and len(self.twelve_data_api_key) > 5:
-                with self._lock:
-                    if (now - self._last_twelve_call) >= 0.45:
-                        self._last_twelve_call = now
-                        run_td = True
-            if run_td:
-                try:
-                    url = f"https://api.twelvedata.com/quote?symbol={sym}&apikey={self.twelve_data_api_key}"
-                    resp = self._session.get(url, timeout=1.8)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        c_str = data.get("close") or data.get("price")
-                        if c_str:
-                            c = float(c_str)
-                            if c > 0:
-                                h = float(data.get("high") or c)
-                                l = float(data.get("low") or c)
-                                o = float(data.get("open") or c)
-                                pc = float(data.get("previous_close") or c)
-                                prev_vol = self.volume_windows.get(sym, [150000.0])[-1]
-                                vol = float(data.get("volume") or prev_vol)
-                                self.api_latency_ms = max(1.0, (time.perf_counter() - start_t) * 1000.0)
-                                self.last_api_call_time = now
-                                self.active_feed_source = "twelve_data"
-                                quote = MarketDataPoint(
-                                    symbol=sym,
-                                    price=c,
-                                    high=h,
-                                    low=l,
-                                    open_p=o,
-                                    prev_close=pc,
-                                    volume=vol,
-                                    timestamp=time.time(),
-                                    source="twelve_data"
-                                )
-                except Exception:
-                    pass
+            if quote is None and self.twelve_data_api_key and len(self.twelve_data_api_key) > 5 and not self._is_symbol_unsupported("twelvedata", sym, now):
+                reserved, _ = self._reserve_provider_slot("twelvedata", "_last_twelve_call", 0.45, max_wait=0.5)
+                if reserved:
+                    try:
+                        url = f"https://api.twelvedata.com/quote?symbol={sym}&apikey={self.twelve_data_api_key}"
+                        resp = self._session.get(url, timeout=1.8)
+                        data = None
+                        try:
+                            data = resp.json()
+                        except Exception:
+                            data = None
+                        if not self._handle_rate_limit_response("twelvedata", resp.status_code, data):
+                            if resp.status_code == 200 and isinstance(data, dict):
+                                c_str = data.get("close") or data.get("price")
+                                if c_str:
+                                    c = float(c_str)
+                                    if c > 0:
+                                        h = float(data.get("high") or c)
+                                        l = float(data.get("low") or c)
+                                        o = float(data.get("open") or c)
+                                        pc = float(data.get("previous_close") or c)
+                                        prev_vol = self.volume_windows.get(sym, [150000.0])[-1]
+                                        vol = float(data.get("volume") or prev_vol)
+                                        quote = MarketDataPoint(
+                                            symbol=sym,
+                                            price=c,
+                                            high=h,
+                                            low=l,
+                                            open_p=o,
+                                            prev_close=pc,
+                                            volume=vol,
+                                            timestamp=time.time(),
+                                            source="twelve_data",
+                                        )
+                    except Exception:
+                        pass
 
             # Priority 3: Financial Modeling Prep (FMP Stable API)
-            run_fmp = False
             if quote is None and self.fmp_api_key and len(self.fmp_api_key) > 5:
-                with self._lock:
-                    if (now - self._last_fmp_call) >= 0.45:
-                        self._last_fmp_call = now
-                        run_fmp = True
-            if run_fmp:
-                try:
-                    url = f"https://financialmodelingprep.com/stable/quote?symbol={sym}&apikey={self.fmp_api_key}"
-                    resp = self._session.get(url, timeout=1.8)
-                    if resp.status_code == 200:
-                        data_list = resp.json()
-                        if isinstance(data_list, list) and len(data_list) > 0:
-                            row = data_list[0]
-                            c = float(row.get("price") or 0.0)
-                            if c > 0:
-                                h = float(row.get("dayHigh") or c)
-                                l = float(row.get("dayLow") or c)
-                                o = float(row.get("open") or c)
-                                pc = float(row.get("previousClose") or c)
-                                prev_vol = self.volume_windows.get(sym, [150000.0])[-1]
-                                vol = float(row.get("volume") or prev_vol)
-                                self.api_latency_ms = max(1.0, (time.perf_counter() - start_t) * 1000.0)
-                                self.last_api_call_time = now
-                                self.active_feed_source = "fmp"
-                                quote = MarketDataPoint(
-                                    symbol=sym,
-                                    price=c,
-                                    high=h,
-                                    low=l,
-                                    open_p=o,
-                                    prev_close=pc,
-                                    volume=vol,
-                                    timestamp=time.time(),
-                                    source="fmp"
-                                )
-                except Exception:
-                    pass
+                reserved, _ = self._reserve_provider_slot("fmp", "_last_fmp_call", 0.45, max_wait=0.5)
+                if reserved:
+                    try:
+                        url = f"https://financialmodelingprep.com/stable/quote?symbol={sym}&apikey={self.fmp_api_key}"
+                        resp = self._session.get(url, timeout=1.8)
+                        data_list = None
+                        try:
+                            data_list = resp.json()
+                        except Exception:
+                            data_list = None
+                        if not self._handle_rate_limit_response("fmp", resp.status_code, data_list):
+                            if resp.status_code == 200 and isinstance(data_list, list) and len(data_list) > 0:
+                                row = data_list[0]
+                                c = float(row.get("price") or 0.0)
+                                if c > 0:
+                                    h = float(row.get("dayHigh") or c)
+                                    l = float(row.get("dayLow") or c)
+                                    o = float(row.get("open") or c)
+                                    pc = float(row.get("previousClose") or c)
+                                    prev_vol = self.volume_windows.get(sym, [150000.0])[-1]
+                                    vol = float(row.get("volume") or prev_vol)
+                                    quote = MarketDataPoint(
+                                        symbol=sym,
+                                        price=c,
+                                        high=h,
+                                        low=l,
+                                        open_p=o,
+                                        prev_close=pc,
+                                        volume=vol,
+                                        timestamp=time.time(),
+                                        source="fmp",
+                                    )
+                    except Exception:
+                        pass
 
             # Priority 4: Alpha Vantage GLOBAL_QUOTE
-            run_av = False
             if quote is None and self.alpha_vantage_api_key and len(self.alpha_vantage_api_key) > 5:
-                with self._lock:
-                    if (now - self._last_av_call) >= 0.9:
-                        self._last_av_call = now
-                        run_av = True
-            if run_av:
-                try:
-                    url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={sym}&apikey={self.alpha_vantage_api_key}"
-                    resp = self._session.get(url, timeout=2.0)
-                    if resp.status_code == 200:
-                        gq = resp.json().get("Global Quote", {})
-                        p_str = gq.get("05. price")
-                        if p_str:
-                            c = float(p_str)
-                            if c > 0:
-                                h = float(gq.get("03. high") or c)
-                                l = float(gq.get("04. low") or c)
-                                o = float(gq.get("02. open") or c)
-                                pc = float(gq.get("08. previous close") or c)
-                                prev_vol = self.volume_windows.get(sym, [150000.0])[-1]
-                                vol = float(gq.get("06. volume") or prev_vol)
-                                self.api_latency_ms = max(1.0, (time.perf_counter() - start_t) * 1000.0)
-                                self.last_api_call_time = now
-                                self.active_feed_source = "alpha_vantage"
-                                quote = MarketDataPoint(
-                                    symbol=sym,
-                                    price=c,
-                                    high=h,
-                                    low=l,
-                                    open_p=o,
-                                    prev_close=pc,
-                                    volume=vol,
-                                    timestamp=time.time(),
-                                    source="alpha_vantage"
-                                )
-                except Exception:
-                    pass
+                reserved, _ = self._reserve_provider_slot("alphavantage", "_last_av_call", 0.9, max_wait=0.5)
+                if reserved:
+                    try:
+                        url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={sym}&apikey={self.alpha_vantage_api_key}"
+                        resp = self._session.get(url, timeout=2.0)
+                        body = None
+                        try:
+                            body = resp.json()
+                        except Exception:
+                            body = None
+                        if not self._handle_rate_limit_response("alphavantage", resp.status_code, body):
+                            if resp.status_code == 200 and isinstance(body, dict):
+                                gq = body.get("Global Quote", {})
+                                p_str = gq.get("05. price") if isinstance(gq, dict) else None
+                                if p_str:
+                                    c = float(p_str)
+                                    if c > 0:
+                                        h = float(gq.get("03. high") or c)
+                                        l = float(gq.get("04. low") or c)
+                                        o = float(gq.get("02. open") or c)
+                                        pc = float(gq.get("08. previous close") or c)
+                                        prev_vol = self.volume_windows.get(sym, [150000.0])[-1]
+                                        vol = float(gq.get("06. volume") or prev_vol)
+                                        quote = MarketDataPoint(
+                                            symbol=sym,
+                                            price=c,
+                                            high=h,
+                                            low=l,
+                                            open_p=o,
+                                            prev_close=pc,
+                                            volume=vol,
+                                            timestamp=time.time(),
+                                            source="alpha_vantage",
+                                        )
+                    except Exception:
+                        pass
 
-        # 6. Graceful fallback: preserve recent real quote (< 120s) before simulated tick
+            # Priority 5: TradingView Scanner live batch fallback (free, fast, no API key)
+            if quote is None:
+                tv_res = self._fetch_tradingview_quotes_batch([sym])
+                if sym in tv_res:
+                    return tv_res[sym]
+
+        # 6. Graceful fallback: preserve recent real quote before emitting a simulated tick
         if quote is None:
-            if cached and (cached[1].source not in ("simulated", "warmup") or not allow_external) and (now - cached[0]) < 120.0:
+            if cached and cached[1].source not in ("simulated", "warmup", "offline_fallback") and (now - cached[0]) < 300.0:
+                return cached[1]
+            with self._lock:
+                last_q = self.last_quotes.get(sym)
+            if last_q and last_q.source not in ("simulated", "warmup", "offline_fallback"):
+                if (not allow_external) or (now - last_q.timestamp) < 300.0:
+                    return last_q
+            if not allow_external and cached and (now - cached[0]) < 120.0:
                 return cached[1]
             self.api_latency_ms = max(1.0, (time.perf_counter() - start_t) * 1000.0)
-            self.active_feed_source = "simulated"
+            with self._lock:
+                recent_real_active = (now - self._last_real_quote_time) < 120.0
+            if not recent_real_active:
+                self.active_feed_source = "simulated"
             quote = self._generate_simulated_tick(sym)
+            if not allow_external:
+                with self._lock:
+                    self._quote_cache[sym] = (now, quote)
+                self.record_bar_point(sym, quote)
+            elif not (last_q and last_q.source not in ("simulated", "warmup", "offline_fallback")):
+                self.record_bar_point(sym, quote)
+            return quote
 
-        # Cache valid quote and append bar point
-        with self._lock:
-            self._quote_cache[sym] = (now, quote)
-        self.record_bar_point(sym, quote)
+        # Cache valid real quote and append bar point
+        self._record_real_quote(sym, quote, start_t, now)
         return quote
 
     def fetch_quotes_batch(self, symbols: List[str], max_cache_age_sec: float = 15.0) -> Dict[str, MarketDataPoint]:
         """
-        Pre-fetches quotes concurrently using multi-symbol batch endpoints (FMP / TwelveData)
-        and bounded parallel Finnhub requests so the analysis loop avoids sequential blocking.
+        Pre-fetches quotes efficiently using cooldown-aware multi-symbol batch endpoints
+        (FMP / TwelveData), paced concurrent Finnhub requests, and TradingView Scanner fallback.
         """
         results: Dict[str, MarketDataPoint] = {}
         now = time.time()
+        start_t = time.perf_counter()
         unique_syms = [s.upper().strip() for s in dict.fromkeys(symbols) if s and s.strip()]
         uncached: List[str] = []
         with self._lock:
             for sym in unique_syms:
                 cached = self._quote_cache.get(sym)
-                if cached and (now - cached[0]) < max_cache_age_sec:
+                if (
+                    cached
+                    and (now - cached[0]) < max_cache_age_sec
+                    and cached[1].source not in ("simulated", "warmup", "offline_fallback")
+                ):
                     results[sym] = cached[1]
                 else:
                     uncached.append(sym)
@@ -542,17 +759,25 @@ class DataFeedManager:
         if not uncached:
             return results
 
-        # Native batch fetch via FMP (up to 20 per call)
-        if self.fmp_api_key and len(self.fmp_api_key) > 5 and uncached:
-            still_needed: List[str] = []
+        # 1. Native batch fetch via FMP (up to 20 per call)
+        if self.fmp_api_key and len(self.fmp_api_key) > 5 and uncached and self._is_provider_available("fmp", now):
             for i in range(0, len(uncached), 20):
+                if not self._is_provider_available("fmp"):
+                    break
                 chunk = uncached[i:i + 20]
                 try:
                     joined = ",".join(chunk)
                     url = f"https://financialmodelingprep.com/stable/quote?symbol={joined}&apikey={self.fmp_api_key}"
                     resp = self._session.get(url, timeout=2.5)
-                    if resp.status_code == 200 and isinstance(resp.json(), list):
-                        for row in resp.json():
+                    payload = None
+                    try:
+                        payload = resp.json()
+                    except Exception:
+                        payload = None
+                    if self._handle_rate_limit_response("fmp", resp.status_code, payload):
+                        break
+                    if resp.status_code == 200 and isinstance(payload, list):
+                        for row in payload:
                             s = str(row.get("symbol") or "").upper().strip()
                             c = float(row.get("price") or 0.0)
                             if s and c > 0:
@@ -565,30 +790,32 @@ class DataFeedManager:
                                     prev_close=float(row.get("previousClose") or c),
                                     volume=float(row.get("volume") or 150000.0),
                                     timestamp=now,
-                                    source="fmp"
+                                    source="fmp",
                                 )
                                 results[s] = q
-                                with self._lock:
-                                    self._quote_cache[s] = (now, q)
-                                self.record_bar_point(s, q)
+                                self._record_real_quote(s, q, start_t, now)
                 except Exception:
                     pass
-                for s in chunk:
-                    if s not in results:
-                        still_needed.append(s)
-            uncached = still_needed
+            uncached = [s for s in uncached if s not in results]
 
-        # Native batch fetch via Twelve Data (up to 8 per call)
-        if self.twelve_data_api_key and len(self.twelve_data_api_key) > 5 and uncached:
-            still_needed = []
+        # 2. Native batch fetch via Twelve Data (up to 8 per call)
+        if self.twelve_data_api_key and len(self.twelve_data_api_key) > 5 and uncached and self._is_provider_available("twelvedata", now):
             for i in range(0, len(uncached), 8):
+                if not self._is_provider_available("twelvedata"):
+                    break
                 chunk = uncached[i:i + 8]
                 try:
                     joined = ",".join(chunk)
                     url = f"https://api.twelvedata.com/quote?symbol={joined}&apikey={self.twelve_data_api_key}"
                     resp = self._session.get(url, timeout=2.5)
-                    if resp.status_code == 200:
+                    payload = None
+                    try:
                         payload = resp.json()
+                    except Exception:
+                        payload = None
+                    if self._handle_rate_limit_response("twelvedata", resp.status_code, payload):
+                        break
+                    if resp.status_code == 200 and isinstance(payload, dict):
                         items = {chunk[0]: payload} if (len(chunk) == 1 and "close" in payload) else payload
                         if isinstance(items, dict):
                             for s_key, row in items.items():
@@ -608,29 +835,45 @@ class DataFeedManager:
                                             prev_close=float(row.get("previous_close") or c),
                                             volume=float(row.get("volume") or 150000.0),
                                             timestamp=now,
-                                            source="twelve_data"
+                                            source="twelve_data",
                                         )
                                         results[s] = q
-                                        with self._lock:
-                                            self._quote_cache[s] = (now, q)
-                                        self.record_bar_point(s, q)
+                                        self._record_real_quote(s, q, start_t, now)
                 except Exception:
                     pass
-                for s in chunk:
-                    if s not in results:
-                        still_needed.append(s)
-            uncached = still_needed
+            uncached = [s for s in uncached if s not in results]
 
-        # Bounded parallel fallback for any remaining symbols (e.g. Finnhub / simulated)
+        # 3. Bounded concurrent paced Finnhub batch (up to 4 eligible symbols per cycle to stay under 60/min)
+        if uncached and self.api_key and len(self.api_key) > 5 and self._is_provider_available("finnhub", now):
+            fh_candidates = [s for s in uncached if not self._is_symbol_unsupported("finnhub", s, now)][:4]
+            if fh_candidates:
+                with ThreadPoolExecutor(max_workers=min(4, len(fh_candidates))) as pool:
+                    futs = {pool.submit(self._fetch_finnhub_quote, sym, start_t): sym for sym in fh_candidates}
+                    for fut in as_completed(futs):
+                        sym = futs[fut]
+                        try:
+                            fq = fut.result()
+                            if fq is not None:
+                                results[sym] = fq
+                                self._record_real_quote(sym, fq, start_t)
+                        except Exception:
+                            pass
+                uncached = [s for s in uncached if s not in results]
+
+        # 4. TradingView Scanner live batch fallback for all remaining US equities (single HTTP POST)
         if uncached:
-            with ThreadPoolExecutor(max_workers=min(4, len(uncached))) as pool:
-                futs = {pool.submit(self.get_latest_quote, sym, max_cache_age_sec, True): sym for sym in uncached[:20]}
-                for fut in as_completed(futs):
-                    sym = futs[fut]
-                    try:
-                        results[sym] = fut.result()
-                    except Exception:
-                        pass
+            tv_quotes = self._fetch_tradingview_quotes_batch(uncached)
+            for s, q in tv_quotes.items():
+                results[s] = q
+            uncached = [s for s in uncached if s not in results]
+
+        # 5. Final graceful resolution (Alpha Vantage / preserved real cache / non-poisoning fallback)
+        if uncached:
+            for sym in uncached[:20]:
+                try:
+                    results[sym] = self.get_latest_quote(sym, max_cache_age_sec, True)
+                except Exception:
+                    pass
         return results
 
 
