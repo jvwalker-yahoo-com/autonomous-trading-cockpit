@@ -212,7 +212,12 @@ class SimulatedBroker:
             close_time = str(t.get("closeTime", ""))
 
             prev_rec = existing_by_id.get(rec_id) or existing_by_sym_time.get((sym, open_time[:16]))
-            horizon = prev_rec.horizon if prev_rec else _infer_horizon(open_time, close_time)
+            inferred_h = _infer_horizon(open_time, close_time)
+            horizon = (
+                prev_rec.horizon
+                if (prev_rec and (prev_rec.horizon == "day" or prev_rec.entry_rationale != "eToro Live Closed Position"))
+                else inferred_h
+            )
             contrib_models = dict(prev_rec.contributing_models) if prev_rec and prev_rec.contributing_models else {}
             entry_rat = prev_rec.entry_rationale if prev_rec and prev_rec.entry_rationale else "eToro Live Closed Position"
             exit_rat = prev_rec.exit_rationale if prev_rec and prev_rec.exit_rationale else f"Closed on eToro (Net: ${realized_pnl:+.2f})"

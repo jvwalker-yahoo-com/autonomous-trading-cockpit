@@ -21,3 +21,8 @@ data/reports/
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# graphify machine-local cache & build sidecars (shareable outputs GRAPH_REPORT.md, graph.json, graph.html, manifest.json are tracked)
+graphify-out/cache/
+graphify-out/.graphify_*
+graphify-out/2026-*/
